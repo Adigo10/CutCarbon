@@ -1,12 +1,13 @@
 {
-  "version": "2024.1",
-  "last_updated": "2024-11-01",
+  "version": "2025.1",
+  "last_updated": "2025-03-27",
   "travel": {
     "short_haul_flight": {
       "economy": 0.255,
       "business": 0.510,
       "unit": "kg_co2e_per_passenger_km",
       "source": "ICAO Carbon Emissions Calculator 2024",
+      "scope": 3,
       "notes": "Flights under 3 hours / 1500km"
     },
     "long_haul_flight": {
@@ -15,48 +16,109 @@
       "first": 0.780,
       "unit": "kg_co2e_per_passenger_km",
       "source": "ICAO Carbon Emissions Calculator 2024",
+      "scope": 3,
       "notes": "Flights over 3 hours / 1500km; includes RFI multiplier 1.9"
+    },
+    "private_jet": {
+      "factor": 2.100,
+      "unit": "kg_co2e_per_passenger_km",
+      "source": "Transport & Environment 2024",
+      "scope": 3,
+      "notes": "Average private jet with 4-8 passengers"
     },
     "train_europe": {
       "factor": 0.041,
       "unit": "kg_co2e_per_passenger_km",
-      "source": "EEA 2023"
+      "source": "EEA 2023",
+      "scope": 3
     },
     "train_uk": {
       "factor": 0.035,
       "unit": "kg_co2e_per_passenger_km",
-      "source": "UK DEFRA 2024"
+      "source": "UK DEFRA 2024",
+      "scope": 3
     },
     "train_asia": {
       "factor": 0.056,
       "unit": "kg_co2e_per_passenger_km",
-      "source": "IEA 2023 estimate"
+      "source": "IEA 2023 estimate",
+      "scope": 3
+    },
+    "train_high_speed": {
+      "factor": 0.028,
+      "unit": "kg_co2e_per_passenger_km",
+      "source": "UIC Sustainability Report 2024",
+      "scope": 3,
+      "notes": "TGV, Shinkansen, ICE class high-speed rail"
     },
     "car_petrol": {
       "factor": 0.171,
       "unit": "kg_co2e_per_passenger_km",
       "source": "UK DEFRA 2024",
+      "scope": 3,
       "notes": "Average occupancy 1.5 passengers"
+    },
+    "car_diesel": {
+      "factor": 0.168,
+      "unit": "kg_co2e_per_passenger_km",
+      "source": "UK DEFRA 2024",
+      "scope": 3
+    },
+    "car_hybrid": {
+      "factor": 0.112,
+      "unit": "kg_co2e_per_passenger_km",
+      "source": "UK DEFRA 2024",
+      "scope": 3
     },
     "car_ev": {
       "factor": 0.053,
       "unit": "kg_co2e_per_passenger_km",
-      "source": "UK DEFRA 2024"
+      "source": "UK DEFRA 2024",
+      "scope": 3
     },
     "bus_coach": {
       "factor": 0.089,
       "unit": "kg_co2e_per_passenger_km",
-      "source": "UK DEFRA 2024"
+      "source": "UK DEFRA 2024",
+      "scope": 3
+    },
+    "shuttle_bus": {
+      "factor": 0.065,
+      "unit": "kg_co2e_per_passenger_km",
+      "source": "UK DEFRA 2024",
+      "scope": 3,
+      "notes": "Dedicated event shuttle, higher occupancy"
     },
     "mrt_metro": {
       "factor": 0.022,
       "unit": "kg_co2e_per_passenger_km",
-      "source": "LTA Singapore 2023"
+      "source": "LTA Singapore 2023",
+      "scope": 3
     },
     "taxi_rideshare": {
       "factor": 0.148,
       "unit": "kg_co2e_per_passenger_km",
-      "source": "UK DEFRA 2024"
+      "source": "UK DEFRA 2024",
+      "scope": 3
+    },
+    "ferry": {
+      "factor": 0.190,
+      "unit": "kg_co2e_per_passenger_km",
+      "source": "UK DEFRA 2024",
+      "scope": 3
+    },
+    "e_scooter": {
+      "factor": 0.035,
+      "unit": "kg_co2e_per_passenger_km",
+      "source": "Environmental Science & Technology 2023",
+      "scope": 3
+    },
+    "cycling": {
+      "factor": 0.005,
+      "unit": "kg_co2e_per_passenger_km",
+      "source": "ECF 2023",
+      "scope": 3,
+      "notes": "Lifecycle emissions of bicycle manufacturing"
     }
   },
   "venue_energy": {
@@ -108,109 +170,480 @@
         "unit": "kg_co2e_per_kwh",
         "source": "MoEFCC India 2023",
         "currency": "INR"
+      },
+      "japan": {
+        "factor": 0.457,
+        "unit": "kg_co2e_per_kwh",
+        "source": "METI Japan 2023",
+        "currency": "JPY"
+      },
+      "south_korea": {
+        "factor": 0.459,
+        "unit": "kg_co2e_per_kwh",
+        "source": "KEEI South Korea 2023",
+        "currency": "KRW"
+      },
+      "canada": {
+        "factor": 0.120,
+        "unit": "kg_co2e_per_kwh",
+        "source": "Canada NIR 2023",
+        "currency": "CAD"
+      },
+      "brazil": {
+        "factor": 0.074,
+        "unit": "kg_co2e_per_kwh",
+        "source": "MCTI Brazil 2023",
+        "currency": "BRL"
+      },
+      "uae": {
+        "factor": 0.510,
+        "unit": "kg_co2e_per_kwh",
+        "source": "UAE MoEI 2023",
+        "currency": "AED"
+      },
+      "south_africa": {
+        "factor": 0.928,
+        "unit": "kg_co2e_per_kwh",
+        "source": "Eskom 2023",
+        "currency": "ZAR"
+      },
+      "germany": {
+        "factor": 0.380,
+        "unit": "kg_co2e_per_kwh",
+        "source": "UBA Germany 2023",
+        "currency": "EUR"
+      },
+      "france": {
+        "factor": 0.052,
+        "unit": "kg_co2e_per_kwh",
+        "source": "RTE France 2023",
+        "currency": "EUR"
+      },
+      "nordics": {
+        "factor": 0.030,
+        "unit": "kg_co2e_per_kwh",
+        "source": "Nordpool 2023",
+        "currency": "EUR",
+        "notes": "Norway, Sweden, Finland average (mainly hydro/wind)"
       }
     },
     "proxy_factors": {
       "conference_centre_per_m2_day": 2.8,
       "hotel_ballroom_per_m2_day": 3.2,
       "outdoor_event_per_attendee_day": 0.5,
+      "exhibition_hall_per_m2_day": 4.5,
+      "stadium_per_seat_day": 1.8,
       "unit": "kg_co2e"
-    }
+    },
+    "scope": 2
   },
   "accommodation": {
     "budget_hotel": {
       "factor": 20.0,
       "unit": "kg_co2e_per_room_night",
-      "source": "Cornell Hospitality Research 2023"
+      "source": "Cornell Hospitality Research 2023",
+      "scope": 3
     },
     "standard_hotel": {
       "factor": 31.5,
       "unit": "kg_co2e_per_room_night",
-      "source": "Cornell Hospitality Research 2023"
+      "source": "Cornell Hospitality Research 2023",
+      "scope": 3
     },
     "luxury_hotel": {
       "factor": 75.0,
       "unit": "kg_co2e_per_room_night",
-      "source": "Cornell Hospitality Research 2023"
+      "source": "Cornell Hospitality Research 2023",
+      "scope": 3
+    },
+    "resort": {
+      "factor": 90.0,
+      "unit": "kg_co2e_per_room_night",
+      "source": "Cornell Hospitality Research 2023",
+      "scope": 3,
+      "notes": "Tropical resort with pool, spa, extensive grounds"
+    },
+    "eco_lodge": {
+      "factor": 12.0,
+      "unit": "kg_co2e_per_room_night",
+      "source": "GSTC 2023",
+      "scope": 3,
+      "notes": "Certified green lodge with solar/water recycling"
     },
     "serviced_apartment": {
       "factor": 18.0,
       "unit": "kg_co2e_per_room_night",
-      "source": "Estimate"
+      "source": "Estimate",
+      "scope": 3
     },
     "airbnb_shared": {
       "factor": 14.0,
       "unit": "kg_co2e_per_room_night",
-      "source": "Airbnb Environmental Report 2023"
+      "source": "Airbnb Environmental Report 2023",
+      "scope": 3
+    },
+    "hostel": {
+      "factor": 8.0,
+      "unit": "kg_co2e_per_room_night",
+      "source": "Estimate based on shared facilities",
+      "scope": 3
+    },
+    "no_accommodation": {
+      "factor": 0.0,
+      "unit": "kg_co2e_per_room_night",
+      "source": "N/A",
+      "scope": 3,
+      "notes": "Local attendees, no overnight stay"
     }
   },
   "catering": {
     "red_meat_meal": {
       "factor": 6.6,
       "unit": "kg_co2e_per_meal",
-      "source": "Poore & Nemecek, Science 2018"
+      "source": "Poore & Nemecek, Science 2018",
+      "scope": 3
     },
     "white_meat_meal": {
       "factor": 3.8,
       "unit": "kg_co2e_per_meal",
-      "source": "Poore & Nemecek, Science 2018"
+      "source": "Poore & Nemecek, Science 2018",
+      "scope": 3
+    },
+    "seafood_meal": {
+      "factor": 3.2,
+      "unit": "kg_co2e_per_meal",
+      "source": "Poore & Nemecek, Science 2018",
+      "scope": 3
     },
     "vegetarian_meal": {
       "factor": 1.5,
       "unit": "kg_co2e_per_meal",
-      "source": "Poore & Nemecek, Science 2018"
+      "source": "Poore & Nemecek, Science 2018",
+      "scope": 3
     },
     "vegan_meal": {
       "factor": 1.0,
       "unit": "kg_co2e_per_meal",
-      "source": "Poore & Nemecek, Science 2018"
+      "source": "Poore & Nemecek, Science 2018",
+      "scope": 3
     },
     "mixed_buffet": {
       "factor": 3.5,
       "unit": "kg_co2e_per_meal",
-      "source": "Estimate based on 50% meat"
+      "source": "Estimate based on 50% meat",
+      "scope": 3
+    },
+    "local_organic": {
+      "factor": 1.8,
+      "unit": "kg_co2e_per_meal",
+      "source": "DEFRA & Nature Food 2023",
+      "scope": 3,
+      "notes": "Locally sourced organic produce, seasonal menu"
+    },
+    "finger_food": {
+      "factor": 2.0,
+      "unit": "kg_co2e_per_meal",
+      "source": "Estimate",
+      "scope": 3,
+      "notes": "Canapes, networking reception, smaller portions"
     },
     "beverages_per_person_day": {
       "factor": 0.3,
       "unit": "kg_co2e",
-      "source": "Estimate"
+      "source": "Estimate",
+      "scope": 3
+    },
+    "alcohol": {
+      "beer_per_serving": {
+        "factor": 0.55,
+        "unit": "kg_co2e_per_serving",
+        "source": "Quantis & Beverage Industry Environmental Roundtable 2023"
+      },
+      "wine_per_bottle": {
+        "factor": 1.28,
+        "unit": "kg_co2e_per_bottle",
+        "source": "Wine Institute Carbon Calculator 2023"
+      },
+      "spirits_per_serving": {
+        "factor": 0.35,
+        "unit": "kg_co2e_per_serving",
+        "source": "Quantis 2023"
+      },
+      "champagne_per_bottle": {
+        "factor": 1.50,
+        "unit": "kg_co2e_per_bottle",
+        "source": "Comite Champagne 2023"
+      }
+    },
+    "coffee_tea_per_cup": {
+      "factor": 0.06,
+      "unit": "kg_co2e_per_cup",
+      "source": "UCL Environmental Study 2023"
+    },
+    "bottled_water_per_unit": {
+      "factor": 0.16,
+      "unit": "kg_co2e_per_500ml",
+      "source": "Pacific Institute 2023"
     }
   },
   "materials_waste": {
     "general_landfill": {
       "factor": 0.587,
       "unit": "kg_co2e_per_kg",
-      "source": "EPA 2023"
+      "source": "EPA 2023",
+      "scope": 3
     },
     "recycled_mixed": {
       "factor": 0.021,
       "unit": "kg_co2e_per_kg",
-      "source": "UK DEFRA 2024"
+      "source": "UK DEFRA 2024",
+      "scope": 3
     },
     "composted_food": {
       "factor": 0.013,
       "unit": "kg_co2e_per_kg",
-      "source": "UK DEFRA 2024"
+      "source": "UK DEFRA 2024",
+      "scope": 3
     },
     "paper_cardboard": {
       "factor": 0.909,
       "unit": "kg_co2e_per_kg",
-      "source": "UK DEFRA 2024"
+      "source": "UK DEFRA 2024",
+      "scope": 3
     },
     "plastic": {
       "factor": 3.14,
       "unit": "kg_co2e_per_kg",
-      "source": "UK DEFRA 2024"
+      "source": "UK DEFRA 2024",
+      "scope": 3
     },
     "printed_materials_per_attendee": {
       "factor": 0.25,
       "unit": "kg_co2e",
-      "source": "Estimate (500g paper × 0.5 kg CO2e/kg)"
+      "source": "Estimate (500g paper x 0.5 kg CO2e/kg)",
+      "scope": 3
     },
     "exhibition_booth_per_m2": {
       "factor": 12.5,
       "unit": "kg_co2e",
-      "source": "Green Events Tool estimate"
+      "source": "Green Events Tool estimate",
+      "scope": 3
+    },
+    "single_use_plastic_per_attendee": {
+      "factor": 0.12,
+      "unit": "kg_co2e",
+      "source": "UNEP Single-Use Plastics Report 2023",
+      "scope": 3,
+      "notes": "Cups, plates, cutlery, straws per person per day"
+    },
+    "e_waste_per_kg": {
+      "factor": 1.85,
+      "unit": "kg_co2e_per_kg",
+      "source": "Global E-waste Monitor 2024",
+      "scope": 3
+    }
+  },
+  "equipment": {
+    "stage_per_m2_per_day": {
+      "factor": 0.50,
+      "unit": "kg_co2e",
+      "source": "Julie's Bicycle Green Events Guide 2023",
+      "scope": 3,
+      "notes": "Stage construction, rigging, basic structure"
+    },
+    "lighting_rig_per_day": {
+      "factor": 45.0,
+      "unit": "kg_co2e",
+      "source": "Julie's Bicycle 2023",
+      "scope": 2,
+      "notes": "Full professional lighting rig (10kW average draw)"
+    },
+    "sound_system_per_day": {
+      "factor": 25.0,
+      "unit": "kg_co2e",
+      "source": "Julie's Bicycle 2023",
+      "scope": 2,
+      "notes": "PA system for 500+ capacity venue"
+    },
+    "led_screen_per_m2_per_day": {
+      "factor": 2.5,
+      "unit": "kg_co2e",
+      "source": "Energy Star & manufacturer data",
+      "scope": 2,
+      "notes": "Large LED video wall panels"
+    },
+    "projector_per_day": {
+      "factor": 3.8,
+      "unit": "kg_co2e",
+      "source": "Energy Star data",
+      "scope": 2
+    },
+    "generator_diesel_per_hour": {
+      "factor": 8.5,
+      "unit": "kg_co2e",
+      "source": "UK DEFRA 2024",
+      "scope": 1,
+      "notes": "50kVA diesel generator"
+    },
+    "hvac_per_m2_per_day": {
+      "factor": 1.2,
+      "unit": "kg_co2e",
+      "source": "ASHRAE estimate for event spaces",
+      "scope": 2
+    },
+    "freight_truck_per_km": {
+      "factor": 0.107,
+      "unit": "kg_co2e_per_tonne_km",
+      "source": "UK DEFRA 2024",
+      "scope": 3,
+      "notes": "Average rigid HGV >17t"
+    }
+  },
+  "digital": {
+    "virtual_attendee_per_hour": {
+      "factor": 0.036,
+      "unit": "kg_co2e",
+      "source": "IEA & Shift Project 2024",
+      "scope": 3,
+      "notes": "HD video streaming + device energy"
+    },
+    "livestream_per_hour": {
+      "factor": 4.5,
+      "unit": "kg_co2e",
+      "source": "Carbon Trust Digital Report 2024",
+      "scope": 3,
+      "notes": "Server-side encoding + CDN delivery per 1000 viewers"
+    },
+    "event_app_per_user": {
+      "factor": 0.008,
+      "unit": "kg_co2e",
+      "source": "Green Software Foundation 2024",
+      "scope": 3,
+      "notes": "Cloud hosting + data transfer per active user per day"
+    },
+    "email_campaign_per_1000": {
+      "factor": 0.6,
+      "unit": "kg_co2e",
+      "source": "Mike Berners-Lee, The Carbon Footprint of Everything",
+      "scope": 3
+    }
+  },
+  "swag_merchandise": {
+    "cotton_tshirt": {
+      "factor": 8.0,
+      "unit": "kg_co2e_per_item",
+      "source": "WRAP & Sustainable Apparel Coalition 2023",
+      "scope": 3
+    },
+    "organic_cotton_tshirt": {
+      "factor": 5.5,
+      "unit": "kg_co2e_per_item",
+      "source": "Textile Exchange 2023",
+      "scope": 3
+    },
+    "recycled_tshirt": {
+      "factor": 3.5,
+      "unit": "kg_co2e_per_item",
+      "source": "Textile Exchange 2023",
+      "scope": 3
+    },
+    "tote_bag_cotton": {
+      "factor": 3.8,
+      "unit": "kg_co2e_per_item",
+      "source": "Danish EPA lifecycle study",
+      "scope": 3
+    },
+    "lanyard": {
+      "factor": 0.08,
+      "unit": "kg_co2e_per_item",
+      "source": "Estimate based on polyester weight",
+      "scope": 3
+    },
+    "name_badge_plastic": {
+      "factor": 0.05,
+      "unit": "kg_co2e_per_item",
+      "source": "Estimate",
+      "scope": 3
+    },
+    "name_badge_recycled": {
+      "factor": 0.02,
+      "unit": "kg_co2e_per_item",
+      "source": "Estimate",
+      "scope": 3
+    },
+    "notebook_pen_set": {
+      "factor": 0.45,
+      "unit": "kg_co2e_per_item",
+      "source": "Estimate based on paper + plastic lifecycle",
+      "scope": 3
+    },
+    "reusable_water_bottle": {
+      "factor": 1.2,
+      "unit": "kg_co2e_per_item",
+      "source": "Environmental Science & Technology 2023",
+      "scope": 3
+    },
+    "usb_drive": {
+      "factor": 0.35,
+      "unit": "kg_co2e_per_item",
+      "source": "Global E-waste Monitor 2024",
+      "scope": 3
+    }
+  },
+  "benchmarks": {
+    "conference_per_attendee_day": {
+      "typical": 0.35,
+      "best_practice": 0.15,
+      "unit": "tco2e",
+      "source": "MeetGreen & JMIC Benchmark 2024"
+    },
+    "trade_show_per_attendee_day": {
+      "typical": 0.50,
+      "best_practice": 0.25,
+      "unit": "tco2e",
+      "source": "UFI Global Exhibition Barometer 2024"
+    },
+    "gala_dinner_per_attendee": {
+      "typical": 0.08,
+      "best_practice": 0.03,
+      "unit": "tco2e",
+      "source": "Green Events Guide 2024"
+    },
+    "music_festival_per_attendee_day": {
+      "typical": 0.12,
+      "best_practice": 0.05,
+      "unit": "tco2e",
+      "source": "Julie's Bicycle Festival Impact 2024"
+    },
+    "corporate_meeting_per_attendee_day": {
+      "typical": 0.20,
+      "best_practice": 0.08,
+      "unit": "tco2e",
+      "source": "GBTA Sustainability Report 2024"
+    },
+    "sporting_event_per_attendee": {
+      "typical": 0.025,
+      "best_practice": 0.010,
+      "unit": "tco2e",
+      "source": "IOC Carbon Footprint Methodology 2024"
+    },
+    "virtual_event_per_attendee_day": {
+      "typical": 0.005,
+      "best_practice": 0.002,
+      "unit": "tco2e",
+      "source": "Nature Sustainability 2024"
+    },
+    "hybrid_event_per_attendee_day": {
+      "typical": 0.18,
+      "best_practice": 0.08,
+      "unit": "tco2e",
+      "source": "PCMA Convene Sustainability Index 2024"
+    },
+    "wedding_per_guest": {
+      "typical": 0.06,
+      "best_practice": 0.02,
+      "unit": "tco2e",
+      "source": "Green Union estimate 2024"
     }
   }
 }

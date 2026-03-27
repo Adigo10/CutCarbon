@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.models.database import get_db, UserDB
-from app.models.schemas import UserCreate, UserLogin, Token, UserOut
+from app.models.schemas import UserCreate, UserLogin, Token, UserOut, TokenWithUser
 from app.config import settings
 
 router = APIRouter()
@@ -56,7 +56,7 @@ async def get_current_user(
     return user
 
 
-@router.post("/register", response_model=UserOut, status_code=201)
+@router.post("/register", response_model=TokenWithUser, status_code=201)
 async def register(payload: UserCreate, db: AsyncSession = Depends(get_db)):
     existing = await db.execute(select(UserDB).where(UserDB.email == payload.email))
     if existing.scalar_one_or_none():
@@ -68,16 +68,18 @@ async def register(payload: UserCreate, db: AsyncSession = Depends(get_db)):
     db.add(user)
     await db.commit()
     await db.refresh(user)
-    return UserOut(id=user.id, email=user.email, created_at=user.created_at.isoformat())
+    user_out = UserOut(id=user.id, email=user.email, created_at=user.created_at.isoformat())
+    return TokenWithUser(access_token=_create_token(user.id), user=user_out)
 
 
-@router.post("/login", response_model=Token)
+@router.post("/login", response_model=TokenWithUser)
 async def login(payload: UserLogin, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(UserDB).where(UserDB.email == payload.email))
     user = result.scalar_one_or_none()
     if not user or not _verify_password(payload.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    return Token(access_token=_create_token(user.id))
+    user_out = UserOut(id=user.id, email=user.email, created_at=user.created_at.isoformat())
+    return TokenWithUser(access_token=_create_token(user.id), user=user_out)
 
 
 @router.get("/me", response_model=UserOut)

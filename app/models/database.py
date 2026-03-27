@@ -29,7 +29,7 @@ class Base(DeclarativeBase):
     pass
 
 
-# ── ORM Models ─────────────────────────────────────────────────────────────────
+# -- ORM Models ----------------------------------------------------------------
 
 class UserDB(Base):
     __tablename__ = "users"
@@ -58,6 +58,7 @@ class ScenarioDB(Base):
     event_id = Column(String)
     name = Column(String, nullable=False)
     event_name = Column(String)
+    event_type = Column(String, default="conference")
     attendees = Column(Integer)
     event_days = Column(Integer)
     mode = Column(String, default="basic")
@@ -72,9 +73,15 @@ class ScenarioDB(Base):
     per_attendee_tco2e = Column(Float, default=0.0)
     data_quality = Column(String, default="estimated")
 
+    # Scope breakdown
+    scope1_tco2e = Column(Float, default=0.0)
+    scope2_tco2e = Column(Float, default=0.0)
+    scope3_tco2e = Column(Float, default=0.0)
+
     assumptions = Column(JSON, default={})
     input_payload = Column(JSON, default={})
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     user_id = Column(Integer, nullable=True)
 
 
@@ -118,7 +125,26 @@ class EmissionFactorDB(Base):
     is_verified = Column(Boolean, default=False)
 
 
-# ── Session dependency ─────────────────────────────────────────────────────────
+class OffsetPurchaseDB(Base):
+    __tablename__ = "offset_purchases"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=False)
+    scenario_id = Column(String, nullable=True)
+    project_type = Column(String, nullable=False)
+    registry = Column(String, nullable=False)
+    quantity_tco2e = Column(Float, nullable=False)
+    price_per_tco2e_usd = Column(Float, nullable=False)
+    total_cost_usd = Column(Float, nullable=False)
+    vintage_year = Column(Integer)
+    serial_number = Column(String, nullable=True)
+    status = Column(String, default="purchased")  # purchased | retired | cancelled
+    retired_at = Column(DateTime, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# -- Session dependency --------------------------------------------------------
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
@@ -129,11 +155,17 @@ async def init_db():
     """Create all tables on startup."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        # Add user_id to existing tables — safe to run repeatedly (SQLite ignores duplicate columns)
-        for sql in [
+        # Add columns to existing tables — safe to run repeatedly (SQLite ignores duplicate columns)
+        migrations = [
             "ALTER TABLE scenarios ADD COLUMN user_id INTEGER REFERENCES users(id)",
             "ALTER TABLE chat_messages ADD COLUMN user_id INTEGER REFERENCES users(id)",
-        ]:
+            "ALTER TABLE scenarios ADD COLUMN scope1_tco2e FLOAT DEFAULT 0.0",
+            "ALTER TABLE scenarios ADD COLUMN scope2_tco2e FLOAT DEFAULT 0.0",
+            "ALTER TABLE scenarios ADD COLUMN scope3_tco2e FLOAT DEFAULT 0.0",
+            "ALTER TABLE scenarios ADD COLUMN event_type TEXT DEFAULT 'conference'",
+            "ALTER TABLE scenarios ADD COLUMN updated_at DATETIME",
+        ]
+        for sql in migrations:
             try:
                 await conn.execute(text(sql))
             except Exception:

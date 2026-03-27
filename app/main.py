@@ -5,12 +5,12 @@ from fastapi.responses import FileResponse
 from pathlib import Path
 
 from app.models.database import init_db
-from app.routers import chat, scenarios, financial, agents, auth
+from app.routers import chat, scenarios, financial, agents, auth, offsets
 
 app = FastAPI(
     title="EventCarbon Co-Pilot",
-    description="AI-powered carbon footprint calculator for events with financial savings and compliance tracking",
-    version="1.0.0",
+    description="AI-powered carbon footprint calculator for events with financial savings, compliance tracking, and carbon offset management",
+    version="2.0.0",
 )
 
 app.add_middleware(
@@ -25,6 +25,7 @@ app.include_router(auth.router,      prefix="/api/auth",      tags=["Auth"])
 app.include_router(chat.router,      prefix="/api/chat",      tags=["Chat"])
 app.include_router(scenarios.router, prefix="/api/scenarios", tags=["Scenarios"])
 app.include_router(financial.router, prefix="/api/financial", tags=["Financial"])
+app.include_router(offsets.router,   prefix="/api/offsets",   tags=["Carbon Offsets"])
 app.include_router(agents.router,    prefix="/api/agents",    tags=["TinyFish Agents"])
 
 STATIC_DIR = Path(__file__).parent.parent / "static"
@@ -38,10 +39,10 @@ async def serve_index():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "EventCarbon Co-Pilot"}
+    return {"status": "ok", "service": "EventCarbon Co-Pilot", "version": "2.0.0"}
 
 
 @app.on_event("startup")
 async def startup():
     await init_db()
-    print("✅ EventCarbon Co-Pilot started — http://localhost:8000")
+    print("EventCarbon Co-Pilot v2.0 started — http://localhost:8000")

@@ -1,0 +1,201 @@
+{
+  "registries": {
+    "gold_standard": {
+      "name": "Gold Standard",
+      "url": "https://www.goldstandard.org",
+      "credibility": "Tier 1",
+      "description": "Premium registry with strong co-benefit verification (SDGs). Recognized by ICAO CORSIA."
+    },
+    "verra_vcs": {
+      "name": "Verra (VCS)",
+      "url": "https://verra.org",
+      "credibility": "Tier 1",
+      "description": "Largest voluntary carbon market registry. Verified Carbon Standard (VCS) is the most widely used."
+    },
+    "cdm": {
+      "name": "Clean Development Mechanism (CDM)",
+      "url": "https://cdm.unfccc.int",
+      "credibility": "Tier 1",
+      "description": "UN-backed compliance mechanism under Kyoto Protocol. CERs recognized in many national systems."
+    },
+    "acr": {
+      "name": "American Carbon Registry (ACR)",
+      "url": "https://acrcarbon.org",
+      "credibility": "Tier 1",
+      "description": "US-focused registry, first private voluntary GHG registry. Used in California compliance."
+    },
+    "car": {
+      "name": "Climate Action Reserve (CAR)",
+      "url": "https://www.climateactionreserve.org",
+      "credibility": "Tier 1",
+      "description": "North American focus. Offset credits (CRTs) recognized by California Cap-and-Trade."
+    },
+    "puro_earth": {
+      "name": "Puro.earth",
+      "url": "https://puro.earth",
+      "credibility": "Tier 2",
+      "description": "Carbon removal-focused registry. Biochar, BECCS, enhanced weathering, direct air capture."
+    },
+    "plan_vivo": {
+      "name": "Plan Vivo",
+      "url": "https://www.planvivo.org",
+      "credibility": "Tier 2",
+      "description": "Community-focused land use and forestry projects. Strong social co-benefits."
+    }
+  },
+  "project_types": {
+    "renewable_energy": {
+      "label": "Renewable Energy",
+      "icon": "fas fa-solar-panel",
+      "description": "Wind, solar, hydro, and geothermal power generation displacing fossil fuels",
+      "avg_price_usd": 8.50,
+      "price_range": [3, 18],
+      "permanence": "N/A (avoidance)",
+      "additionality_risk": "medium",
+      "co_benefits": ["clean energy access", "local jobs", "air quality"],
+      "sdgs": [7, 8, 13],
+      "registries": ["gold_standard", "verra_vcs", "cdm"]
+    },
+    "forestry_afforestation": {
+      "label": "Afforestation / Reforestation",
+      "icon": "fas fa-tree",
+      "description": "Planting trees on degraded or non-forested land to sequester carbon",
+      "avg_price_usd": 12.00,
+      "price_range": [5, 30],
+      "permanence": "25-100 years (risk of reversal)",
+      "additionality_risk": "medium",
+      "co_benefits": ["biodiversity", "watershed protection", "soil health"],
+      "sdgs": [13, 15],
+      "registries": ["verra_vcs", "gold_standard", "plan_vivo"]
+    },
+    "redd_plus": {
+      "label": "REDD+ (Avoided Deforestation)",
+      "icon": "fas fa-shield-halved",
+      "description": "Protecting existing forests from deforestation and degradation",
+      "avg_price_usd": 10.00,
+      "price_range": [4, 25],
+      "permanence": "Program-dependent (20-30 year crediting)",
+      "additionality_risk": "high",
+      "co_benefits": ["biodiversity", "indigenous rights", "watershed"],
+      "sdgs": [1, 13, 15],
+      "registries": ["verra_vcs", "gold_standard"]
+    },
+    "cookstove": {
+      "label": "Clean Cookstoves",
+      "icon": "fas fa-fire-burner",
+      "description": "Distributing efficient cookstoves to reduce biomass burning in developing regions",
+      "avg_price_usd": 7.00,
+      "price_range": [3, 15],
+      "permanence": "N/A (avoidance)",
+      "additionality_risk": "low",
+      "co_benefits": ["health", "gender equality", "time savings"],
+      "sdgs": [3, 5, 7, 13],
+      "registries": ["gold_standard", "verra_vcs"]
+    },
+    "methane_capture": {
+      "label": "Methane Capture",
+      "icon": "fas fa-dumpster-fire",
+      "description": "Capturing methane from landfills, mines, or agriculture and destroying or using it",
+      "avg_price_usd": 6.50,
+      "price_range": [2, 12],
+      "permanence": "N/A (avoidance/destruction)",
+      "additionality_risk": "low",
+      "co_benefits": ["air quality", "energy generation", "odor reduction"],
+      "sdgs": [7, 11, 13],
+      "registries": ["verra_vcs", "acr", "car"]
+    },
+    "blue_carbon": {
+      "label": "Blue Carbon (Mangroves/Seagrass)",
+      "icon": "fas fa-water",
+      "description": "Restoring and protecting coastal ecosystems that sequester carbon in sediments",
+      "avg_price_usd": 20.00,
+      "price_range": [10, 45],
+      "permanence": "100+ years (if protected)",
+      "additionality_risk": "medium",
+      "co_benefits": ["coastal protection", "fisheries", "biodiversity"],
+      "sdgs": [13, 14, 15],
+      "registries": ["verra_vcs", "plan_vivo"]
+    },
+    "direct_air_capture": {
+      "label": "Direct Air Capture (DAC)",
+      "icon": "fas fa-wind",
+      "description": "Machines that extract CO2 directly from ambient air and store it permanently",
+      "avg_price_usd": 600.00,
+      "price_range": [250, 1200],
+      "permanence": "1000+ years (geological storage)",
+      "additionality_risk": "very low",
+      "co_benefits": ["scalable", "measurable", "verifiable"],
+      "sdgs": [9, 13],
+      "registries": ["puro_earth"]
+    },
+    "biochar": {
+      "label": "Biochar",
+      "icon": "fas fa-seedling",
+      "description": "Converting biomass waste into stable carbon and applying it to soil",
+      "avg_price_usd": 120.00,
+      "price_range": [50, 250],
+      "permanence": "100-1000 years",
+      "additionality_risk": "low",
+      "co_benefits": ["soil fertility", "waste reduction", "water retention"],
+      "sdgs": [2, 12, 13, 15],
+      "registries": ["puro_earth", "verra_vcs"]
+    },
+    "enhanced_weathering": {
+      "label": "Enhanced Rock Weathering",
+      "icon": "fas fa-mountain",
+      "description": "Spreading crushed silicate rocks on farmland to accelerate natural CO2 absorption",
+      "avg_price_usd": 80.00,
+      "price_range": [40, 200],
+      "permanence": "10,000+ years",
+      "additionality_risk": "low",
+      "co_benefits": ["soil pH improvement", "crop yields", "reduced fertilizer"],
+      "sdgs": [2, 13, 15],
+      "registries": ["puro_earth"]
+    },
+    "community_energy": {
+      "label": "Community-Based Energy Access",
+      "icon": "fas fa-people-group",
+      "description": "Solar microgrids and clean energy for off-grid communities",
+      "avg_price_usd": 15.00,
+      "price_range": [8, 30],
+      "permanence": "N/A (avoidance)",
+      "additionality_risk": "low",
+      "co_benefits": ["energy access", "education", "economic development"],
+      "sdgs": [1, 4, 7, 10, 13],
+      "registries": ["gold_standard", "plan_vivo"]
+    }
+  },
+  "quality_criteria": {
+    "additionality": "Would this emission reduction have happened without carbon finance? The project must demonstrate that it would not be viable without credit revenue.",
+    "permanence": "How long will the carbon stay out of the atmosphere? Geological storage (DAC, enhanced weathering) > biochar > forests > avoided emissions.",
+    "leakage": "Does the project cause emissions elsewhere? E.g., protecting one forest may shift logging pressure to another.",
+    "measurability": "Can the emission reductions be accurately measured, reported, and verified (MRV)?",
+    "co_benefits": "Does the project deliver additional social, environmental, or economic benefits beyond carbon?"
+  },
+  "market_data": {
+    "vcm_volume_2024_mt": 250,
+    "vcm_value_2024_usd_bn": 2.0,
+    "average_price_2024_usd": 8.0,
+    "compliance_price_eu_ets_eur": 65,
+    "compliance_price_uk_ets_gbp": 50,
+    "price_trend": "Voluntary prices recovering from 2023 dip. Removal credits (DAC, biochar) trending significantly higher than avoidance credits.",
+    "icvcm_core_carbon_principles": "The Integrity Council for the Voluntary Carbon Market (ICVCM) Core Carbon Principles (CCPs) set the bar for high-quality credits. Look for CCP-labelled credits from 2025.",
+    "article6_status": "Paris Agreement Article 6 rules finalized at COP28. Corresponding adjustments now required for cross-border credit transfers."
+  },
+  "retirement_guidance": {
+    "claim_types": {
+      "carbon_neutral": "Offset 100% of measured emissions. Must follow PAS 2060 or equivalent.",
+      "climate_positive": "Offset more than 100% of measured emissions (net negative).",
+      "contribution_claim": "Fund climate action without claiming neutrality. Increasingly preferred by SBTi.",
+      "insetting": "Reduce emissions within your own value chain rather than buying external offsets."
+    },
+    "best_practices": [
+      "Measure and reduce first, offset residual emissions only",
+      "Diversify across project types and geographies",
+      "Prioritize removal credits over avoidance for SBTi alignment",
+      "Use CCP-labelled or Gold Standard certified credits",
+      "Retire credits in a public registry (not just purchased)",
+      "Disclose your offset portfolio and methodology transparently"
+    ]
+  }
+}

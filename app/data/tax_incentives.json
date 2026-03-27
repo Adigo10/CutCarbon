@@ -6,16 +6,17 @@
       "2030_rate_sgd": 65,
       "currency": "SGD",
       "usd_exchange": 0.74,
-      "scope": "Facilities emitting ≥ 25,000 tCO2e/year; event organizers indirectly affected via supply chain",
+      "scope": "Facilities emitting >= 25,000 tCO2e/year; event organizers indirectly affected via supply chain",
       "scheme": "Carbon Pricing Act (CPA)",
       "source": "NEA Singapore 2024"
     },
     "european_union": {
       "ets_price_eur": 65,
+      "cbam_price_eur": 65,
       "currency": "EUR",
       "usd_exchange": 1.08,
-      "scope": "EU ETS covers aviation (intra-EU), energy, heavy industry",
-      "notes": "CBAM from 2026 extends carbon costs to imports",
+      "scope": "EU ETS covers aviation (intra-EU), energy, heavy industry. CBAM from 2026 extends carbon costs to imports.",
+      "notes": "CBAM transitional phase since Oct 2023; full implementation from 2026",
       "source": "EU ETS Registry 2024"
     },
     "united_kingdom": {
@@ -27,17 +28,53 @@
     },
     "australia": {
       "accu_price_aud": 35,
+      "safeguard_baseline_aud": 32,
       "currency": "AUD",
       "usd_exchange": 0.65,
-      "scope": "Australian Carbon Credit Units (voluntary/compliance)",
+      "scope": "Australian Carbon Credit Units (voluntary/compliance). Safeguard Mechanism covers facilities >100k tCO2e/year.",
       "source": "Clean Energy Regulator 2024"
     },
     "usa_california": {
       "cap_trade_price_usd": 30,
+      "sec_climate_disclosure": true,
       "currency": "USD",
       "usd_exchange": 1.0,
-      "scope": "California Cap-and-Trade (large emitters)",
+      "scope": "California Cap-and-Trade (large emitters). SEC climate disclosure rule from 2025.",
       "source": "CARB 2024"
+    },
+    "canada": {
+      "federal_rate_cad": 80,
+      "2030_rate_cad": 170,
+      "currency": "CAD",
+      "usd_exchange": 0.74,
+      "scope": "Federal carbon pricing backstop. Provinces may operate own systems.",
+      "scheme": "Federal Carbon Pricing",
+      "source": "ECCC Canada 2024"
+    },
+    "japan": {
+      "tax_rate_jpy": 289,
+      "gx_ets_start": 2026,
+      "currency": "JPY",
+      "usd_exchange": 0.0067,
+      "scope": "Tax on fossil fuels (JPY 289/tCO2e). GX-ETS full trading from 2026.",
+      "scheme": "Tax for Climate Change Mitigation + GX-ETS",
+      "source": "MOE Japan 2024"
+    },
+    "south_korea": {
+      "ets_price_krw": 12000,
+      "currency": "KRW",
+      "usd_exchange": 0.00075,
+      "scope": "K-ETS covers ~74% of national emissions. Third compliance period (2021-2025).",
+      "scheme": "Korea Emissions Trading Scheme (K-ETS)",
+      "source": "Ministry of Environment Korea 2024"
+    },
+    "china": {
+      "ets_price_cny": 80,
+      "currency": "CNY",
+      "usd_exchange": 0.14,
+      "scope": "China National ETS covers power sector (~4.5 GtCO2). Expanding to cement, steel, aluminum.",
+      "scheme": "China National ETS",
+      "source": "MEE China 2024"
     }
   },
   "green_incentives": {
@@ -73,6 +110,13 @@
         "benefit": "100% capital allowance in year of purchase for qualifying equipment",
         "applicable_actions": ["renewable_energy", "energy_efficiency"],
         "source": "IRAS Singapore 2024"
+      },
+      {
+        "name": "Singapore Green Bonds",
+        "type": "financing",
+        "benefit": "Government-backed green bond framework for sustainability projects",
+        "applicable_actions": ["renewable_energy", "green_venue", "sustainable_transport"],
+        "source": "MAS Singapore 2024"
       }
     ],
     "european_union": [
@@ -86,9 +130,23 @@
       {
         "name": "Corporate Sustainability Reporting Directive (CSRD)",
         "type": "compliance_requirement",
-        "benefit": "Penalty avoidance: €10M or 5% of global turnover",
+        "benefit": "Penalty avoidance: EUR 10M or 5% of global turnover",
         "applicable_actions": ["ghg_reporting", "sustainability_audit"],
         "source": "EU CSRD 2024"
+      },
+      {
+        "name": "EU Innovation Fund",
+        "type": "grant",
+        "benefit": "EUR 40B+ for innovative low-carbon technologies (2020-2030)",
+        "applicable_actions": ["renewable_energy", "carbon_capture", "green_technology"],
+        "source": "EC Innovation Fund 2024"
+      },
+      {
+        "name": "EU Taxonomy Alignment",
+        "type": "financing",
+        "benefit": "Access to green finance and lower borrowing costs for taxonomy-aligned activities",
+        "applicable_actions": ["renewable_energy", "energy_efficiency", "circular_economy"],
+        "source": "EU Taxonomy Regulation 2024"
       }
     ],
     "united_kingdom": [
@@ -105,15 +163,36 @@
         "benefit": "80% CCL discount with Climate Change Agreement",
         "applicable_actions": ["energy_efficiency"],
         "source": "HMRC 2024"
+      },
+      {
+        "name": "UK Green Finance Strategy",
+        "type": "financing",
+        "benefit": "Transition Plan Taskforce guidance for net-zero aligned financing",
+        "applicable_actions": ["ghg_reporting", "sustainability_audit", "net_zero_plan"],
+        "source": "HM Treasury 2024"
       }
     ],
     "australia": [
       {
         "name": "Australian Renewable Energy Agency (ARENA)",
         "type": "grant",
-        "benefit": "Grants for renewable energy deployment",
+        "benefit": "Grants for renewable energy deployment and innovation",
         "applicable_actions": ["renewable_energy"],
         "source": "ARENA 2024"
+      },
+      {
+        "name": "Safeguard Mechanism Credits",
+        "type": "credit",
+        "benefit": "Earn tradeable credits for emissions below baseline",
+        "applicable_actions": ["energy_efficiency", "renewable_energy", "process_improvement"],
+        "source": "Clean Energy Regulator 2024"
+      },
+      {
+        "name": "Climate Active Certification",
+        "type": "certification",
+        "benefit": "Government-backed carbon neutral certification for events and organizations",
+        "applicable_actions": ["carbon_audit", "carbon_offset", "ghg_reporting"],
+        "source": "DCCEEW Australia 2024"
       }
     ],
     "usa": [
@@ -130,6 +209,45 @@
         "benefit": "$0.026/kWh for renewable energy generated",
         "applicable_actions": ["renewable_energy"],
         "source": "IRS IRA 2024"
+      },
+      {
+        "name": "45Q Carbon Capture Tax Credit",
+        "type": "tax_credit",
+        "benefit": "$85/tCO2 for geological storage, $60/tCO2 for utilization",
+        "applicable_actions": ["carbon_capture"],
+        "source": "IRS 2024"
+      },
+      {
+        "name": "EPA Climate Pollution Reduction Grants",
+        "type": "grant",
+        "benefit": "$5B+ in grants for state/local/tribal climate action",
+        "applicable_actions": ["renewable_energy", "energy_efficiency", "sustainable_transport"],
+        "source": "EPA 2024"
+      }
+    ],
+    "canada": [
+      {
+        "name": "Federal Carbon Price Revenue Recycling",
+        "type": "rebate",
+        "benefit": "Climate Action Incentive payments returned to households",
+        "applicable_actions": ["energy_efficiency"],
+        "source": "ECCC Canada 2024"
+      },
+      {
+        "name": "Strategic Innovation Fund - Net Zero Accelerator",
+        "type": "grant",
+        "benefit": "CAD 8B for industrial decarbonization projects",
+        "applicable_actions": ["renewable_energy", "carbon_capture", "process_improvement"],
+        "source": "ISED Canada 2024"
+      }
+    ],
+    "japan": [
+      {
+        "name": "GX Transition Bonds",
+        "type": "financing",
+        "benefit": "JPY 20T+ in government-backed transition bonds (2023-2032)",
+        "applicable_actions": ["renewable_energy", "energy_efficiency", "green_technology"],
+        "source": "METI Japan 2024"
       }
     ]
   },
@@ -144,6 +262,12 @@
       "co2e_saved_per_meal_kg": 2.5,
       "description": "Replace mixed/meat meal with vegan",
       "typical_cost_delta_usd": -3.0
+    },
+    "local_seasonal_catering": {
+      "co2e_saved_per_meal_kg": 1.2,
+      "description": "Source ingredients locally and seasonally",
+      "typical_cost_delta_usd": 1.5,
+      "notes": "May cost slightly more but reduces food miles"
     },
     "rail_instead_of_short_haul": {
       "co2e_saved_per_100km_kg": 21.4,
@@ -173,10 +297,31 @@
       "typical_cost_delta_usd": -2.0,
       "notes": "Cost saving from print elimination"
     },
+    "sustainable_swag": {
+      "co2e_saved_per_attendee_kg": 5.0,
+      "description": "Replace cotton tshirt + plastic items with recycled or digital alternatives",
+      "typical_cost_delta_usd": -3.0
+    },
+    "local_venue_selection": {
+      "co2e_saved_pct_travel": 20,
+      "description": "Choose venue near transport hubs to minimize last-mile travel",
+      "typical_cost_delta_usd": 0
+    },
+    "led_lighting_upgrade": {
+      "co2e_saved_pct_energy": 40,
+      "description": "Switch to LED stage and venue lighting",
+      "typical_cost_delta_usd_per_day": 500,
+      "notes": "Higher upfront rental but lower energy consumption"
+    },
     "carbon_offset_purchase": {
       "cost_per_tco2e_usd": 15,
       "description": "High-quality carbon offsets (Gold Standard / VCS)",
       "quality_note": "Ensure additionality, permanence, co-benefits"
+    },
+    "carbon_removal_purchase": {
+      "cost_per_tco2e_usd": 150,
+      "description": "Permanent carbon removal (biochar, DAC, enhanced weathering)",
+      "quality_note": "Higher cost but stronger climate impact and SBTi-preferred"
     }
   },
   "compliance_frameworks": {
@@ -207,9 +352,10 @@
     },
     "science_based_targets": {
       "name": "Science Based Targets initiative (SBTi)",
-      "target": "1.5°C pathway: 50% absolute reduction by 2030 vs 2019 baseline",
+      "target": "1.5C pathway: 50% absolute reduction by 2030 vs 2019 baseline",
       "net_zero": "Net-zero by 2050 with 90% absolute reduction",
-      "relevance": "Corporate net-zero commitments"
+      "beyondvalue_chain": "BVCM: invest in mitigation beyond value chain (offsets/removals)",
+      "relevance": "Corporate net-zero commitments. SBTi prefers removal credits over avoidance."
     },
     "singapore_sustainability_reporting": {
       "name": "SGX Sustainability Reporting",
@@ -221,7 +367,18 @@
       "name": "EU Corporate Sustainability Reporting Directive",
       "mandatory_from": "2024 (large public-interest entities)",
       "rollout": "2025 (large companies), 2026 (listed SMEs)",
-      "penalties_eur": 10000000
+      "penalties_eur": 10000000,
+      "esrs_standards": ["E1 Climate Change", "E2 Pollution", "E3 Water", "E4 Biodiversity", "E5 Circular Economy"]
+    },
+    "tcfd": {
+      "name": "Task Force on Climate-related Financial Disclosures (TCFD)",
+      "pillars": ["Governance", "Strategy", "Risk Management", "Metrics & Targets"],
+      "status": "Consolidated into ISSB/IFRS S2 from 2024. Many jurisdictions adopting ISSB standards."
+    },
+    "sbtn": {
+      "name": "Science Based Targets for Nature (SBTN)",
+      "description": "Framework for setting corporate nature and biodiversity targets alongside climate targets",
+      "relevance": "Event venues, catering supply chains, and land use impacts"
     }
   }
 }
