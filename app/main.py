@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse
 from pathlib import Path
 
 from app.models.database import init_db
-from app.routers import chat, scenarios, financial, agents
+from app.routers import chat, scenarios, financial, agents, auth
 
 app = FastAPI(
     title="EventCarbon Co-Pilot",
@@ -21,6 +21,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router,      prefix="/api/auth",      tags=["Auth"])
 app.include_router(chat.router,      prefix="/api/chat",      tags=["Chat"])
 app.include_router(scenarios.router, prefix="/api/scenarios", tags=["Scenarios"])
 app.include_router(financial.router, prefix="/api/financial", tags=["Financial"])

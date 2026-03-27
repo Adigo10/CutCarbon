@@ -9,22 +9,28 @@
   <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.5/dist/cdn.min.js" defer></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
   <style>
+    [x-cloak] { display: none !important; }
     :root {
-      --green-900: #0d1f17;
-      --green-800: #152a1e;
-      --green-700: #1a3a2a;
-      --green-600: #1e4d35;
-      --accent:    #00d68f;
-      --accent-dim:#00a86b;
-      --gold:      #ffd600;
-      --red:       #ff5252;
-      --blue:      #4fc3f7;
-      --text:      #e8f5e9;
-      --muted:     #90a4ae;
+      --bg:        #f4f6f5;
+      --surface:   #ffffff;
+      --surface-2: #f0f7f4;
+      --border:    #d1e5da;
+      --border-2:  #b8d8cc;
+      --accent:    #1a9e6e;
+      --accent-dim:#15805a;
+      --accent-bg: #e6f5ef;
+      --gold:      #d97706;
+      --gold-bg:   #fef3c7;
+      --red:       #dc2626;
+      --red-bg:    #fee2e2;
+      --blue:      #0369a1;
+      --blue-bg:   #e0f2fe;
+      --text:      #111827;
+      --muted:     #6b7280;
     }
     * { box-sizing: border-box; }
     body {
-      background: var(--green-900);
+      background: var(--bg);
       color: var(--text);
       font-family: 'Inter', system-ui, sans-serif;
       margin: 0;
@@ -32,13 +38,13 @@
     }
     /* Scrollbar */
     ::-webkit-scrollbar { width: 6px; }
-    ::-webkit-scrollbar-track { background: var(--green-800); }
-    ::-webkit-scrollbar-thumb { background: var(--green-600); border-radius: 3px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 3px; }
 
     /* Sidebar */
     .sidebar {
-      background: var(--green-800);
-      border-right: 1px solid var(--green-700);
+      background: var(--surface);
+      border-right: 1px solid var(--border);
       min-height: 100vh;
       position: fixed;
       top: 0; left: 0;
@@ -57,20 +63,20 @@
       color: var(--muted);
       font-size: 14px;
     }
-    .nav-item:hover { background: var(--green-700); color: var(--text); }
-    .nav-item.active { background: var(--green-600); color: var(--accent); }
+    .nav-item:hover { background: var(--surface-2); color: var(--text); }
+    .nav-item.active { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
     .nav-item i { width: 18px; text-align: center; }
 
     /* Cards */
     .card {
-      background: var(--green-800);
-      border: 1px solid var(--green-700);
+      background: var(--surface);
+      border: 1px solid var(--border);
       border-radius: 12px;
       padding: 20px;
     }
     .kpi-card {
-      background: linear-gradient(135deg, var(--green-800), var(--green-700));
-      border: 1px solid var(--green-600);
+      background: var(--surface);
+      border: 1px solid var(--border);
       border-radius: 12px;
       padding: 20px;
       position: relative;
@@ -83,12 +89,12 @@
       width: 80px; height: 80px;
       border-radius: 50%;
       background: var(--accent);
-      opacity: 0.08;
+      opacity: 0.06;
     }
 
-    /* Glow effect */
-    .glow { box-shadow: 0 0 20px rgba(0, 214, 143, 0.15); }
-    .glow-gold { box-shadow: 0 0 20px rgba(255, 214, 0, 0.15); }
+    /* Glow / shadow */
+    .glow { box-shadow: 0 1px 6px rgba(26,158,110,0.12), 0 0 0 1px rgba(26,158,110,0.08); }
+    .glow-gold { box-shadow: 0 1px 6px rgba(217,119,6,0.12), 0 0 0 1px rgba(217,119,6,0.08); }
 
     /* Accent text */
     .text-accent { color: var(--accent); }
@@ -107,25 +113,26 @@
       text-transform: uppercase;
       letter-spacing: 0.5px;
     }
-    .badge-green  { background: rgba(0,214,143,0.15); color: var(--accent); border: 1px solid rgba(0,214,143,0.3); }
-    .badge-yellow { background: rgba(255,214,0,0.15); color: var(--gold);   border: 1px solid rgba(255,214,0,0.3); }
-    .badge-red    { background: rgba(255,82,82,0.15);  color: var(--red);    border: 1px solid rgba(255,82,82,0.3); }
-    .badge-blue   { background: rgba(79,195,247,0.15); color: var(--blue);   border: 1px solid rgba(79,195,247,0.3); }
+    .badge-green  { background: var(--accent-bg); color: var(--accent);   border: 1px solid rgba(26,158,110,0.25); }
+    .badge-yellow { background: var(--gold-bg);   color: var(--gold);     border: 1px solid rgba(217,119,6,0.25); }
+    .badge-red    { background: var(--red-bg);    color: var(--red);      border: 1px solid rgba(220,38,38,0.25); }
+    .badge-blue   { background: var(--blue-bg);   color: var(--blue);     border: 1px solid rgba(3,105,161,0.25); }
 
     /* Chat */
     .chat-bubble-user {
-      background: var(--green-600);
+      background: var(--accent);
+      color: #fff;
       border-radius: 18px 18px 4px 18px;
       padding: 10px 16px;
       max-width: 80%;
       margin-left: auto;
     }
     .chat-bubble-bot {
-      background: var(--green-700);
+      background: var(--surface-2);
       border-radius: 18px 18px 18px 4px;
       padding: 10px 16px;
       max-width: 85%;
-      border: 1px solid var(--green-600);
+      border: 1px solid var(--border);
     }
     .typing-dot {
       width: 8px; height: 8px;
@@ -143,9 +150,10 @@
     /* Progress bar */
     .progress-bar {
       height: 8px;
-      background: var(--green-700);
+      background: var(--surface-2);
       border-radius: 4px;
       overflow: hidden;
+      border: 1px solid var(--border);
     }
     .progress-fill {
       height: 100%;
@@ -155,8 +163,8 @@
 
     /* Input */
     .input-field {
-      background: var(--green-700);
-      border: 1px solid var(--green-600);
+      background: var(--surface);
+      border: 1px solid var(--border);
       border-radius: 8px;
       color: var(--text);
       padding: 10px 14px;
@@ -164,35 +172,35 @@
       outline: none;
       transition: border-color 0.2s;
     }
-    .input-field:focus { border-color: var(--accent); }
+    .input-field:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(26,158,110,0.1); }
     .input-field::placeholder { color: var(--muted); }
-    select.input-field option { background: var(--green-800); }
+    select.input-field option { background: var(--surface); color: var(--text); }
 
     /* Button */
     .btn-primary {
       background: var(--accent);
-      color: #0d1f17;
-      font-weight: 700;
+      color: #fff;
+      font-weight: 600;
       padding: 10px 20px;
       border-radius: 8px;
       border: none;
       cursor: pointer;
       transition: all 0.2s;
     }
-    .btn-primary:hover { background: var(--accent-dim); transform: translateY(-1px); }
+    .btn-primary:hover { background: var(--accent-dim); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(26,158,110,0.25); }
     .btn-ghost {
       background: transparent;
-      border: 1px solid var(--green-600);
+      border: 1px solid var(--border);
       color: var(--text);
       padding: 8px 16px;
       border-radius: 8px;
       cursor: pointer;
       transition: all 0.2s;
     }
-    .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+    .btn-ghost:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
 
     /* Divider */
-    .divider { border-color: var(--green-700); }
+    .divider { border-color: var(--border); }
 
     /* Main content offset */
     .main-content { margin-left: 240px; }
@@ -214,7 +222,7 @@
       position: absolute;
       bottom: 100%; left: 50%;
       transform: translateX(-50%);
-      background: #111;
+      background: var(--text);
       color: #fff;
       padding: 4px 10px;
       border-radius: 6px;
@@ -225,20 +233,66 @@
     }
 
     /* Scenario comparison row colors */
-    .scenario-color-0 { background: rgba(0,214,143,0.2); }
-    .scenario-color-1 { background: rgba(79,195,247,0.2); }
-    .scenario-color-2 { background: rgba(255,214,0,0.2); }
-    .scenario-color-3 { background: rgba(255,82,82,0.2); }
+    .scenario-color-0 { background: rgba(26,158,110,0.08); }
+    .scenario-color-1 { background: rgba(3,105,161,0.08); }
+    .scenario-color-2 { background: rgba(217,119,6,0.08); }
+    .scenario-color-3 { background: rgba(220,38,38,0.08); }
   </style>
 </head>
 <body x-data="app()" x-init="init()">
 
+<!-- ── Auth Gate ────────────────────────────────────────────────────────────── -->
+<div x-show="!currentUser" x-cloak class="min-h-screen flex items-center justify-center" style="background:var(--bg)">
+  <div class="card" style="width:380px;max-width:95vw">
+    <div class="flex items-center gap-3 mb-6">
+      <div class="w-9 h-9 rounded-xl flex items-center justify-center" style="background:var(--accent)">
+        <i class="fas fa-leaf text-sm" style="color:#fff"></i>
+      </div>
+      <div>
+        <div class="font-bold text-sm">EventCarbon Co-Pilot</div>
+        <div class="text-xs text-muted">Sign in to manage your events</div>
+      </div>
+    </div>
+
+    <div class="flex gap-2 mb-5">
+      <button class="flex-1 py-2 rounded-lg text-sm font-medium transition-colors"
+        :style="authView==='login' ? 'background:var(--accent);color:#fff' : 'background:var(--surface-2);color:var(--muted)'"
+        @click="authView='login'">Sign In</button>
+      <button class="flex-1 py-2 rounded-lg text-sm font-medium transition-colors"
+        :style="authView==='register' ? 'background:var(--accent);color:#fff' : 'background:var(--surface-2);color:var(--muted)'"
+        @click="authView='register'">Register</button>
+    </div>
+
+    <div class="mb-3">
+      <label class="text-xs text-muted block mb-1">Email</label>
+      <input type="email" class="input-field" x-model="authEmail" placeholder="you@example.com"
+        @keydown.enter="authView==='login' ? login() : register()">
+    </div>
+    <div class="mb-5">
+      <label class="text-xs text-muted block mb-1">Password</label>
+      <input type="password" class="input-field" x-model="authPassword" placeholder="••••••••"
+        @keydown.enter="authView==='login' ? login() : register()">
+    </div>
+
+    <div x-show="authError" class="text-sm mb-4" style="color:var(--red)" x-text="authError"></div>
+
+    <button class="btn-primary w-full" :disabled="authLoading"
+      @click="authView==='login' ? login() : register()">
+      <i class="fas fa-sync-alt mr-2 animate-spin" x-show="authLoading"></i>
+      <span x-text="authView==='login' ? 'Sign In' : 'Create Account'"></span>
+    </button>
+  </div>
+</div>
+
+<!-- ── App (shown when logged in) ───────────────────────────────────────────── -->
+<div x-show="currentUser" x-cloak>
+
 <!-- ── Sidebar ──────────────────────────────────────────────────────────────── -->
 <aside class="sidebar">
-  <div class="p-5 border-b border-green-700" style="border-color: var(--green-700)">
+  <div class="p-5 border-b" style="border-color:var(--border)">
     <div class="flex items-center gap-3">
       <div class="w-9 h-9 rounded-xl flex items-center justify-center" style="background:var(--accent)">
-        <i class="fas fa-leaf text-sm" style="color:var(--green-900)"></i>
+        <i class="fas fa-leaf text-sm" style="color:#fff"></i>
       </div>
       <div>
         <div class="font-bold text-sm">EventCarbon</div>
@@ -260,8 +314,14 @@
     </template>
   </nav>
 
-  <!-- Model badge -->
-  <div class="p-4 border-t" style="border-color:var(--green-700)">
+  <!-- User + model badge -->
+  <div class="p-4 border-t" style="border-color:var(--border)">
+    <div class="flex items-center justify-between mb-2">
+      <div class="text-xs text-muted truncate flex-1 mr-2" x-text="currentUser?.email"></div>
+      <button class="text-xs text-muted hover:text-accent transition-colors flex-shrink-0" @click="logout()" title="Sign out">
+        <i class="fas fa-sign-out-alt"></i>
+      </button>
+    </div>
     <div class="flex items-center gap-2 text-xs text-muted">
       <div class="w-2 h-2 rounded-full bg-green-400 animate-pulse"></div>
       <span>GPT-4o mini · TinyFish agents</span>
@@ -329,7 +389,7 @@
           <canvas id="categoryChart"></canvas>
         </div>
         <div x-show="!selectedScenario" class="flex flex-col items-center justify-center py-10 text-muted">
-          <i class="fas fa-chart-pie text-4xl mb-3" style="color:var(--green-600)"></i>
+          <i class="fas fa-chart-pie text-4xl mb-3" style="color:var(--accent)"></i>
           <p class="text-sm">Create a scenario to see breakdown</p>
           <button class="btn-primary mt-3 text-sm" @click="activeTab='scenarios'">
             <i class="fas fa-plus mr-1"></i>New Scenario
@@ -346,7 +406,7 @@
           <canvas id="comparisonChart"></canvas>
         </div>
         <div x-show="scenarios.length === 0" class="flex flex-col items-center justify-center py-10 text-muted">
-          <i class="fas fa-chart-bar text-4xl mb-3" style="color:var(--green-600)"></i>
+          <i class="fas fa-chart-bar text-4xl mb-3" style="color:var(--accent)"></i>
           <p class="text-sm">Add 2+ scenarios to compare</p>
         </div>
       </div>
@@ -366,7 +426,7 @@
       <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
         <template x-for="action in quickActions" :key="action.title">
           <div class="p-4 rounded-xl cursor-pointer transition-all hover:scale-105"
-            style="background:var(--green-700); border:1px solid var(--green-600)"
+            style="background:var(--surface-2);border:1px solid var(--border)"
             @click="action.handler()">
             <div class="text-2xl mb-2" x-text="action.icon"></div>
             <div class="font-medium text-sm" x-text="action.title"></div>
@@ -385,7 +445,7 @@
         <!-- Welcome message -->
         <div x-show="chatMessages.length === 0" class="flex flex-col items-center justify-center h-full text-center py-12">
           <div class="w-16 h-16 rounded-2xl flex items-center justify-center mb-4" style="background:var(--accent)">
-            <i class="fas fa-robot text-2xl" style="color:var(--green-900)"></i>
+            <i class="fas fa-robot text-2xl" style="color:#fff"></i>
           </div>
           <h3 class="text-lg font-semibold mb-2">EventCarbon Co-Pilot</h3>
           <p class="text-muted text-sm max-w-sm">Describe your event and I'll calculate its carbon footprint, suggest reductions, and calculate financial savings & compliance status.</p>
@@ -401,7 +461,7 @@
           <div class="mb-4 flex" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
             <div x-show="msg.role === 'assistant'" class="w-7 h-7 rounded-full flex items-center justify-center mr-2 flex-shrink-0 mt-1"
               style="background:var(--accent)">
-              <i class="fas fa-robot text-xs" style="color:var(--green-900)"></i>
+              <i class="fas fa-robot text-xs" style="color:#fff"></i>
             </div>
             <div>
               <div :class="msg.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-bot'"
@@ -421,7 +481,7 @@
         <!-- Typing indicator -->
         <div x-show="chatLoading" class="flex items-start mb-4">
           <div class="w-7 h-7 rounded-full flex items-center justify-center mr-2" style="background:var(--accent)">
-            <i class="fas fa-robot text-xs" style="color:var(--green-900)"></i>
+            <i class="fas fa-robot text-xs" style="color:#fff"></i>
           </div>
           <div class="chat-bubble-bot flex items-center gap-1 py-3">
             <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
@@ -433,7 +493,7 @@
       <div x-show="chatSuggestions.length > 0" class="flex gap-2 mb-3 flex-wrap">
         <template x-for="s in chatSuggestions" :key="s">
           <button class="text-xs px-3 py-1.5 rounded-full transition-all hover:scale-105"
-            style="background:var(--green-700);border:1px solid var(--green-600)"
+            style="background:var(--surface-2);border:1px solid var(--border)"
             @click="sendSuggestion(s)" x-text="s"></button>
         </template>
       </div>
@@ -587,7 +647,7 @@
       <!-- Scenario results list -->
       <div class="lg:col-span-3 space-y-3">
         <div x-show="scenarios.length === 0" class="card flex flex-col items-center py-12 text-muted">
-          <i class="fas fa-wind text-4xl mb-3" style="color:var(--green-600)"></i>
+          <i class="fas fa-wind text-4xl mb-3" style="color:var(--accent)"></i>
           <p class="text-sm">No scenarios yet — calculate your first one</p>
         </div>
         <template x-for="(s, idx) in scenarios" :key="s.scenario_id">
@@ -650,7 +710,7 @@
       </h3>
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
         <template x-for="sug in suggestions" :key="sug.action">
-          <div class="p-4 rounded-xl" style="background:var(--green-700);border:1px solid var(--green-600)">
+          <div class="p-4 rounded-xl" style="background:var(--surface-2);border:1px solid var(--border)">
             <div class="flex items-center justify-between mb-2">
               <span class="badge" :class="{
                 'badge-green': sug.difficulty==='easy',
@@ -733,7 +793,7 @@
       <!-- Results -->
       <div class="lg:col-span-2 space-y-4" x-show="finResult">
         <!-- Total savings banner -->
-        <div class="card glow-gold" style="background:linear-gradient(135deg,var(--green-800),#2a2200)">
+        <div class="card glow-gold" style="background:linear-gradient(135deg,#f0fdf4,var(--gold-bg))">
           <div class="flex items-center justify-between">
             <div>
               <div class="text-xs text-muted uppercase tracking-widest">Total Financial Benefit</div>
@@ -755,7 +815,7 @@
             <i class="fas fa-landmark text-blue"></i>Carbon Tax Savings
           </h4>
           <template x-for="tax in (finResult?.carbon_tax_savings || [])" :key="tax.scheme">
-            <div class="flex items-center justify-between py-2 border-b last:border-0" style="border-color:var(--green-700)">
+            <div class="flex items-center justify-between py-2 border-b last:border-0" style="border-color:var(--border)">
               <div>
                 <div class="text-sm font-medium" x-text="tax.scheme"></div>
                 <div class="text-xs text-muted" x-text="tax.description"></div>
@@ -794,7 +854,7 @@
             <i class="fas fa-award text-gold"></i>Available Green Incentives
           </h4>
           <template x-for="inc in (finResult?.available_incentives || [])" :key="inc.name">
-            <div class="p-3 rounded-lg mb-2" style="background:var(--green-700)">
+            <div class="p-3 rounded-lg mb-2" style="background:var(--surface-2);border:1px solid var(--border)">
               <div class="flex items-start justify-between gap-2">
                 <div>
                   <div class="text-sm font-medium" x-text="inc.name"></div>
@@ -809,7 +869,7 @@
 
       <!-- Empty state -->
       <div class="lg:col-span-2 card flex flex-col items-center justify-center py-16" x-show="!finResult">
-        <i class="fas fa-coins text-5xl mb-4" style="color:var(--green-600)"></i>
+        <i class="fas fa-coins text-5xl mb-4" style="color:var(--accent)"></i>
         <p class="text-muted text-sm">Configure the calculator and click Calculate Savings</p>
       </div>
     </div>
@@ -871,7 +931,7 @@
           <div class="relative flex-shrink-0" style="width:100px;height:100px">
             <svg viewBox="0 0 36 36" style="width:100px;height:100px">
               <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                fill="none" stroke="var(--green-700)" stroke-width="3" />
+                fill="none" stroke="var(--border)" stroke-width="3" />
               <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
                 fill="none"
                 :stroke="(complianceReport?.overall_score_pct||0) >= 70 ? 'var(--accent)' : (complianceReport?.overall_score_pct||0) >= 40 ? 'var(--gold)' : 'var(--red)'"
@@ -941,7 +1001,7 @@
       </div>
 
       <div class="lg:col-span-2 card flex flex-col items-center justify-center py-16" x-show="!complianceReport">
-        <i class="fas fa-shield-halved text-5xl mb-4" style="color:var(--green-600)"></i>
+        <i class="fas fa-shield-halved text-5xl mb-4" style="color:var(--accent)"></i>
         <p class="text-muted text-sm">Configure inputs and run compliance check</p>
       </div>
     </div>
@@ -949,10 +1009,12 @@
 
 </main>
 
+</div><!-- end app wrapper -->
+
 <!-- ── Toast notification ───────────────────────────────────────────────────── -->
 <div x-show="toast.show" x-transition
   class="fixed bottom-6 right-6 p-4 rounded-xl shadow-xl z-50 flex items-center gap-3"
-  style="background:var(--green-700);border:1px solid var(--green-600);min-width:280px"
+  style="background:var(--surface);border:1px solid var(--border);min-width:280px;box-shadow:0 4px 20px rgba(0,0,0,0.12)"
   @click="toast.show = false">
   <i :class="toast.icon" class="text-lg flex-shrink-0"></i>
   <span class="text-sm" x-text="toast.message"></span>

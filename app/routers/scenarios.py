@@ -5,9 +5,10 @@ from typing import List, Optional
 from datetime import datetime
 import uuid
 
-from app.models.database import get_db, ScenarioDB
+from app.models.database import get_db, ScenarioDB, UserDB
 from app.models.schemas import EventScenarioInput, ScenarioResult
 from app.services.emissions_engine import calculate_scenario, get_reduction_suggestions
+from app.routers.auth import get_current_user
 
 router = APIRouter()
 
@@ -35,7 +36,11 @@ def _db_to_result(s: ScenarioDB) -> dict:
 
 
 @router.post("", response_model=dict)
-async def create_scenario(payload: EventScenarioInput, db: AsyncSession = Depends(get_db)):
+async def create_scenario(
+    payload: EventScenarioInput,
+    db: AsyncSession = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user),
+):
     """Calculate emissions for a scenario and save to DB."""
     result: ScenarioResult = calculate_scenario(payload)
     scenario_id = str(uuid.uuid4())[:8]
@@ -58,6 +63,7 @@ async def create_scenario(payload: EventScenarioInput, db: AsyncSession = Depend
         assumptions=result.assumptions,
         input_payload=payload.model_dump(),
         created_at=datetime.utcnow(),
+        user_id=current_user.id,
     )
     db.add(db_obj)
     await db.commit()
@@ -66,17 +72,28 @@ async def create_scenario(payload: EventScenarioInput, db: AsyncSession = Depend
 
 
 @router.get("", response_model=List[dict])
-async def list_scenarios(db: AsyncSession = Depends(get_db)):
-    """List all saved scenarios."""
+async def list_scenarios(
+    db: AsyncSession = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user),
+):
+    """List all saved scenarios for the current user."""
     result = await db.execute(
-        select(ScenarioDB).order_by(ScenarioDB.created_at.desc())
+        select(ScenarioDB)
+        .where(ScenarioDB.user_id == current_user.id)
+        .order_by(ScenarioDB.created_at.desc())
     )
     return [_db_to_result(s) for s in result.scalars().all()]
 
 
 @router.get("/{scenario_id}", response_model=dict)
-async def get_scenario(scenario_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(ScenarioDB).where(ScenarioDB.id == scenario_id))
+async def get_scenario(
+    scenario_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(ScenarioDB).where(ScenarioDB.id == scenario_id, ScenarioDB.user_id == current_user.id)
+    )
     s = result.scalar_one_or_none()
     if not s:
         raise HTTPException(status_code=404, detail="Scenario not found")
@@ -84,16 +101,29 @@ async def get_scenario(scenario_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.delete("/{scenario_id}")
-async def delete_scenario(scenario_id: str, db: AsyncSession = Depends(get_db)):
-    await db.execute(delete(ScenarioDB).where(ScenarioDB.id == scenario_id))
+async def delete_scenario(
+    scenario_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user),
+):
+    await db.execute(
+        delete(ScenarioDB).where(ScenarioDB.id == scenario_id, ScenarioDB.user_id == current_user.id)
+    )
     await db.commit()
     return {"deleted": scenario_id}
 
 
 @router.post("/{scenario_id}/clone")
-async def clone_scenario(scenario_id: str, name: str, db: AsyncSession = Depends(get_db)):
+async def clone_scenario(
+    scenario_id: str,
+    name: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user),
+):
     """Clone a scenario for what-if comparisons."""
-    result = await db.execute(select(ScenarioDB).where(ScenarioDB.id == scenario_id))
+    result = await db.execute(
+        select(ScenarioDB).where(ScenarioDB.id == scenario_id, ScenarioDB.user_id == current_user.id)
+    )
     orig = result.scalar_one_or_none()
     if not orig:
         raise HTTPException(status_code=404, detail="Scenario not found")
@@ -117,6 +147,7 @@ async def clone_scenario(scenario_id: str, name: str, db: AsyncSession = Depends
         assumptions={**orig.assumptions, "cloned_from": scenario_id},
         input_payload=orig.input_payload,
         created_at=datetime.utcnow(),
+        user_id=current_user.id,
     )
     db.add(clone)
     await db.commit()
@@ -128,9 +159,12 @@ async def reduction_suggestions(
     scenario_id: str,
     target_pct: float = 30.0,
     db: AsyncSession = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user),
 ):
     """Get ranked reduction suggestions for a scenario."""
-    result = await db.execute(select(ScenarioDB).where(ScenarioDB.id == scenario_id))
+    result = await db.execute(
+        select(ScenarioDB).where(ScenarioDB.id == scenario_id, ScenarioDB.user_id == current_user.id)
+    )
     s = result.scalar_one_or_none()
     if not s:
         raise HTTPException(status_code=404, detail="Scenario not found")
@@ -158,16 +192,23 @@ async def reduction_suggestions(
 
 
 @router.get("/compare/all")
-async def compare_scenarios(ids: Optional[str] = None, db: AsyncSession = Depends(get_db)):
+async def compare_scenarios(
+    ids: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user),
+):
     """Compare multiple scenarios. Pass ?ids=id1,id2,id3 or leave empty for all."""
     if ids:
         id_list = ids.split(",")
         result = await db.execute(
-            select(ScenarioDB).where(ScenarioDB.id.in_(id_list))
+            select(ScenarioDB).where(ScenarioDB.id.in_(id_list), ScenarioDB.user_id == current_user.id)
         )
     else:
         result = await db.execute(
-            select(ScenarioDB).order_by(ScenarioDB.created_at.desc()).limit(10)
+            select(ScenarioDB)
+            .where(ScenarioDB.user_id == current_user.id)
+            .order_by(ScenarioDB.created_at.desc())
+            .limit(10)
         )
     scenarios = result.scalars().all()
     return [_db_to_result(s) for s in scenarios]

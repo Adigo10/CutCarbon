@@ -16,6 +16,15 @@ function app() {
     ],
     quickActions: [],
 
+    // ── Auth ─────────────────────────────────────────────────────────────────
+    authView: 'login',
+    authEmail: '',
+    authPassword: '',
+    authError: '',
+    authLoading: false,
+    currentUser: null,
+    token: localStorage.getItem('cc_token') || null,
+
     // ── Shared state ─────────────────────────────────────────────────────────
     scenarios: [],
     selectedScenario: null,
@@ -32,11 +41,11 @@ function app() {
     pathwayChart: null,
 
     emissionCategories: [
-      { key: 'travel_tco2e',           label: '✈ Travel',        color: '#4fc3f7' },
-      { key: 'venue_energy_tco2e',     label: '⚡ Venue Energy',  color: '#00d68f' },
-      { key: 'accommodation_tco2e',    label: '🏨 Accommodation', color: '#ffd600' },
-      { key: 'catering_tco2e',         label: '🍽 Catering',      color: '#ff9800' },
-      { key: 'materials_waste_tco2e',  label: '♻ Waste',          color: '#e040fb' },
+      { key: 'travel_tco2e',           label: '✈ Travel',        color: '#0369a1' },
+      { key: 'venue_energy_tco2e',     label: '⚡ Venue Energy',  color: '#1a9e6e' },
+      { key: 'accommodation_tco2e',    label: '🏨 Accommodation', color: '#d97706' },
+      { key: 'catering_tco2e',         label: '🍽 Catering',      color: '#ea580c' },
+      { key: 'materials_waste_tco2e',  label: '♻ Waste',          color: '#7c3aed' },
     ],
 
     // ── Chat ─────────────────────────────────────────────────────────────────
@@ -107,7 +116,94 @@ function app() {
         { icon: '📊', title: 'Build a Scenario', desc: 'Fill in the structured form', handler: () => this.activeTab = 'scenarios' },
         { icon: '💰', title: 'Calculate Savings', desc: 'See carbon tax & incentive benefits', handler: () => this.activeTab = 'financial' },
       ];
-      await this.loadScenarios();
+      if (this.token) {
+        try {
+          const res = await fetch(`${API}/api/auth/me`, {
+            headers: { 'Authorization': `Bearer ${this.token}` },
+          });
+          if (res.ok) {
+            this.currentUser = await res.json();
+            await this.loadScenarios();
+          } else {
+            this.token = null;
+            localStorage.removeItem('cc_token');
+          }
+        } catch (e) {
+          this.token = null;
+          localStorage.removeItem('cc_token');
+        }
+      }
+    },
+
+    // ── Auth ─────────────────────────────────────────────────────────────────
+    authHeaders() {
+      return this.token
+        ? { 'Content-Type': 'application/json', 'Authorization': `Bearer ${this.token}` }
+        : { 'Content-Type': 'application/json' };
+    },
+
+    async login() {
+      this.authLoading = true;
+      this.authError = '';
+      try {
+        const res = await fetch(`${API}/api/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: this.authEmail, password: this.authPassword }),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          this.authError = err.detail || 'Login failed';
+          return;
+        }
+        const data = await res.json();
+        this.token = data.access_token;
+        localStorage.setItem('cc_token', this.token);
+        const meRes = await fetch(`${API}/api/auth/me`, {
+          headers: { 'Authorization': `Bearer ${this.token}` },
+        });
+        this.currentUser = await meRes.json();
+        this.authEmail = '';
+        this.authPassword = '';
+        await this.loadScenarios();
+      } catch (e) {
+        this.authError = 'Network error. Please try again.';
+      } finally {
+        this.authLoading = false;
+      }
+    },
+
+    async register() {
+      this.authLoading = true;
+      this.authError = '';
+      try {
+        const res = await fetch(`${API}/api/auth/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: this.authEmail, password: this.authPassword }),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          this.authError = err.detail || 'Registration failed';
+          return;
+        }
+        await this.login();
+      } catch (e) {
+        this.authError = 'Network error. Please try again.';
+      } finally {
+        this.authLoading = false;
+      }
+    },
+
+    logout() {
+      this.token = null;
+      this.currentUser = null;
+      localStorage.removeItem('cc_token');
+      this.scenarios = [];
+      this.selectedScenario = null;
+      this.bestScenario = null;
+      this.potentialSavings = null;
+      this.complianceScore = null;
     },
 
     // ── Toast ─────────────────────────────────────────────────────────────────
@@ -119,7 +215,9 @@ function app() {
     // ── Scenarios ─────────────────────────────────────────────────────────────
     async loadScenarios() {
       try {
-        const res = await fetch(`${API}/api/scenarios`);
+        const res = await fetch(`${API}/api/scenarios`, {
+          headers: { 'Authorization': `Bearer ${this.token}` },
+        });
         this.scenarios = await res.json();
         if (this.scenarios.length > 0) {
           this.bestScenario = [...this.scenarios].sort(
@@ -141,7 +239,7 @@ function app() {
         const payload = this._buildScenarioPayload();
         const res = await fetch(`${API}/api/scenarios`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: this.authHeaders(),
           body: JSON.stringify(payload),
         });
         if (!res.ok) throw new Error(await res.text());
@@ -207,6 +305,7 @@ function app() {
       try {
         const res = await fetch(`${API}/api/scenarios/${scenario.scenario_id}/clone?name=${encodeURIComponent(name)}`, {
           method: 'POST',
+          headers: { 'Authorization': `Bearer ${this.token}` },
         });
         const cloned = await res.json();
         this.scenarios.unshift(cloned);
@@ -219,7 +318,10 @@ function app() {
 
     async deleteScenario(id) {
       if (!confirm('Delete this scenario?')) return;
-      await fetch(`${API}/api/scenarios/${id}`, { method: 'DELETE' });
+      await fetch(`${API}/api/scenarios/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${this.token}` },
+      });
       this.scenarios = this.scenarios.filter(s => s.scenario_id !== id);
       if (this.selectedScenario?.scenario_id === id) this.selectedScenario = this.scenarios[0] || null;
       this.suggestions = [];
@@ -240,7 +342,9 @@ function app() {
 
     async getSuggestions(scenario) {
       try {
-        const res = await fetch(`${API}/api/scenarios/${scenario.scenario_id}/suggestions?target_pct=30`);
+        const res = await fetch(`${API}/api/scenarios/${scenario.scenario_id}/suggestions?target_pct=30`, {
+          headers: { 'Authorization': `Bearer ${this.token}` },
+        });
         this.suggestions = await res.json();
         this.showToast('Reduction suggestions loaded');
       } catch (e) {
@@ -286,7 +390,7 @@ function app() {
           plugins: {
             legend: {
               position: 'right',
-              labels: { color: '#90a4ae', font: { size: 11 }, boxWidth: 12 },
+              labels: { color: '#6b7280', font: { size: 11 }, boxWidth: 12 },
             },
             tooltip: {
               callbacks: {
@@ -321,15 +425,15 @@ function app() {
           responsive: true,
           maintainAspectRatio: false,
           scales: {
-            x: { stacked: true, ticks: { color: '#90a4ae', font: { size: 10 } }, grid: { color: '#1a3a2a' } },
+            x: { stacked: true, ticks: { color: '#6b7280', font: { size: 10 } }, grid: { color: '#e5e7eb' } },
             y: {
               stacked: true,
-              ticks: { color: '#90a4ae', font: { size: 10 }, callback: v => v.toFixed(0) + ' kg' },
-              grid: { color: '#1a3a2a' },
+              ticks: { color: '#6b7280', font: { size: 10 }, callback: v => v.toFixed(0) + ' kg' },
+              grid: { color: '#e5e7eb' },
             },
           },
           plugins: {
-            legend: { labels: { color: '#90a4ae', font: { size: 10 }, boxWidth: 10 } },
+            legend: { labels: { color: '#6b7280', font: { size: 10 }, boxWidth: 10 } },
           },
         },
       });
@@ -357,11 +461,11 @@ function app() {
             {
               label: 'Your pathway',
               data: pathway,
-              borderColor: '#00d68f',
-              backgroundColor: 'rgba(0,214,143,0.08)',
+              borderColor: '#1a9e6e',
+              backgroundColor: 'rgba(26,158,110,0.08)',
               fill: true,
               tension: 0.4,
-              pointBackgroundColor: '#00d68f',
+              pointBackgroundColor: '#1a9e6e',
             },
             {
               label: 'SBTi 1.5°C budget',
@@ -378,14 +482,14 @@ function app() {
           responsive: true,
           maintainAspectRatio: false,
           scales: {
-            x: { ticks: { color: '#90a4ae' }, grid: { color: '#1a3a2a' } },
+            x: { ticks: { color: '#6b7280' }, grid: { color: '#e5e7eb' } },
             y: {
-              ticks: { color: '#90a4ae', callback: v => v + ' t' },
-              grid: { color: '#1a3a2a' },
+              ticks: { color: '#6b7280', callback: v => v + ' t' },
+              grid: { color: '#e5e7eb' },
             },
           },
           plugins: {
-            legend: { labels: { color: '#90a4ae', font: { size: 11 } } },
+            legend: { labels: { color: '#6b7280', font: { size: 11 } } },
           },
         },
       });
@@ -404,7 +508,7 @@ function app() {
         const messages = this.chatMessages.map(m => ({ role: m.role, content: m.content }));
         const res = await fetch(`${API}/api/chat`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: this.authHeaders(),
           body: JSON.stringify({
             messages,
             event_context: { ...this.chatContext, session_id: this.sessionId },
@@ -449,7 +553,7 @@ function app() {
       // Basic markdown: **bold**, `code`, newlines
       return text
         .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-        .replace(/`([^`]+)`/g, '<code style="background:var(--green-900);padding:1px 5px;border-radius:4px;font-family:monospace">$1</code>')
+        .replace(/`([^`]+)`/g, '<code style="background:var(--surface-2);padding:1px 5px;border-radius:4px;font-family:monospace;color:var(--accent)">$1</code>')
         .replace(/\n/g, '<br>');
     },
 

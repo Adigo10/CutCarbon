@@ -12,5 +12,8 @@ python-multipart==0.0.12
 sqlalchemy==2.0.36
 aiosqlite==0.20.0
 alembic==1.14.0
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
 # For PostgreSQL: swap aiosqlite for asyncpg and update DATABASE_URL in .env
 # asyncpg==0.30.0

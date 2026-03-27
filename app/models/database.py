@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import AsyncGenerator
 
 from sqlalchemy import (
-    Column, String, Integer, Float, Text, DateTime, Boolean, JSON
+    Column, String, Integer, Float, Text, DateTime, Boolean, JSON, text
 )
 from sqlalchemy.ext.asyncio import (
     AsyncSession, create_async_engine, async_sessionmaker
@@ -30,6 +30,16 @@ class Base(DeclarativeBase):
 
 
 # ── ORM Models ─────────────────────────────────────────────────────────────────
+
+class UserDB(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    email = Column(String, unique=True, nullable=False, index=True)
+    hashed_password = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    is_active = Column(Boolean, default=True)
+
 
 class EventDB(Base):
     __tablename__ = "events"
@@ -65,6 +75,7 @@ class ScenarioDB(Base):
     assumptions = Column(JSON, default={})
     input_payload = Column(JSON, default={})
     created_at = Column(DateTime, default=datetime.utcnow)
+    user_id = Column(Integer, nullable=True)
 
 
 class ChatMessageDB(Base):
@@ -76,6 +87,7 @@ class ChatMessageDB(Base):
     content = Column(Text)
     extracted_data = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    user_id = Column(Integer, nullable=True)
 
 
 class FinancialReportDB(Base):
@@ -117,3 +129,12 @@ async def init_db():
     """Create all tables on startup."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Add user_id to existing tables — safe to run repeatedly (SQLite ignores duplicate columns)
+        for sql in [
+            "ALTER TABLE scenarios ADD COLUMN user_id INTEGER REFERENCES users(id)",
+            "ALTER TABLE chat_messages ADD COLUMN user_id INTEGER REFERENCES users(id)",
+        ]:
+            try:
+                await conn.execute(text(sql))
+            except Exception:
+                pass  # Column already exists

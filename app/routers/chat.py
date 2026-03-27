@@ -4,15 +4,20 @@ from sqlalchemy import select
 from datetime import datetime
 import uuid
 
-from app.models.database import get_db, ChatMessageDB, ScenarioDB
+from app.models.database import get_db, ChatMessageDB, ScenarioDB, UserDB
 from app.models.schemas import ChatRequest, ChatResponse
 from app.services import openai_service
+from app.routers.auth import get_current_user
 
 router = APIRouter()
 
 
 @router.post("", response_model=ChatResponse)
-async def chat(req: ChatRequest, db: AsyncSession = Depends(get_db)):
+async def chat(
+    req: ChatRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user),
+):
     """Send a chat message to the AI co-pilot and receive a reply with optional data extraction."""
     if not req.messages:
         raise HTTPException(status_code=400, detail="No messages provided")
@@ -21,7 +26,7 @@ async def chat(req: ChatRequest, db: AsyncSession = Depends(get_db)):
     event_context = req.event_context or {}
     if req.scenario_id:
         result = await db.execute(
-            select(ScenarioDB).where(ScenarioDB.id == req.scenario_id)
+            select(ScenarioDB).where(ScenarioDB.id == req.scenario_id, ScenarioDB.user_id == current_user.id)
         )
         scenario = result.scalar_one_or_none()
         if scenario:
@@ -43,6 +48,7 @@ async def chat(req: ChatRequest, db: AsyncSession = Depends(get_db)):
         role=last_user.role,
         content=last_user.content,
         created_at=datetime.utcnow(),
+        user_id=current_user.id,
     ))
     db.add(ChatMessageDB(
         session_id=session_id,
@@ -50,6 +56,7 @@ async def chat(req: ChatRequest, db: AsyncSession = Depends(get_db)):
         content=result["reply"],
         extracted_data=result.get("extracted_data"),
         created_at=datetime.utcnow(),
+        user_id=current_user.id,
     ))
     await db.commit()
 
@@ -61,11 +68,15 @@ async def chat(req: ChatRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/history/{session_id}")
-async def get_history(session_id: str, db: AsyncSession = Depends(get_db)):
+async def get_history(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user),
+):
     """Retrieve chat history for a session."""
     result = await db.execute(
         select(ChatMessageDB)
-        .where(ChatMessageDB.session_id == session_id)
+        .where(ChatMessageDB.session_id == session_id, ChatMessageDB.user_id == current_user.id)
         .order_by(ChatMessageDB.created_at)
     )
     messages = result.scalars().all()
