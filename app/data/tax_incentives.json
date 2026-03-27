@@ -1,0 +1,227 @@
+{
+  "carbon_tax_rates": {
+    "singapore": {
+      "current_rate_sgd": 25,
+      "2026_rate_sgd": 45,
+      "2030_rate_sgd": 65,
+      "currency": "SGD",
+      "usd_exchange": 0.74,
+      "scope": "Facilities emitting ≥ 25,000 tCO2e/year; event organizers indirectly affected via supply chain",
+      "scheme": "Carbon Pricing Act (CPA)",
+      "source": "NEA Singapore 2024"
+    },
+    "european_union": {
+      "ets_price_eur": 65,
+      "currency": "EUR",
+      "usd_exchange": 1.08,
+      "scope": "EU ETS covers aviation (intra-EU), energy, heavy industry",
+      "notes": "CBAM from 2026 extends carbon costs to imports",
+      "source": "EU ETS Registry 2024"
+    },
+    "united_kingdom": {
+      "ets_price_gbp": 50,
+      "currency": "GBP",
+      "usd_exchange": 1.27,
+      "scope": "UK ETS covers aviation, power, industry",
+      "source": "UK ETS Authority 2024"
+    },
+    "australia": {
+      "accu_price_aud": 35,
+      "currency": "AUD",
+      "usd_exchange": 0.65,
+      "scope": "Australian Carbon Credit Units (voluntary/compliance)",
+      "source": "Clean Energy Regulator 2024"
+    },
+    "usa_california": {
+      "cap_trade_price_usd": 30,
+      "currency": "USD",
+      "usd_exchange": 1.0,
+      "scope": "California Cap-and-Trade (large emitters)",
+      "source": "CARB 2024"
+    }
+  },
+  "green_incentives": {
+    "singapore": [
+      {
+        "name": "Energy Efficiency Fund (EEF)",
+        "type": "grant",
+        "benefit": "Up to 50% co-funding for energy efficiency projects",
+        "max_grant_sgd": 1000000,
+        "eligibility": "Singapore-registered companies implementing energy efficiency measures",
+        "applicable_actions": ["renewable_energy", "energy_efficiency", "smart_controls"],
+        "source": "EDB Singapore 2024"
+      },
+      {
+        "name": "Enterprise Sustainability Programme (ESP)",
+        "type": "grant",
+        "benefit": "Up to 70% grant for sustainability projects",
+        "max_grant_sgd": 300000,
+        "eligibility": "SMEs in Singapore",
+        "applicable_actions": ["sustainability_reporting", "carbon_audit", "green_certification"],
+        "source": "Enterprise Singapore 2024"
+      },
+      {
+        "name": "BCA Green Mark Incentive Scheme",
+        "type": "tax_deduction",
+        "benefit": "Enhanced capital allowances for green building features",
+        "applicable_actions": ["green_venue", "energy_efficiency"],
+        "source": "BCA Singapore 2024"
+      },
+      {
+        "name": "Investment Allowance for Energy Efficient Equipment",
+        "type": "tax_allowance",
+        "benefit": "100% capital allowance in year of purchase for qualifying equipment",
+        "applicable_actions": ["renewable_energy", "energy_efficiency"],
+        "source": "IRAS Singapore 2024"
+      }
+    ],
+    "european_union": [
+      {
+        "name": "EU Green Deal / Cohesion Funds",
+        "type": "grant",
+        "benefit": "Grants for sustainable event infrastructure",
+        "applicable_actions": ["renewable_energy", "green_venue", "sustainable_transport"],
+        "source": "EC 2024"
+      },
+      {
+        "name": "Corporate Sustainability Reporting Directive (CSRD)",
+        "type": "compliance_requirement",
+        "benefit": "Penalty avoidance: €10M or 5% of global turnover",
+        "applicable_actions": ["ghg_reporting", "sustainability_audit"],
+        "source": "EU CSRD 2024"
+      }
+    ],
+    "united_kingdom": [
+      {
+        "name": "HMRC Enhanced Capital Allowances",
+        "type": "tax_allowance",
+        "benefit": "100% first-year allowance for energy-saving equipment",
+        "applicable_actions": ["energy_efficiency", "renewable_energy"],
+        "source": "HMRC 2024"
+      },
+      {
+        "name": "Climate Change Levy (CCL) Reduction",
+        "type": "tax_reduction",
+        "benefit": "80% CCL discount with Climate Change Agreement",
+        "applicable_actions": ["energy_efficiency"],
+        "source": "HMRC 2024"
+      }
+    ],
+    "australia": [
+      {
+        "name": "Australian Renewable Energy Agency (ARENA)",
+        "type": "grant",
+        "benefit": "Grants for renewable energy deployment",
+        "applicable_actions": ["renewable_energy"],
+        "source": "ARENA 2024"
+      }
+    ],
+    "usa": [
+      {
+        "name": "IRA Investment Tax Credit (ITC)",
+        "type": "tax_credit",
+        "benefit": "30% tax credit on solar/renewable installations",
+        "applicable_actions": ["renewable_energy"],
+        "source": "IRS IRA 2024"
+      },
+      {
+        "name": "IRA Production Tax Credit (PTC)",
+        "type": "tax_credit",
+        "benefit": "$0.026/kWh for renewable energy generated",
+        "applicable_actions": ["renewable_energy"],
+        "source": "IRS IRA 2024"
+      }
+    ]
+  },
+  "reduction_action_savings": {
+    "switch_to_vegetarian_meal": {
+      "co2e_saved_per_meal_kg": 2.1,
+      "description": "Replace mixed/meat meal with vegetarian",
+      "typical_cost_delta_usd": -2.5,
+      "notes": "Negative cost delta = cost saving on food"
+    },
+    "switch_to_vegan_meal": {
+      "co2e_saved_per_meal_kg": 2.5,
+      "description": "Replace mixed/meat meal with vegan",
+      "typical_cost_delta_usd": -3.0
+    },
+    "rail_instead_of_short_haul": {
+      "co2e_saved_per_100km_kg": 21.4,
+      "description": "Replace short-haul flight with train (per passenger per 100km)",
+      "typical_cost_delta_usd": -15,
+      "notes": "Train often cheaper than flight when time comparable"
+    },
+    "virtual_attendance_option": {
+      "co2e_saved_per_remote_attendee_kg": 450,
+      "description": "Enable hybrid/virtual attendance to cut travel emissions",
+      "typical_cost_delta_usd": 30,
+      "notes": "Platform cost vs saved travel and accommodation"
+    },
+    "renewable_energy_venue": {
+      "co2e_saved_per_kwh_kg": 0.4,
+      "description": "Switch venue to renewable energy tariff",
+      "typical_cost_delta_usd_per_kwh": 0.02
+    },
+    "zero_waste_catering": {
+      "co2e_saved_per_attendee_day_kg": 0.8,
+      "description": "Eliminate single-use plastics, compost food waste",
+      "typical_cost_delta_usd": 1.5
+    },
+    "digital_materials": {
+      "co2e_saved_per_attendee_kg": 0.25,
+      "description": "Replace printed materials with digital (app/QR codes)",
+      "typical_cost_delta_usd": -2.0,
+      "notes": "Cost saving from print elimination"
+    },
+    "carbon_offset_purchase": {
+      "cost_per_tco2e_usd": 15,
+      "description": "High-quality carbon offsets (Gold Standard / VCS)",
+      "quality_note": "Ensure additionality, permanence, co-benefits"
+    }
+  },
+  "compliance_frameworks": {
+    "ghg_protocol": {
+      "name": "GHG Protocol Corporate Standard",
+      "scopes": {
+        "scope1": "Direct emissions (owned/controlled sources)",
+        "scope2": "Indirect from purchased energy",
+        "scope3": "All other indirect (travel, supply chain, waste)"
+      },
+      "event_relevance": "Scope 3 dominates events (typically 70-90% from travel)",
+      "reporting_format": "tCO2e by scope and category"
+    },
+    "iso_20121": {
+      "name": "ISO 20121 Sustainable Events Management",
+      "description": "International standard for sustainable event management systems",
+      "key_requirements": ["stakeholder identification", "supply chain management", "continuous improvement", "reporting"],
+      "certification_available": true
+    },
+    "iso_14064": {
+      "name": "ISO 14064 GHG Quantification & Reporting",
+      "description": "Standard for quantifying and reporting greenhouse gas inventories",
+      "parts": {
+        "14064-1": "Organizational GHG inventories",
+        "14064-2": "Project-level GHG reductions",
+        "14064-3": "Validation and verification"
+      }
+    },
+    "science_based_targets": {
+      "name": "Science Based Targets initiative (SBTi)",
+      "target": "1.5°C pathway: 50% absolute reduction by 2030 vs 2019 baseline",
+      "net_zero": "Net-zero by 2050 with 90% absolute reduction",
+      "relevance": "Corporate net-zero commitments"
+    },
+    "singapore_sustainability_reporting": {
+      "name": "SGX Sustainability Reporting",
+      "mandatory_from": "2025",
+      "required_disclosures": ["material ESG factors", "GHG emissions (Scope 1+2)", "climate risks"],
+      "scope3_from": "2026 (large companies)"
+    },
+    "eu_csrd": {
+      "name": "EU Corporate Sustainability Reporting Directive",
+      "mandatory_from": "2024 (large public-interest entities)",
+      "rollout": "2025 (large companies), 2026 (listed SMEs)",
+      "penalties_eur": 10000000
+    }
+  }
+}

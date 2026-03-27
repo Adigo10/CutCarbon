@@ -1,0 +1,4 @@
+.env
+.carbon_venv
+__pycachce__/
+*.pyc

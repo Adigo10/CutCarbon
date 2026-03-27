@@ -1,0 +1,963 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EventCarbon Co-Pilot</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.5/dist/cdn.min.js" defer></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+  <style>
+    :root {
+      --green-900: #0d1f17;
+      --green-800: #152a1e;
+      --green-700: #1a3a2a;
+      --green-600: #1e4d35;
+      --accent:    #00d68f;
+      --accent-dim:#00a86b;
+      --gold:      #ffd600;
+      --red:       #ff5252;
+      --blue:      #4fc3f7;
+      --text:      #e8f5e9;
+      --muted:     #90a4ae;
+    }
+    * { box-sizing: border-box; }
+    body {
+      background: var(--green-900);
+      color: var(--text);
+      font-family: 'Inter', system-ui, sans-serif;
+      margin: 0;
+      min-height: 100vh;
+    }
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: var(--green-800); }
+    ::-webkit-scrollbar-thumb { background: var(--green-600); border-radius: 3px; }
+
+    /* Sidebar */
+    .sidebar {
+      background: var(--green-800);
+      border-right: 1px solid var(--green-700);
+      min-height: 100vh;
+      position: fixed;
+      top: 0; left: 0;
+      width: 240px;
+      z-index: 40;
+      display: flex;
+      flex-direction: column;
+    }
+    .nav-item {
+      display: flex; align-items: center; gap: 12px;
+      padding: 11px 20px;
+      border-radius: 8px;
+      margin: 2px 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .nav-item:hover { background: var(--green-700); color: var(--text); }
+    .nav-item.active { background: var(--green-600); color: var(--accent); }
+    .nav-item i { width: 18px; text-align: center; }
+
+    /* Cards */
+    .card {
+      background: var(--green-800);
+      border: 1px solid var(--green-700);
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .kpi-card {
+      background: linear-gradient(135deg, var(--green-800), var(--green-700));
+      border: 1px solid var(--green-600);
+      border-radius: 12px;
+      padding: 20px;
+      position: relative;
+      overflow: hidden;
+    }
+    .kpi-card::before {
+      content: '';
+      position: absolute;
+      top: -30px; right: -30px;
+      width: 80px; height: 80px;
+      border-radius: 50%;
+      background: var(--accent);
+      opacity: 0.08;
+    }
+
+    /* Glow effect */
+    .glow { box-shadow: 0 0 20px rgba(0, 214, 143, 0.15); }
+    .glow-gold { box-shadow: 0 0 20px rgba(255, 214, 0, 0.15); }
+
+    /* Accent text */
+    .text-accent { color: var(--accent); }
+    .text-gold { color: var(--gold); }
+    .text-red { color: var(--red); }
+    .text-blue { color: var(--blue); }
+    .text-muted { color: var(--muted); }
+
+    /* Badge */
+    .badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .badge-green  { background: rgba(0,214,143,0.15); color: var(--accent); border: 1px solid rgba(0,214,143,0.3); }
+    .badge-yellow { background: rgba(255,214,0,0.15); color: var(--gold);   border: 1px solid rgba(255,214,0,0.3); }
+    .badge-red    { background: rgba(255,82,82,0.15);  color: var(--red);    border: 1px solid rgba(255,82,82,0.3); }
+    .badge-blue   { background: rgba(79,195,247,0.15); color: var(--blue);   border: 1px solid rgba(79,195,247,0.3); }
+
+    /* Chat */
+    .chat-bubble-user {
+      background: var(--green-600);
+      border-radius: 18px 18px 4px 18px;
+      padding: 10px 16px;
+      max-width: 80%;
+      margin-left: auto;
+    }
+    .chat-bubble-bot {
+      background: var(--green-700);
+      border-radius: 18px 18px 18px 4px;
+      padding: 10px 16px;
+      max-width: 85%;
+      border: 1px solid var(--green-600);
+    }
+    .typing-dot {
+      width: 8px; height: 8px;
+      background: var(--accent);
+      border-radius: 50%;
+      animation: bounce 1.2s infinite;
+    }
+    .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes bounce {
+      0%, 80%, 100% { transform: translateY(0); }
+      40% { transform: translateY(-8px); }
+    }
+
+    /* Progress bar */
+    .progress-bar {
+      height: 8px;
+      background: var(--green-700);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 0.8s ease;
+    }
+
+    /* Input */
+    .input-field {
+      background: var(--green-700);
+      border: 1px solid var(--green-600);
+      border-radius: 8px;
+      color: var(--text);
+      padding: 10px 14px;
+      width: 100%;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .input-field:focus { border-color: var(--accent); }
+    .input-field::placeholder { color: var(--muted); }
+    select.input-field option { background: var(--green-800); }
+
+    /* Button */
+    .btn-primary {
+      background: var(--accent);
+      color: #0d1f17;
+      font-weight: 700;
+      padding: 10px 20px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-primary:hover { background: var(--accent-dim); transform: translateY(-1px); }
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid var(--green-600);
+      color: var(--text);
+      padding: 8px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* Divider */
+    .divider { border-color: var(--green-700); }
+
+    /* Main content offset */
+    .main-content { margin-left: 240px; }
+
+    /* Animated number */
+    @keyframes countUp {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-in { animation: countUp 0.5s ease forwards; }
+
+    /* Compliance score ring */
+    .score-ring { transform: rotate(-90deg); }
+
+    /* Tooltip */
+    [data-tooltip] { position: relative; cursor: help; }
+    [data-tooltip]:hover::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      bottom: 100%; left: 50%;
+      transform: translateX(-50%);
+      background: #111;
+      color: #fff;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      white-space: nowrap;
+      z-index: 100;
+      margin-bottom: 4px;
+    }
+
+    /* Scenario comparison row colors */
+    .scenario-color-0 { background: rgba(0,214,143,0.2); }
+    .scenario-color-1 { background: rgba(79,195,247,0.2); }
+    .scenario-color-2 { background: rgba(255,214,0,0.2); }
+    .scenario-color-3 { background: rgba(255,82,82,0.2); }
+  </style>
+</head>
+<body x-data="app()" x-init="init()">
+
+<!-- ── Sidebar ──────────────────────────────────────────────────────────────── -->
+<aside class="sidebar">
+  <div class="p-5 border-b border-green-700" style="border-color: var(--green-700)">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-xl flex items-center justify-center" style="background:var(--accent)">
+        <i class="fas fa-leaf text-sm" style="color:var(--green-900)"></i>
+      </div>
+      <div>
+        <div class="font-bold text-sm">EventCarbon</div>
+        <div class="text-xs text-muted">Co-Pilot</div>
+      </div>
+    </div>
+  </div>
+
+  <nav class="flex-1 py-4">
+    <div class="px-4 pb-2 text-xs text-muted uppercase tracking-widest">Navigation</div>
+    <template x-for="item in navItems" :key="item.id">
+      <div class="nav-item" :class="{'active': activeTab === item.id}" @click="activeTab = item.id">
+        <i :class="item.icon"></i>
+        <span x-text="item.label"></span>
+        <span x-show="item.id === 'scenarios' && scenarios.length > 0"
+          class="ml-auto badge badge-green text-xs px-2 py-0"
+          x-text="scenarios.length"></span>
+      </div>
+    </template>
+  </nav>
+
+  <!-- Model badge -->
+  <div class="p-4 border-t" style="border-color:var(--green-700)">
+    <div class="flex items-center gap-2 text-xs text-muted">
+      <div class="w-2 h-2 rounded-full bg-green-400 animate-pulse"></div>
+      <span>GPT-4o mini · TinyFish agents</span>
+    </div>
+  </div>
+</aside>
+
+<!-- ── Main ─────────────────────────────────────────────────────────────────── -->
+<main class="main-content p-6 min-h-screen">
+
+  <!-- HEADER -->
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="text-xl font-bold" x-text="navItems.find(n=>n.id===activeTab)?.label"></h1>
+      <p class="text-muted text-sm mt-0.5" x-text="navItems.find(n=>n.id===activeTab)?.desc"></p>
+    </div>
+    <div class="flex gap-2">
+      <button class="btn-ghost text-sm" @click="refreshAgents()">
+        <i class="fas fa-sync-alt mr-2" :class="{'animate-spin': agentsRunning}"></i>Refresh Factors
+      </button>
+      <button class="btn-primary text-sm" @click="activeTab='chat'">
+        <i class="fas fa-robot mr-2"></i>Ask Co-Pilot
+      </button>
+    </div>
+  </div>
+
+  <!-- ── DASHBOARD TAB ──────────────────────────────────────────────────────── -->
+  <div x-show="activeTab === 'dashboard'" x-transition>
+    <!-- KPI row -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div class="kpi-card glow">
+        <div class="text-xs text-muted uppercase tracking-widest mb-1">Total Scenarios</div>
+        <div class="text-3xl font-bold text-accent" x-text="scenarios.length"></div>
+        <div class="text-xs text-muted mt-1">saved in database</div>
+      </div>
+      <div class="kpi-card">
+        <div class="text-xs text-muted uppercase tracking-widest mb-1">Best Scenario</div>
+        <div class="text-3xl font-bold text-accent" x-text="bestScenario ? bestScenario.emissions.total_tco2e.toFixed(1) + ' t' : '—'"></div>
+        <div class="text-xs text-muted mt-1" x-text="bestScenario ? bestScenario.name : 'no scenarios yet'"></div>
+      </div>
+      <div class="kpi-card glow-gold">
+        <div class="text-xs text-muted uppercase tracking-widest mb-1">Potential Tax Savings</div>
+        <div class="text-3xl font-bold text-gold" x-text="potentialSavings ? '$' + potentialSavings.toLocaleString() : '—'"></div>
+        <div class="text-xs text-muted mt-1">at 30% reduction</div>
+      </div>
+      <div class="kpi-card">
+        <div class="text-xs text-muted uppercase tracking-widest mb-1">Compliance Score</div>
+        <div class="text-3xl font-bold" :class="complianceScore >= 70 ? 'text-accent' : complianceScore >= 40 ? 'text-gold' : 'text-red'"
+          x-text="complianceScore ? complianceScore + '%' : '—'"></div>
+        <div class="text-xs text-muted mt-1">across frameworks</div>
+      </div>
+    </div>
+
+    <!-- Charts row -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+      <div class="card">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="font-semibold">Emissions by Category</h3>
+          <span class="badge badge-green" x-show="selectedScenario">
+            <i class="fas fa-circle-check"></i>
+            <span x-text="selectedScenario?.name"></span>
+          </span>
+        </div>
+        <div x-show="selectedScenario" class="relative" style="height:240px">
+          <canvas id="categoryChart"></canvas>
+        </div>
+        <div x-show="!selectedScenario" class="flex flex-col items-center justify-center py-10 text-muted">
+          <i class="fas fa-chart-pie text-4xl mb-3" style="color:var(--green-600)"></i>
+          <p class="text-sm">Create a scenario to see breakdown</p>
+          <button class="btn-primary mt-3 text-sm" @click="activeTab='scenarios'">
+            <i class="fas fa-plus mr-1"></i>New Scenario
+          </button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="font-semibold">Scenario Comparison</h3>
+          <span class="text-xs text-muted" x-text="scenarios.length + ' scenarios'"></span>
+        </div>
+        <div x-show="scenarios.length > 0" style="height:240px">
+          <canvas id="comparisonChart"></canvas>
+        </div>
+        <div x-show="scenarios.length === 0" class="flex flex-col items-center justify-center py-10 text-muted">
+          <i class="fas fa-chart-bar text-4xl mb-3" style="color:var(--green-600)"></i>
+          <p class="text-sm">Add 2+ scenarios to compare</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Reduction pathway -->
+    <div class="card" x-show="selectedScenario">
+      <h3 class="font-semibold mb-4">Reduction Pathway to Net Zero</h3>
+      <div style="height:180px">
+        <canvas id="pathwayChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Quick actions -->
+    <div class="card mt-4" x-show="!selectedScenario && scenarios.length === 0">
+      <h3 class="font-semibold mb-4">Get Started</h3>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <template x-for="action in quickActions" :key="action.title">
+          <div class="p-4 rounded-xl cursor-pointer transition-all hover:scale-105"
+            style="background:var(--green-700); border:1px solid var(--green-600)"
+            @click="action.handler()">
+            <div class="text-2xl mb-2" x-text="action.icon"></div>
+            <div class="font-medium text-sm" x-text="action.title"></div>
+            <div class="text-xs text-muted mt-1" x-text="action.desc"></div>
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── CHAT TAB ───────────────────────────────────────────────────────────── -->
+  <div x-show="activeTab === 'chat'" x-transition class="flex gap-4">
+    <!-- Chat window -->
+    <div class="flex-1 flex flex-col" style="height: calc(100vh - 120px)">
+      <div class="card flex-1 overflow-y-auto mb-3" id="chatMessages" style="padding: 16px">
+        <!-- Welcome message -->
+        <div x-show="chatMessages.length === 0" class="flex flex-col items-center justify-center h-full text-center py-12">
+          <div class="w-16 h-16 rounded-2xl flex items-center justify-center mb-4" style="background:var(--accent)">
+            <i class="fas fa-robot text-2xl" style="color:var(--green-900)"></i>
+          </div>
+          <h3 class="text-lg font-semibold mb-2">EventCarbon Co-Pilot</h3>
+          <p class="text-muted text-sm max-w-sm">Describe your event and I'll calculate its carbon footprint, suggest reductions, and calculate financial savings & compliance status.</p>
+          <div class="grid grid-cols-1 gap-2 mt-6 w-full max-w-sm">
+            <template x-for="s in startSuggestions" :key="s">
+              <button class="btn-ghost text-sm text-left px-4 py-3" @click="sendSuggestion(s)" x-text="s"></button>
+            </template>
+          </div>
+        </div>
+
+        <!-- Messages -->
+        <template x-for="(msg, idx) in chatMessages" :key="idx">
+          <div class="mb-4 flex" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
+            <div x-show="msg.role === 'assistant'" class="w-7 h-7 rounded-full flex items-center justify-center mr-2 flex-shrink-0 mt-1"
+              style="background:var(--accent)">
+              <i class="fas fa-robot text-xs" style="color:var(--green-900)"></i>
+            </div>
+            <div>
+              <div :class="msg.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-bot'"
+                x-html="formatMessage(msg.content)"></div>
+              <!-- Extracted data notification -->
+              <div x-show="msg.extracted_data && Object.keys(msg.extracted_data).length > 0"
+                class="mt-2 p-2 rounded-lg text-xs flex items-center gap-2"
+                style="background:rgba(0,214,143,0.1); border:1px solid rgba(0,214,143,0.2)">
+                <i class="fas fa-database text-accent"></i>
+                <span class="text-accent">Data extracted — </span>
+                <button class="underline text-accent" @click="applyExtracted(msg.extracted_data)">Apply to scenario</button>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- Typing indicator -->
+        <div x-show="chatLoading" class="flex items-start mb-4">
+          <div class="w-7 h-7 rounded-full flex items-center justify-center mr-2" style="background:var(--accent)">
+            <i class="fas fa-robot text-xs" style="color:var(--green-900)"></i>
+          </div>
+          <div class="chat-bubble-bot flex items-center gap-1 py-3">
+            <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Suggestions chips -->
+      <div x-show="chatSuggestions.length > 0" class="flex gap-2 mb-3 flex-wrap">
+        <template x-for="s in chatSuggestions" :key="s">
+          <button class="text-xs px-3 py-1.5 rounded-full transition-all hover:scale-105"
+            style="background:var(--green-700);border:1px solid var(--green-600)"
+            @click="sendSuggestion(s)" x-text="s"></button>
+        </template>
+      </div>
+
+      <!-- Input -->
+      <div class="flex gap-2">
+        <textarea class="input-field flex-1 resize-none" rows="2"
+          placeholder="Describe your event… e.g. '500-person tech conference in Singapore, 3 days, mostly APAC audience'"
+          x-model="chatInput"
+          @keydown.enter.prevent="if(!$event.shiftKey) sendChat()"></textarea>
+        <button class="btn-primary px-5 flex items-center gap-2" @click="sendChat()" :disabled="chatLoading || !chatInput.trim()">
+          <i class="fas fa-paper-plane"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Context panel -->
+    <div class="w-64 space-y-3">
+      <div class="card">
+        <div class="text-xs text-muted uppercase tracking-widest mb-3">Event Context</div>
+        <div x-show="!chatContext.attendees" class="text-xs text-muted">Talk to the co-pilot to build context</div>
+        <div x-show="chatContext.attendees" class="space-y-2 text-sm">
+          <div class="flex justify-between">
+            <span class="text-muted">Event</span>
+            <span class="font-medium truncate ml-2" x-text="chatContext.event_name || '—'"></span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-muted">Attendees</span>
+            <span class="font-medium text-accent" x-text="chatContext.attendees || '—'"></span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-muted">Location</span>
+            <span class="font-medium" x-text="chatContext.location || '—'"></span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-muted">Footprint</span>
+            <span class="font-medium text-accent" x-text="chatContext.current_tco2e ? chatContext.current_tco2e.toFixed(2) + ' tCO₂e' : '—'"></span>
+          </div>
+        </div>
+      </div>
+      <div class="card" x-show="lastExtracted">
+        <div class="text-xs text-muted uppercase tracking-widest mb-3">Last Extraction</div>
+        <pre class="text-xs text-accent overflow-x-auto" x-text="JSON.stringify(lastExtracted, null, 2)"></pre>
+        <button class="btn-primary w-full text-xs mt-3" @click="buildScenarioFromExtracted()">
+          <i class="fas fa-calculator mr-1"></i>Calculate Emissions
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── SCENARIOS TAB ──────────────────────────────────────────────────────── -->
+  <div x-show="activeTab === 'scenarios'" x-transition>
+    <!-- Scenario builder -->
+    <div class="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-6">
+      <div class="lg:col-span-2 card">
+        <h3 class="font-semibold mb-4 flex items-center gap-2">
+          <i class="fas fa-plus-circle text-accent"></i> New Scenario
+        </h3>
+        <form @submit.prevent="calculateScenario()" class="space-y-3">
+          <div>
+            <label class="text-xs text-muted block mb-1">Scenario Name</label>
+            <input class="input-field" x-model="newScenario.name" placeholder="e.g. Baseline / Green Option" required />
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-xs text-muted block mb-1">Attendees</label>
+              <input class="input-field" type="number" x-model.number="newScenario.attendees" min="1" required />
+            </div>
+            <div>
+              <label class="text-xs text-muted block mb-1">Event Days</label>
+              <input class="input-field" type="number" x-model.number="newScenario.event_days" min="1" required />
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-xs text-muted block mb-1">Location</label>
+              <input class="input-field" x-model="newScenario.location" placeholder="Singapore" />
+            </div>
+            <div>
+              <label class="text-xs text-muted block mb-1">Grid Region</label>
+              <select class="input-field" x-model="newScenario.venue_grid">
+                <option value="singapore">Singapore</option>
+                <option value="eu_average">EU Average</option>
+                <option value="uk">UK</option>
+                <option value="australia">Australia</option>
+                <option value="usa">USA</option>
+                <option value="global_average">Global Average</option>
+              </select>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-xs text-muted block mb-1">Catering</label>
+              <select class="input-field" x-model="newScenario.catering_type">
+                <option value="mixed_buffet">Mixed Buffet</option>
+                <option value="red_meat_meal">Red Meat Heavy</option>
+                <option value="white_meat_meal">White Meat</option>
+                <option value="vegetarian_meal">Vegetarian</option>
+                <option value="vegan_meal">Vegan</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-xs text-muted block mb-1">Accommodation</label>
+              <select class="input-field" x-model="newScenario.accommodation_type">
+                <option value="standard_hotel">Standard Hotel</option>
+                <option value="budget_hotel">Budget Hotel</option>
+                <option value="luxury_hotel">Luxury Hotel</option>
+                <option value="serviced_apartment">Serviced Apt</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label class="text-xs text-muted block mb-1">Renewable Energy %</label>
+            <input type="range" class="w-full" min="0" max="100" x-model.number="newScenario.renewable_pct" />
+            <div class="text-xs text-accent mt-1" x-text="newScenario.renewable_pct + '% renewable'"></div>
+          </div>
+          <!-- Travel segments -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <label class="text-xs text-muted uppercase tracking-widest">Travel Segments</label>
+              <button type="button" class="text-xs text-accent hover:underline" @click="addTravelSegment()">
+                <i class="fas fa-plus mr-1"></i>Add
+              </button>
+            </div>
+            <template x-for="(seg, idx) in newScenario.travel_segments" :key="idx">
+              <div class="flex gap-2 mb-2 items-center">
+                <select class="input-field text-xs" style="flex:2" x-model="seg.mode">
+                  <option value="short_haul_flight">✈ Short-haul</option>
+                  <option value="long_haul_flight">✈ Long-haul</option>
+                  <option value="train_europe">🚆 Train EU</option>
+                  <option value="train_asia">🚆 Train Asia</option>
+                  <option value="car_petrol">🚗 Car</option>
+                  <option value="mrt_metro">🚇 MRT</option>
+                  <option value="bus_coach">🚌 Bus</option>
+                </select>
+                <input class="input-field text-xs" style="flex:1" type="number" placeholder="Pax" x-model.number="seg.attendees" />
+                <input class="input-field text-xs" style="flex:1" type="number" placeholder="km" x-model.number="seg.distance_km" />
+                <button type="button" class="text-red" @click="newScenario.travel_segments.splice(idx,1)">
+                  <i class="fas fa-times"></i>
+                </button>
+              </div>
+            </template>
+          </div>
+          <button type="submit" class="btn-primary w-full" :disabled="scenarioLoading">
+            <i class="fas fa-calculator mr-2" :class="{'animate-spin': scenarioLoading}"></i>
+            Calculate Emissions
+          </button>
+        </form>
+      </div>
+
+      <!-- Scenario results list -->
+      <div class="lg:col-span-3 space-y-3">
+        <div x-show="scenarios.length === 0" class="card flex flex-col items-center py-12 text-muted">
+          <i class="fas fa-wind text-4xl mb-3" style="color:var(--green-600)"></i>
+          <p class="text-sm">No scenarios yet — calculate your first one</p>
+        </div>
+        <template x-for="(s, idx) in scenarios" :key="s.scenario_id">
+          <div class="card cursor-pointer transition-all hover:border-accent"
+            :class="{'border-accent glow': selectedScenario?.scenario_id === s.scenario_id}"
+            style="border-color: transparent"
+            @click="selectScenario(s)">
+            <div class="flex items-start justify-between">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="font-semibold" x-text="s.name"></span>
+                  <span class="badge" :class="s.emissions.data_quality === 'estimated' ? 'badge-yellow' : 'badge-green'"
+                    x-text="s.emissions.data_quality"></span>
+                </div>
+                <div class="text-xs text-muted mt-0.5" x-text="s.event_name + ' · ' + s.attendees + ' attendees · ' + s.event_days + 'd'"></div>
+              </div>
+              <div class="text-right">
+                <div class="text-xl font-bold text-accent" x-text="s.emissions.total_tco2e.toFixed(2) + ' t'"></div>
+                <div class="text-xs text-muted" x-text="s.emissions.per_attendee_tco2e.toFixed(3) + ' t/attendee'"></div>
+              </div>
+            </div>
+
+            <!-- Category bar chart -->
+            <div class="mt-3 space-y-1.5">
+              <template x-for="cat in emissionCategories" :key="cat.key">
+                <div x-show="s.emissions[cat.key] > 0">
+                  <div class="flex justify-between text-xs mb-1">
+                    <span class="text-muted" x-text="cat.label"></span>
+                    <span x-text="(s.emissions[cat.key] * 1000).toFixed(0) + ' kg'"></span>
+                  </div>
+                  <div class="progress-bar">
+                    <div class="progress-fill" :style="`width:${s.emissions[cat.key]/s.emissions.total_tco2e*100}%; background:${cat.color}`"></div>
+                  </div>
+                </div>
+              </template>
+            </div>
+
+            <div class="flex gap-2 mt-3">
+              <button class="btn-ghost text-xs flex-1" @click.stop="cloneScenario(s)">
+                <i class="fas fa-copy mr-1"></i>Clone
+              </button>
+              <button class="btn-ghost text-xs flex-1" @click.stop="getSuggestions(s)">
+                <i class="fas fa-lightbulb mr-1"></i>Reduce 30%
+              </button>
+              <button class="btn-ghost text-xs" @click.stop="deleteScenario(s.scenario_id)">
+                <i class="fas fa-trash text-red"></i>
+              </button>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- Suggestions panel -->
+    <div class="card" x-show="suggestions.length > 0" x-transition>
+      <h3 class="font-semibold mb-4 flex items-center gap-2">
+        <i class="fas fa-lightbulb text-gold"></i>
+        Reduction Suggestions
+        <span class="badge badge-yellow ml-2" x-text="'Target: -30%'"></span>
+      </h3>
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+        <template x-for="sug in suggestions" :key="sug.action">
+          <div class="p-4 rounded-xl" style="background:var(--green-700);border:1px solid var(--green-600)">
+            <div class="flex items-center justify-between mb-2">
+              <span class="badge" :class="{
+                'badge-green': sug.difficulty==='easy',
+                'badge-yellow': sug.difficulty==='medium',
+                'badge-red': sug.difficulty==='hard'
+              }" x-text="sug.difficulty"></span>
+              <span class="text-xs text-muted" x-text="sug.category"></span>
+            </div>
+            <div class="text-sm font-medium mb-2" x-text="sug.label"></div>
+            <div class="flex items-center justify-between text-xs">
+              <span class="text-accent font-bold" x-text="'-' + sug.co2e_saved_tco2e.toFixed(3) + ' tCO₂e'"></span>
+              <span :class="sug.estimated_cost_usd < 0 ? 'text-accent' : 'text-muted'"
+                x-text="sug.estimated_cost_usd < 0 ? 'Saves $' + Math.abs(sug.estimated_cost_usd).toFixed(0) : '+$' + sug.estimated_cost_usd.toFixed(0)"></span>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── FINANCIAL TAB ──────────────────────────────────────────────────────── -->
+  <div x-show="activeTab === 'financial'" x-transition>
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+      <!-- Calculator inputs -->
+      <div class="card lg:col-span-1">
+        <h3 class="font-semibold mb-4 flex items-center gap-2">
+          <i class="fas fa-calculator text-accent"></i>Savings Calculator
+        </h3>
+        <div class="space-y-3">
+          <div>
+            <label class="text-xs text-muted block mb-1">Region / Jurisdiction</label>
+            <select class="input-field" x-model="finCalc.region">
+              <option value="singapore">Singapore (SGD 25/tCO₂e)</option>
+              <option value="eu">EU ETS (€65/tCO₂e)</option>
+              <option value="uk">UK ETS (£50/tCO₂e)</option>
+              <option value="australia">Australia (AUD 35/tCO₂e)</option>
+              <option value="usa">USA California (USD 30/tCO₂e)</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-xs text-muted block mb-1">
+              Baseline Emissions (tCO₂e)
+              <span x-show="selectedScenario" class="text-accent cursor-pointer hover:underline ml-1"
+                @click="finCalc.baseline = selectedScenario.emissions.total_tco2e">(use selected)</span>
+            </label>
+            <input class="input-field" type="number" step="0.01" x-model.number="finCalc.baseline" />
+          </div>
+          <div>
+            <label class="text-xs text-muted block mb-1">
+              Target Reduction %
+              <span class="text-accent ml-1" x-text="finCalc.reduction_pct + '%'"></span>
+            </label>
+            <input type="range" class="w-full" min="5" max="95" x-model.number="finCalc.reduction_pct" />
+          </div>
+          <div>
+            <label class="text-xs text-muted block mb-1">Energy Saved (kWh)</label>
+            <input class="input-field" type="number" x-model.number="finCalc.energy_kwh" placeholder="0" />
+          </div>
+          <div>
+            <label class="text-xs text-muted block mb-1">Meal Switches (meat → veg)</label>
+            <input class="input-field" type="number" x-model.number="finCalc.meal_switches" placeholder="0" />
+          </div>
+          <div>
+            <label class="text-xs text-muted block mb-1">Actions Taken</label>
+            <div class="space-y-1">
+              <template x-for="action in availableActions" :key="action.key">
+                <label class="flex items-center gap-2 text-sm cursor-pointer">
+                  <input type="checkbox" :value="action.key" x-model="finCalc.actions" class="accent-green-400" />
+                  <span x-text="action.label"></span>
+                </label>
+              </template>
+            </div>
+          </div>
+          <button class="btn-primary w-full" @click="calculateSavings()" :disabled="finLoading">
+            <i class="fas fa-coins mr-2"></i>Calculate Savings
+          </button>
+        </div>
+      </div>
+
+      <!-- Results -->
+      <div class="lg:col-span-2 space-y-4" x-show="finResult">
+        <!-- Total savings banner -->
+        <div class="card glow-gold" style="background:linear-gradient(135deg,var(--green-800),#2a2200)">
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="text-xs text-muted uppercase tracking-widest">Total Financial Benefit</div>
+              <div class="text-4xl font-bold text-gold mt-1" x-text="finResult ? '$' + finResult.total_financial_savings_usd.toLocaleString('en-US',{maximumFractionDigits:0}) : '—'"></div>
+              <div class="text-sm text-muted mt-1">
+                from
+                <span class="text-accent font-semibold" x-text="finResult ? finResult.total_co2e_reduced.toFixed(2) + ' tCO₂e' : ''"></span>
+                reduction
+                (<span class="text-accent" x-text="finResult ? finResult.co2e_reduction_pct.toFixed(1) + '%' : ''"></span>)
+              </div>
+            </div>
+            <div class="text-6xl">💰</div>
+          </div>
+        </div>
+
+        <!-- Carbon tax savings breakdown -->
+        <div class="card">
+          <h4 class="font-semibold mb-3 flex items-center gap-2">
+            <i class="fas fa-landmark text-blue"></i>Carbon Tax Savings
+          </h4>
+          <template x-for="tax in (finResult?.carbon_tax_savings || [])" :key="tax.scheme">
+            <div class="flex items-center justify-between py-2 border-b last:border-0" style="border-color:var(--green-700)">
+              <div>
+                <div class="text-sm font-medium" x-text="tax.scheme"></div>
+                <div class="text-xs text-muted" x-text="tax.description"></div>
+              </div>
+              <div class="text-right">
+                <div class="font-bold text-accent" x-text="'$' + tax.savings_usd.toLocaleString('en-US',{maximumFractionDigits:0})"></div>
+                <div class="text-xs text-muted" x-text="tax.savings_local.toLocaleString('en-US',{maximumFractionDigits:0}) + ' ' + tax.currency"></div>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- Other savings -->
+        <div class="grid grid-cols-2 gap-3">
+          <div class="kpi-card">
+            <div class="text-xs text-muted mb-1">Energy Cost Savings</div>
+            <div class="text-2xl font-bold text-accent" x-text="finResult ? '$' + finResult.energy_cost_savings_usd.toLocaleString('en-US',{maximumFractionDigits:0}) : '—'"></div>
+          </div>
+          <div class="kpi-card">
+            <div class="text-xs text-muted mb-1">Catering Cost Savings</div>
+            <div class="text-2xl font-bold text-accent" x-text="finResult ? '$' + finResult.catering_cost_savings_usd.toLocaleString('en-US',{maximumFractionDigits:0}) : '—'"></div>
+          </div>
+          <div class="kpi-card">
+            <div class="text-xs text-muted mb-1">Compliance Value</div>
+            <div class="text-2xl font-bold text-gold" x-text="finResult ? '$' + finResult.compliance_value_usd.toLocaleString('en-US',{maximumFractionDigits:0}) : '—'"></div>
+          </div>
+          <div class="kpi-card">
+            <div class="text-xs text-muted mb-1">Est. ROI Breakeven</div>
+            <div class="text-2xl font-bold text-blue" x-text="finResult?.roi_months ? finResult.roi_months + ' mo' : 'N/A'"></div>
+          </div>
+        </div>
+
+        <!-- Incentives -->
+        <div class="card" x-show="finResult?.available_incentives?.length > 0">
+          <h4 class="font-semibold mb-3 flex items-center gap-2">
+            <i class="fas fa-award text-gold"></i>Available Green Incentives
+          </h4>
+          <template x-for="inc in (finResult?.available_incentives || [])" :key="inc.name">
+            <div class="p-3 rounded-lg mb-2" style="background:var(--green-700)">
+              <div class="flex items-start justify-between gap-2">
+                <div>
+                  <div class="text-sm font-medium" x-text="inc.name"></div>
+                  <div class="text-xs text-muted mt-0.5" x-text="inc.benefit"></div>
+                </div>
+                <span class="badge badge-green flex-shrink-0" x-text="inc.type.replace('_',' ')"></span>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Empty state -->
+      <div class="lg:col-span-2 card flex flex-col items-center justify-center py-16" x-show="!finResult">
+        <i class="fas fa-coins text-5xl mb-4" style="color:var(--green-600)"></i>
+        <p class="text-muted text-sm">Configure the calculator and click Calculate Savings</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── COMPLIANCE TAB ─────────────────────────────────────────────────────── -->
+  <div x-show="activeTab === 'compliance'" x-transition>
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <!-- Controls -->
+      <div class="card">
+        <h3 class="font-semibold mb-4 flex items-center gap-2">
+          <i class="fas fa-shield-halved text-accent"></i>Compliance Check
+        </h3>
+        <div class="space-y-3">
+          <div>
+            <label class="text-xs text-muted block mb-1">Region</label>
+            <select class="input-field" x-model="complianceInput.region">
+              <option value="singapore">Singapore (SGX)</option>
+              <option value="eu">European Union (CSRD)</option>
+              <option value="uk">United Kingdom</option>
+              <option value="australia">Australia</option>
+              <option value="usa">USA</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-xs text-muted block mb-1">
+              Total Emissions (tCO₂e)
+              <span x-show="selectedScenario" class="text-accent cursor-pointer hover:underline ml-1"
+                @click="complianceInput.total_tco2e = selectedScenario.emissions.total_tco2e">(use selected)</span>
+            </label>
+            <input class="input-field" type="number" step="0.01" x-model.number="complianceInput.total_tco2e" />
+          </div>
+          <div>
+            <label class="text-xs text-muted block mb-1">Attendees</label>
+            <input class="input-field" type="number" x-model.number="complianceInput.attendees" />
+          </div>
+          <div>
+            <label class="text-xs text-muted block mb-1">Event Days</label>
+            <input class="input-field" type="number" x-model.number="complianceInput.event_days" />
+          </div>
+          <label class="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" x-model="complianceInput.has_scope3" class="accent-green-400" />
+            <span>Scope 3 emissions included</span>
+          </label>
+          <label class="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" x-model="complianceInput.has_ghg_report" class="accent-green-400" />
+            <span>GHG report generated</span>
+          </label>
+          <button class="btn-primary w-full" @click="checkCompliance()" :disabled="complianceLoading">
+            <i class="fas fa-clipboard-check mr-2"></i>Check Compliance
+          </button>
+        </div>
+      </div>
+
+      <!-- Compliance results -->
+      <div class="lg:col-span-2 space-y-4" x-show="complianceReport">
+        <!-- Overall score -->
+        <div class="card flex items-center gap-6">
+          <div class="relative flex-shrink-0" style="width:100px;height:100px">
+            <svg viewBox="0 0 36 36" style="width:100px;height:100px">
+              <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                fill="none" stroke="var(--green-700)" stroke-width="3" />
+              <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                fill="none"
+                :stroke="(complianceReport?.overall_score_pct||0) >= 70 ? 'var(--accent)' : (complianceReport?.overall_score_pct||0) >= 40 ? 'var(--gold)' : 'var(--red)'"
+                stroke-width="3"
+                stroke-linecap="round"
+                :stroke-dasharray="`${complianceReport?.overall_score_pct||0}, 100`"
+                class="score-ring" />
+              <text x="18" y="20.5" text-anchor="middle" font-size="8" fill="var(--text)" font-weight="bold"
+                x-text="(complianceReport?.overall_score_pct||0) + '%'"></text>
+            </svg>
+          </div>
+          <div>
+            <div class="text-xl font-bold mb-1">
+              <span x-text="(complianceReport?.overall_score_pct||0) >= 70 ? 'Good Standing' : (complianceReport?.overall_score_pct||0) >= 40 ? 'Needs Improvement' : 'Non-Compliant'"></span>
+            </div>
+            <div class="text-sm text-muted" x-text="'Overall compliance across ' + (complianceReport?.checks?.length||0) + ' frameworks'"></div>
+            <div x-show="complianceReport?.penalty_risk_usd > 0" class="mt-2">
+              <span class="badge badge-red">
+                <i class="fas fa-exclamation-triangle"></i>
+                Penalty risk: $<span x-text="complianceReport?.penalty_risk_usd?.toLocaleString()"></span>
+              </span>
+            </div>
+            <div x-show="complianceReport?.mandatory_frameworks?.length > 0" class="mt-2 text-xs text-muted">
+              Mandatory: <span class="text-gold" x-text="complianceReport?.mandatory_frameworks?.join(', ')"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Framework cards -->
+        <template x-for="check in (complianceReport?.checks || [])" :key="check.framework">
+          <div class="card">
+            <div class="flex items-center justify-between mb-3">
+              <h4 class="font-semibold" x-text="check.framework"></h4>
+              <span class="badge"
+                :class="{
+                  'badge-green':  check.status === 'compliant',
+                  'badge-yellow': check.status === 'partial',
+                  'badge-red':    check.status === 'non_compliant',
+                  'badge-blue':   check.status === 'not_applicable'
+                }"
+                x-text="check.status.replace('_',' ')"></span>
+            </div>
+            <div class="progress-bar mb-3">
+              <div class="progress-fill"
+                :style="`width:${check.score_pct}%; background:${check.score_pct >= 70 ? 'var(--accent)' : check.score_pct >= 40 ? 'var(--gold)' : 'var(--red)'}`"></div>
+            </div>
+            <div x-show="check.gaps.filter(g=>g).length > 0" class="mb-2">
+              <div class="text-xs text-muted uppercase tracking-widest mb-1">Gaps</div>
+              <template x-for="gap in check.gaps.filter(g=>g)" :key="gap">
+                <div class="flex items-start gap-2 text-xs mb-1">
+                  <i class="fas fa-circle-xmark text-red mt-0.5 flex-shrink-0"></i>
+                  <span x-text="gap"></span>
+                </div>
+              </template>
+            </div>
+            <div x-show="check.recommendations.length > 0">
+              <div class="text-xs text-muted uppercase tracking-widest mb-1">Recommendations</div>
+              <template x-for="rec in check.recommendations" :key="rec">
+                <div class="flex items-start gap-2 text-xs mb-1">
+                  <i class="fas fa-circle-arrow-right text-accent mt-0.5 flex-shrink-0"></i>
+                  <span x-text="rec"></span>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <div class="lg:col-span-2 card flex flex-col items-center justify-center py-16" x-show="!complianceReport">
+        <i class="fas fa-shield-halved text-5xl mb-4" style="color:var(--green-600)"></i>
+        <p class="text-muted text-sm">Configure inputs and run compliance check</p>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<!-- ── Toast notification ───────────────────────────────────────────────────── -->
+<div x-show="toast.show" x-transition
+  class="fixed bottom-6 right-6 p-4 rounded-xl shadow-xl z-50 flex items-center gap-3"
+  style="background:var(--green-700);border:1px solid var(--green-600);min-width:280px"
+  @click="toast.show = false">
+  <i :class="toast.icon" class="text-lg flex-shrink-0"></i>
+  <span class="text-sm" x-text="toast.message"></span>
+</div>
+
+<script src="/static/js/app.js"></script>
+</body>
+</html>

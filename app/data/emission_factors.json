@@ -1,0 +1,216 @@
+{
+  "version": "2024.1",
+  "last_updated": "2024-11-01",
+  "travel": {
+    "short_haul_flight": {
+      "economy": 0.255,
+      "business": 0.510,
+      "unit": "kg_co2e_per_passenger_km",
+      "source": "ICAO Carbon Emissions Calculator 2024",
+      "notes": "Flights under 3 hours / 1500km"
+    },
+    "long_haul_flight": {
+      "economy": 0.195,
+      "business": 0.570,
+      "first": 0.780,
+      "unit": "kg_co2e_per_passenger_km",
+      "source": "ICAO Carbon Emissions Calculator 2024",
+      "notes": "Flights over 3 hours / 1500km; includes RFI multiplier 1.9"
+    },
+    "train_europe": {
+      "factor": 0.041,
+      "unit": "kg_co2e_per_passenger_km",
+      "source": "EEA 2023"
+    },
+    "train_uk": {
+      "factor": 0.035,
+      "unit": "kg_co2e_per_passenger_km",
+      "source": "UK DEFRA 2024"
+    },
+    "train_asia": {
+      "factor": 0.056,
+      "unit": "kg_co2e_per_passenger_km",
+      "source": "IEA 2023 estimate"
+    },
+    "car_petrol": {
+      "factor": 0.171,
+      "unit": "kg_co2e_per_passenger_km",
+      "source": "UK DEFRA 2024",
+      "notes": "Average occupancy 1.5 passengers"
+    },
+    "car_ev": {
+      "factor": 0.053,
+      "unit": "kg_co2e_per_passenger_km",
+      "source": "UK DEFRA 2024"
+    },
+    "bus_coach": {
+      "factor": 0.089,
+      "unit": "kg_co2e_per_passenger_km",
+      "source": "UK DEFRA 2024"
+    },
+    "mrt_metro": {
+      "factor": 0.022,
+      "unit": "kg_co2e_per_passenger_km",
+      "source": "LTA Singapore 2023"
+    },
+    "taxi_rideshare": {
+      "factor": 0.148,
+      "unit": "kg_co2e_per_passenger_km",
+      "source": "UK DEFRA 2024"
+    }
+  },
+  "venue_energy": {
+    "grids": {
+      "singapore": {
+        "factor": 0.4085,
+        "unit": "kg_co2e_per_kwh",
+        "source": "EMA Singapore 2023",
+        "currency": "SGD"
+      },
+      "eu_average": {
+        "factor": 0.276,
+        "unit": "kg_co2e_per_kwh",
+        "source": "EEA 2023",
+        "currency": "EUR"
+      },
+      "uk": {
+        "factor": 0.233,
+        "unit": "kg_co2e_per_kwh",
+        "source": "UK DEFRA 2024",
+        "currency": "GBP"
+      },
+      "australia": {
+        "factor": 0.71,
+        "unit": "kg_co2e_per_kwh",
+        "source": "DEPTAC Australia 2023",
+        "currency": "AUD"
+      },
+      "usa": {
+        "factor": 0.384,
+        "unit": "kg_co2e_per_kwh",
+        "source": "EPA eGrid 2023",
+        "currency": "USD"
+      },
+      "global_average": {
+        "factor": 0.478,
+        "unit": "kg_co2e_per_kwh",
+        "source": "IEA 2023",
+        "currency": "USD"
+      },
+      "china": {
+        "factor": 0.581,
+        "unit": "kg_co2e_per_kwh",
+        "source": "NDRC China 2023",
+        "currency": "CNY"
+      },
+      "india": {
+        "factor": 0.716,
+        "unit": "kg_co2e_per_kwh",
+        "source": "MoEFCC India 2023",
+        "currency": "INR"
+      }
+    },
+    "proxy_factors": {
+      "conference_centre_per_m2_day": 2.8,
+      "hotel_ballroom_per_m2_day": 3.2,
+      "outdoor_event_per_attendee_day": 0.5,
+      "unit": "kg_co2e"
+    }
+  },
+  "accommodation": {
+    "budget_hotel": {
+      "factor": 20.0,
+      "unit": "kg_co2e_per_room_night",
+      "source": "Cornell Hospitality Research 2023"
+    },
+    "standard_hotel": {
+      "factor": 31.5,
+      "unit": "kg_co2e_per_room_night",
+      "source": "Cornell Hospitality Research 2023"
+    },
+    "luxury_hotel": {
+      "factor": 75.0,
+      "unit": "kg_co2e_per_room_night",
+      "source": "Cornell Hospitality Research 2023"
+    },
+    "serviced_apartment": {
+      "factor": 18.0,
+      "unit": "kg_co2e_per_room_night",
+      "source": "Estimate"
+    },
+    "airbnb_shared": {
+      "factor": 14.0,
+      "unit": "kg_co2e_per_room_night",
+      "source": "Airbnb Environmental Report 2023"
+    }
+  },
+  "catering": {
+    "red_meat_meal": {
+      "factor": 6.6,
+      "unit": "kg_co2e_per_meal",
+      "source": "Poore & Nemecek, Science 2018"
+    },
+    "white_meat_meal": {
+      "factor": 3.8,
+      "unit": "kg_co2e_per_meal",
+      "source": "Poore & Nemecek, Science 2018"
+    },
+    "vegetarian_meal": {
+      "factor": 1.5,
+      "unit": "kg_co2e_per_meal",
+      "source": "Poore & Nemecek, Science 2018"
+    },
+    "vegan_meal": {
+      "factor": 1.0,
+      "unit": "kg_co2e_per_meal",
+      "source": "Poore & Nemecek, Science 2018"
+    },
+    "mixed_buffet": {
+      "factor": 3.5,
+      "unit": "kg_co2e_per_meal",
+      "source": "Estimate based on 50% meat"
+    },
+    "beverages_per_person_day": {
+      "factor": 0.3,
+      "unit": "kg_co2e",
+      "source": "Estimate"
+    }
+  },
+  "materials_waste": {
+    "general_landfill": {
+      "factor": 0.587,
+      "unit": "kg_co2e_per_kg",
+      "source": "EPA 2023"
+    },
+    "recycled_mixed": {
+      "factor": 0.021,
+      "unit": "kg_co2e_per_kg",
+      "source": "UK DEFRA 2024"
+    },
+    "composted_food": {
+      "factor": 0.013,
+      "unit": "kg_co2e_per_kg",
+      "source": "UK DEFRA 2024"
+    },
+    "paper_cardboard": {
+      "factor": 0.909,
+      "unit": "kg_co2e_per_kg",
+      "source": "UK DEFRA 2024"
+    },
+    "plastic": {
+      "factor": 3.14,
+      "unit": "kg_co2e_per_kg",
+      "source": "UK DEFRA 2024"
+    },
+    "printed_materials_per_attendee": {
+      "factor": 0.25,
+      "unit": "kg_co2e",
+      "source": "Estimate (500g paper × 0.5 kg CO2e/kg)"
+    },
+    "exhibition_booth_per_m2": {
+      "factor": 12.5,
+      "unit": "kg_co2e",
+      "source": "Green Events Tool estimate"
+    }
+  }
+}
