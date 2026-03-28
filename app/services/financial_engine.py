@@ -138,32 +138,45 @@ def get_available_incentives(region: str, actions: List[str]) -> List[Dict[str, 
     }
     mapped = region_map.get(region_key, "singapore")
     incentives = TAX_DATA["green_incentives"].get(mapped, [])
+    expanded_actions = set(actions)
+    action_aliases = {
+        "ghg_reporting": "sustainability_reporting",
+        "renewable_energy": "energy_efficiency",
+        "led_lighting": "energy_efficiency",
+    }
+    for action in list(expanded_actions):
+        alias = action_aliases.get(action)
+        if alias:
+            expanded_actions.add(alias)
 
     matched = []
     for inc in incentives:
         applicable = inc.get("applicable_actions", [])
-        if not applicable or any(a in actions for a in applicable):
+        if not applicable or any(a in expanded_actions for a in applicable):
             matched.append(inc)
 
     return matched
 
 
 def estimate_incentive_value(incentives: List[Dict], baseline_tco2e: float, attendees: int) -> float:
-    """Rough USD value from matched incentives."""
+    """Conservative USD estimate from matched incentives.
+
+    Only directly quantifiable incentives are included in the total savings figure.
+    Unbounded grants/financing programs stay listed in `available_incentives` but are
+    not converted into cash savings without project-cost inputs.
+    """
     total = 0.0
     for inc in incentives:
         itype = inc.get("type", "")
-        if itype == "grant":
-            max_grant = inc.get("max_grant_sgd", 0) * 0.74  # to USD
-            # Assume 10% of max grant is realistically achievable for event scale
-            total += max_grant * 0.10
-        elif itype == "tax_credit":
+        if itype == "tax_credit":
             # Estimate 30% of energy cost at $0.18/kWh for estimated kWh
             kwh_est = baseline_tco2e * 1000 / 0.4  # rough reverse from Singapore grid
             total += kwh_est * 0.18 * 0.30
         elif itype == "compliance_requirement":
             # Penalty avoidance value
             total += inc.get("max_grant_sgd", 10000) * 0.01  # 1% of max penalty
+        elif itype in {"grant", "tax_allowance", "tax_deduction", "financing"}:
+            continue
     return round(total, 2)
 
 
@@ -188,7 +201,7 @@ def calculate_compliance_value(actions: List[str], region: str) -> float:
 
 def generate_financial_report(req: FinancialRequest) -> FinancialResult:
     """Full financial analysis of emission reductions."""
-    co2e_reduced = req.baseline_tco2e - req.reduced_tco2e
+    co2e_reduced = max(0.0, req.baseline_tco2e - req.reduced_tco2e)
     reduction_pct = (co2e_reduced / req.baseline_tco2e * 100) if req.baseline_tco2e > 0 else 0
 
     # Carbon tax savings

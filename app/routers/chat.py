@@ -33,7 +33,7 @@ async def chat(
             event_context.update({
                 "event_name": scenario.event_name,
                 "attendees": scenario.attendees,
-                "location": scenario.event_name,
+                "location": getattr(scenario, "location", None) or (scenario.input_payload or {}).get("location"),
                 "current_tco2e": scenario.total_tco2e,
             })
 

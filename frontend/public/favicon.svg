@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="CutCarbon">
+  <defs>
+    <linearGradient id="cutcarbon-gradient" x1="10" x2="54" y1="8" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#115e59" />
+      <stop offset="1" stop-color="#22c55e" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#cutcarbon-gradient)" />
+  <path
+    fill="#f8fafc"
+    d="M18 34c0-10.2 7.8-18 18.2-18H46v8H36.2C30.1 24 26 28.1 26 34s4.1 10 10.2 10H46v8h-9.8C25.8 52 18 44.2 18 34Z"
+  />
+  <path
+    fill="#bbf7d0"
+    d="M37.5 14.5c8.3 2.9 13 9 13 17.1-8.4-.8-14.3-6.9-13-17.1Z"
+  />
+</svg>

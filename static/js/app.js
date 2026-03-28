@@ -29,6 +29,9 @@ function app() {
     // -- Shared state ----------------------------------------------------------
     scenarios: [],
     selectedScenario: null,
+    selectedScenarioId: localStorage.getItem('cc_selected_scenario_id') || null,
+    selectedScenarioSyncing: false,
+    selectedScenarioRequestToken: 0,
     suggestions: [],
     toast: { show: false, message: '', icon: 'fas fa-check text-accent' },
     agentsRunning: false,
@@ -191,23 +194,41 @@ function app() {
           ]);
           if (meRes.ok) {
             this.currentUser = await meRes.json();
-            if (scenRes.ok) this._applyScenarios(await scenRes.json());
+            if (scenRes.ok) {
+              await this.applyScenarios(await scenRes.json(), this.selectedScenarioId, {
+                syncSelected: true,
+                renderDashboard: this.activeTab === 'dashboard',
+              });
+            }
           } else {
             this.token = null;
             localStorage.removeItem('cc_token');
+            this.persistSelectedScenarioId(null);
           }
         } catch (e) {
           this.token = null;
           localStorage.removeItem('cc_token');
+          this.persistSelectedScenarioId(null);
         }
       }
     },
 
-    switchTab(tabId) {
+    async switchTab(tabId) {
       this.activeTab = tabId;
-      if (tabId === 'offsets') this.loadOffsetData();
-      if (tabId === 'data') this.loadAgentStatus();
-      if (tabId === 'dashboard') this.scheduleDashboardRender();
+      if (tabId === 'offsets') await this.loadOffsetData();
+      if (tabId === 'data') await Promise.all([this.loadAgentStatus(), this.loadAgentHistory()]);
+      if (tabId === 'dashboard') {
+        if (this.token && this.scenarios.length === 0) {
+          await this.loadScenarios(this.selectedScenarioId);
+        } else if (this.selectedScenario || this.selectedScenarioId) {
+          await this.syncSelectedScenarioFromDb(
+            this.selectedScenario?.scenario_id || this.selectedScenarioId,
+            { renderDashboard: true }
+          );
+        } else {
+          this.scheduleDashboardRender();
+        }
+      }
     },
 
     scheduleDashboardRender() {
@@ -236,7 +257,7 @@ function app() {
             if (el._chartRenderVersion !== version) return;
             this.dashboardRenderAttempts = 0;
             this.drawChartsWhenReady(true, false, version, el);
-            this.renderFlowchart();
+            this.renderFlowchart(version, el);
 
             // A second delayed pass avoids zero-size canvases during transitions.
             // reportErrors=true so that persistent failures are surfaced after this final attempt.
@@ -352,8 +373,10 @@ function app() {
       this.token = null;
       this.currentUser = null;
       localStorage.removeItem('cc_token');
+      localStorage.removeItem('cc_selected_scenario_id');
       this.scenarios = [];
       this.selectedScenario = null;
+      this.selectedScenarioId = null;
       this.bestScenario = null;
       this.complianceScore = null;
       this.destroySelectedScenarioCharts();
@@ -367,31 +390,118 @@ function app() {
     },
 
     // -- Scenarios -------------------------------------------------------------
-    _applyScenarios(list) {
-      const currentSelectedId = this.selectedScenario?.scenario_id || null;
-      this.scenarios = list;
-      if (list.length > 0) {
-        this.bestScenario = [...list].sort((a, b) => a.emissions.total_tco2e - b.emissions.total_tco2e)[0];
-        this.selectedScenario = currentSelectedId
-          ? (list.find(s => s.scenario_id === currentSelectedId) || list[0])
-          : list[0];
-        if (this.selectedScenario) this.loadScenarioIntoFinCalc(this.selectedScenario);
-        this.scheduleDashboardRender();
+    persistSelectedScenarioId(id = null) {
+      this.selectedScenarioId = id || null;
+      if (id) {
+        localStorage.setItem('cc_selected_scenario_id', id);
       } else {
-        this.selectedScenario = null;
-        this.bestScenario = null;
-        this.destroySelectedScenarioCharts();
-        this.destroyPortfolioCharts();
-        this.scheduleDashboardRender();
+        localStorage.removeItem('cc_selected_scenario_id');
       }
     },
 
-    async loadScenarios() {
+    syncScenarioDependents(scenario) {
+      if (!scenario?.emissions) return;
+      this.loadScenarioIntoFinCalc(scenario);
+      this.complianceInput.total_tco2e = scenario.emissions.total_tco2e;
+      this.complianceInput.attendees = scenario.attendees;
+      this.complianceInput.event_days = scenario.event_days;
+    },
+
+    recomputeBestScenario() {
+      this.bestScenario = this.scenarios.length > 0
+        ? [...this.scenarios].sort((a, b) => (a.emissions?.total_tco2e || 0) - (b.emissions?.total_tco2e || 0))[0]
+        : null;
+    },
+
+    mergeScenarioIntoCollection(scenario) {
+      const idx = this.scenarios.findIndex(s => s.scenario_id === scenario.scenario_id);
+      const next = [...this.scenarios];
+      if (idx >= 0) {
+        next[idx] = scenario;
+      } else {
+        next.unshift(scenario);
+      }
+      this.scenarios = next;
+      this.recomputeBestScenario();
+      return scenario;
+    },
+
+    async fetchScenarioById(scenarioId) {
+      if (!scenarioId || !this.token) return null;
+      const res = await fetch(`${API}/api/scenarios/${scenarioId}`, {
+        headers: { 'Authorization': `Bearer ${this.token}` },
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    },
+
+    async syncSelectedScenarioFromDb(scenarioId = null, { renderDashboard = true } = {}) {
+      const targetId = scenarioId || this.selectedScenario?.scenario_id || this.selectedScenarioId;
+      if (!targetId || !this.token) {
+        if (renderDashboard && this.activeTab === 'dashboard') this.scheduleDashboardRender();
+        return this.selectedScenario;
+      }
+
+      const requestToken = ++this.selectedScenarioRequestToken;
+      this.selectedScenarioSyncing = true;
+
+      try {
+        const scenario = await this.fetchScenarioById(targetId);
+        if (!scenario || requestToken !== this.selectedScenarioRequestToken) return this.selectedScenario;
+
+        this.mergeScenarioIntoCollection(scenario);
+        this.selectedScenario = scenario;
+        this.persistSelectedScenarioId(scenario.scenario_id);
+        this.syncScenarioDependents(scenario);
+        return scenario;
+      } catch (e) {
+        console.error('Failed to synchronize selected scenario:', e);
+        return this.selectedScenario;
+      } finally {
+        if (requestToken === this.selectedScenarioRequestToken) {
+          this.selectedScenarioSyncing = false;
+          if (renderDashboard && this.activeTab === 'dashboard') this.scheduleDashboardRender();
+        }
+      }
+    },
+
+    async applyScenarios(list, preferredScenarioId = null, { syncSelected = true, renderDashboard = true } = {}) {
+      const rememberedId = preferredScenarioId || this.selectedScenario?.scenario_id || this.selectedScenarioId || null;
+      this.scenarios = list;
+      if (list.length > 0) {
+        this.recomputeBestScenario();
+        this.selectedScenario = rememberedId
+          ? (list.find(s => s.scenario_id === rememberedId) || list[0])
+          : list[0];
+        if (this.selectedScenario) {
+          this.persistSelectedScenarioId(this.selectedScenario.scenario_id);
+          this.syncScenarioDependents(this.selectedScenario);
+          if (syncSelected) {
+            await this.syncSelectedScenarioFromDb(this.selectedScenario.scenario_id, { renderDashboard });
+            return;
+          }
+        }
+      } else {
+        this.selectedScenario = null;
+        this.persistSelectedScenarioId(null);
+        this.recomputeBestScenario();
+        this.destroySelectedScenarioCharts();
+        this.destroyPortfolioCharts();
+      }
+      if (renderDashboard) this.scheduleDashboardRender();
+    },
+
+    async loadScenarios(preferredScenarioId = null) {
       try {
         const res = await fetch(`${API}/api/scenarios`, {
           headers: { 'Authorization': `Bearer ${this.token}` },
         });
-        if (res.ok) this._applyScenarios(await res.json());
+        if (res.ok) {
+          await this.applyScenarios(await res.json(), preferredScenarioId, {
+            syncSelected: true,
+            renderDashboard: this.activeTab === 'dashboard',
+          });
+        }
       } catch (e) {
         console.error(e);
       }
@@ -424,9 +534,9 @@ function app() {
         }
 
         this.selectedScenario = scenario;
-        this.bestScenario = [...this.scenarios].sort(
-          (a, b) => a.emissions.total_tco2e - b.emissions.total_tco2e
-        )[0];
+        this.persistSelectedScenarioId(scenario.scenario_id);
+        this.syncScenarioDependents(scenario);
+        this.recomputeBestScenario();
         this.newScenario.name = '';
         this.newScenario.travel_segments = [];
         this.showToast(`Scenario "${scenario.name}" ${isEdit ? 'updated' : 'calculated'}: ${scenario.emissions.total_tco2e.toFixed(2)} tCO2e`);
@@ -547,7 +657,7 @@ function app() {
           headers: { 'Authorization': `Bearer ${this.token}` },
         });
         const cloned = await res.json();
-        this.scenarios.unshift(cloned);
+        this.mergeScenarioIntoCollection(cloned);
         this.showToast('Scenario cloned: ' + name);
         this.scheduleDashboardRender();
       } catch (e) {
@@ -563,6 +673,13 @@ function app() {
       });
       this.scenarios = this.scenarios.filter(s => s.scenario_id !== id);
       if (this.selectedScenario?.scenario_id === id) this.selectedScenario = this.scenarios[0] || null;
+      if (this.selectedScenario) {
+        this.persistSelectedScenarioId(this.selectedScenario.scenario_id);
+        this.syncScenarioDependents(this.selectedScenario);
+      } else {
+        this.persistSelectedScenarioId(null);
+      }
+      this.recomputeBestScenario();
       this.suggestions = [];
       this.showToast('Scenario deleted');
       this.scheduleDashboardRender();
@@ -587,14 +704,13 @@ function app() {
       }
     },
 
-    selectScenario(s) {
+    async selectScenario(s) {
       this.selectedScenario = s;
+      this.persistSelectedScenarioId(s.scenario_id);
       this.suggestions = [];
-      this.loadScenarioIntoFinCalc(s);
-      this.complianceInput.total_tco2e = s.emissions.total_tco2e;
-      this.complianceInput.attendees = s.attendees;
-      this.complianceInput.event_days = s.event_days;
+      this.syncScenarioDependents(s);
       this.scheduleDashboardRender();
+      await this.syncSelectedScenarioFromDb(s.scenario_id, { renderDashboard: this.activeTab === 'dashboard' });
     },
 
     loadScenarioIntoFinCalc(s) {
@@ -761,6 +877,35 @@ function app() {
         { label: 'Accommodation', unit: 'kg/room-night÷10', value: (snap.accommodation_kg_per_room_night || 0) / 10, color: '#8b5cf6' },
         { label: 'Waste (landfill)', unit: 'kg/kg', value: snap.waste_landfill_kg_per_kg, color: '#6b7280' },
       ].filter(row => row.value > 0);
+    },
+
+    flowchartCategoryRows(scenario) {
+      if (!scenario?.emissions) return [];
+
+      const meta = {
+        travel_tco2e: { id: 'TR', target: 'S3' },
+        venue_energy_tco2e: { id: 'VE', target: 'S2' },
+        accommodation_tco2e: { id: 'AC', target: 'S3' },
+        catering_tco2e: { id: 'CA', target: 'S3' },
+        materials_waste_tco2e: { id: 'WA', target: 'S3' },
+        equipment_tco2e: { id: 'EQ', target: 'TOT', note: 'mixed scopes' },
+        swag_tco2e: { id: 'SW', target: 'S3' },
+      };
+
+      return this.emissionCategories
+        .map((cat) => {
+          const config = meta[cat.key] || { id: cat.key.toUpperCase(), target: 'TOT' };
+          return {
+            key: cat.key,
+            label: cat.label,
+            color: cat.color,
+            id: config.id,
+            target: config.target,
+            note: config.note || '',
+            value: scenario.emissions[cat.key] || 0,
+          };
+        })
+        .filter(row => row.value > 0);
     },
 
     scenarioRank(scenario) {
@@ -1254,7 +1399,13 @@ function app() {
     },
 
     formatMessage(text) {
-      return text
+      const safe = String(text || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+      return safe
         .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
         .replace(/`([^`]+)`/g, '<code style="background:var(--surface-2);padding:1px 5px;border-radius:4px;font-family:monospace;color:var(--accent)">$1</code>')
         .replace(/\n/g, '<br>');
@@ -1280,13 +1431,18 @@ function app() {
 
     // -- Financial -------------------------------------------------------------
     async calculateSavings() {
+      if (!this.token) {
+        this.showToast('Sign in to save and calculate financial reports', 'fas fa-triangle-exclamation text-gold');
+        return;
+      }
       this.finLoading = true;
       try {
         const reduced = this.finCalc.baseline * (1 - this.finCalc.reduction_pct / 100);
         const res = await fetch(`${API}/api/financial/savings`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: this.authHeaders(),
           body: JSON.stringify({
+            scenario_id: this.finCalc.linked_scenario_id || null,
             baseline_tco2e: this.finCalc.baseline,
             reduced_tco2e: reduced,
             region: this.finCalc.region,
@@ -1296,6 +1452,7 @@ function app() {
             actions_taken: this.finCalc.actions,
           }),
         });
+        if (!res.ok) throw new Error(await res.text());
         this.finResult = await res.json();
         this.showToast(`Total savings: $${this.finResult.total_financial_savings_usd.toLocaleString()}`);
       } catch (e) {
@@ -1430,6 +1587,10 @@ function app() {
 
     // -- TinyFish agents -------------------------------------------------------
     async refreshAgents() {
+      if (!this.token) {
+        this.showToast('Sign in to refresh factors', 'fas fa-triangle-exclamation text-gold');
+        return;
+      }
       this.agentsRunning = true;
       this.showToast('Refreshing factors and recalculating scenarios...', 'fas fa-sync-alt text-blue');
       const previouslySelectedId = this.selectedScenario?.scenario_id || null;
@@ -1437,7 +1598,9 @@ function app() {
 
       // Step 1: refresh global emission factors via TinyFish (non-fatal if it fails)
       try {
-        const runRes = await fetch(`${API}/api/agents/run/sync?force=true`);
+        const runRes = await fetch(`${API}/api/agents/run/sync?force=true`, {
+          headers: { 'Authorization': `Bearer ${this.token}` },
+        });
         agentOk = runRes.ok;
       } catch (_) {
         // TinyFish unavailable — proceed to recalculate with existing factors
@@ -1454,11 +1617,10 @@ function app() {
 
           const recalc = await recalcRes.json();
           if (Array.isArray(recalc.scenarios)) {
-            this._applyScenarios(recalc.scenarios);
-            if (previouslySelectedId) {
-              const restored = this.scenarios.find(s => s.scenario_id === previouslySelectedId);
-              if (restored) this.selectScenario(restored);
-            }
+            await this.applyScenarios(recalc.scenarios, previouslySelectedId, {
+              syncSelected: true,
+              renderDashboard: this.activeTab === 'dashboard',
+            });
           }
 
           const agentNote = agentOk ? '' : ' (factors unchanged — agent offline)';
@@ -1480,18 +1642,25 @@ function app() {
         );
       }
 
-      try { await this.loadAgentStatus(); } catch (_) {}
+      try { await Promise.all([this.loadAgentStatus(), this.loadAgentHistory()]); } catch (_) {}
       this.agentsRunning = false;
     },
 
     async refreshAgentsForceful() {
+      if (!this.token) {
+        this.showToast('Sign in to refresh factors', 'fas fa-triangle-exclamation text-gold');
+        return;
+      }
       this.agentsRunning = true;
       this.showToast('Force re-fetching all agents...', 'fas fa-bolt text-gold');
       try {
-        await fetch(`${API}/api/agents/run?force=true`, { method: 'POST' });
+        await fetch(`${API}/api/agents/run?force=true`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${this.token}` },
+        });
         setTimeout(async () => {
           this.agentsRunning = false;
-          await this.loadAgentStatus();
+          await Promise.all([this.loadAgentStatus(), this.loadAgentHistory()]);
           this.showToast('Force refresh dispatched', 'fas fa-bolt text-gold');
         }, 4000);
       } catch {
@@ -1501,8 +1670,14 @@ function app() {
 
     // -- Data & Exports --------------------------------------------------------
     async loadAgentStatus() {
+      if (!this.token) {
+        this.agentStatus = [];
+        return;
+      }
       try {
-        const res = await fetch(`${API}/api/agents/status`);
+        const res = await fetch(`${API}/api/agents/status`, {
+          headers: { 'Authorization': `Bearer ${this.token}` },
+        });
         if (res.ok) this.agentStatus = await res.json();
       } catch (e) {
         console.error('Failed to load agent status:', e);
@@ -1510,8 +1685,14 @@ function app() {
     },
 
     async loadAgentHistory() {
+      if (!this.token) {
+        this.agentHistory = [];
+        return;
+      }
       try {
-        const res = await fetch(`${API}/api/agents/history?limit=50`);
+        const res = await fetch(`${API}/api/agents/history?limit=50`, {
+          headers: { 'Authorization': `Bearer ${this.token}` },
+        });
         if (res.ok) this.agentHistory = await res.json();
       } catch (e) {
         console.error('Failed to load agent history:', e);
@@ -1525,19 +1706,24 @@ function app() {
       a.click();
     },
 
-    downloadFileAuth(url, filename) {
-      // For auth-protected endpoints, fetch with bearer token then trigger download
-      fetch(url, { headers: { 'Authorization': `Bearer ${this.token}` } })
-        .then(r => r.blob())
-        .then(blob => {
-          const objUrl = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = objUrl;
-          a.download = filename;
-          a.click();
-          URL.revokeObjectURL(objUrl);
-        })
-        .catch(() => this.showToast('Download failed', 'fas fa-triangle-exclamation text-red'));
+    async downloadFileAuth(url, filename) {
+      if (!this.token) {
+        this.showToast('Sign in to download this export', 'fas fa-triangle-exclamation text-gold');
+        return;
+      }
+      try {
+        const response = await fetch(url, { headers: { 'Authorization': `Bearer ${this.token}` } });
+        if (!response.ok) throw new Error('Download request failed');
+        const blob = await response.blob();
+        const objUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = objUrl;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(objUrl);
+      } catch (_) {
+        this.showToast('Download failed', 'fas fa-triangle-exclamation text-red');
+      }
     },
 
     downloadScenarioReport() {
@@ -1545,40 +1731,42 @@ function app() {
         this.showToast('Select a scenario first', 'fas fa-triangle-exclamation text-gold');
         return;
       }
-      this.downloadFile(
+      this.downloadFileAuth(
         `/api/exports/scenarios/${this.selectedScenario.scenario_id}.xlsx`,
         `report_${this.selectedScenario.scenario_id}.xlsx`
       );
     },
 
     // -- Mermaid flowchart -----------------------------------------------------
-    async renderFlowchart() {
+    async renderFlowchart(version = 0, rootEl = null) {
+      const el = document.getElementById('mermaidFlowchart');
+      if (!el) return;
+
       const s = this.selectedScenario;
-      if (!s) return;
+      if (!s) {
+        el.innerHTML = '<div class="text-xs text-muted py-8">Select a scenario to generate its flowchart.</div>';
+        return;
+      }
 
       const em = s.emissions;
       const total = em.total_tco2e || 0.001;
       const fmt = v => (v || 0).toFixed(3) + ' t';
+      const scenarioId = s.scenario_id;
+      const categories = this.flowchartCategoryRows(s);
+      const scenarioLabel = `${s.name}\\n${s.attendees || '?'} attendees · ${s.event_days || '?'} days`;
 
-      const categories = [
-        { key: 'travel_tco2e',          label: 'Travel',        id: 'TR', scope: 3, color: '#0369a1' },
-        { key: 'venue_energy_tco2e',     label: 'Venue Energy',  id: 'VE', scope: 2, color: '#1a9e6e' },
-        { key: 'accommodation_tco2e',    label: 'Accommodation', id: 'AC', scope: 3, color: '#d97706' },
-        { key: 'catering_tco2e',         label: 'Catering',      id: 'CA', scope: 3, color: '#ea580c' },
-        { key: 'materials_waste_tco2e',  label: 'Waste',         id: 'WA', scope: 3, color: '#7c3aed' },
-      ].filter(c => (em[c.key] || 0) > 0);
-
-      const scopes = s.emissions.scopes || {};
+      const scopes = em.scopes || {};
       const s1 = (scopes.scope1_tco2e || 0).toFixed(3);
       const s2 = (scopes.scope2_tco2e || 0).toFixed(3);
       const s3 = (scopes.scope3_tco2e || 0).toFixed(3);
 
       let diagram = `flowchart TD\n`;
-      diagram += `  EVT["🏢 ${s.name}\\n${s.attendees || '?'} attendees · ${s.event_days || '?'} days"]\n`;
+      diagram += `  EVT["🏢 ${scenarioLabel}"]\n`;
 
       // Category nodes
       for (const c of categories) {
-        diagram += `  ${c.id}["${c.label}\\n${fmt(em[c.key])}"]\n`;
+        const note = c.note ? `\\n${c.note}` : '';
+        diagram += `  ${c.id}["${c.label}\\n${fmt(c.value)}${note}"]\n`;
       }
 
       // Scope nodes
@@ -1593,11 +1781,15 @@ function app() {
       for (const c of categories) {
         diagram += `  EVT --> ${c.id}\n`;
       }
-      // Edges: categories → scopes
+      // Edges: categories → scopes/total
       for (const c of categories) {
-        const scopeId = `S${c.scope}`;
-        if (diagram.includes(`  ${scopeId}[`)) {
-          diagram += `  ${c.id} --> ${scopeId}\n`;
+        const targetId = c.target || 'TOT';
+        if (targetId === 'TOT') {
+          diagram += `  ${c.id} --> TOT\n`;
+        } else if (diagram.includes(`  ${targetId}[`)) {
+          diagram += `  ${c.id} --> ${targetId}\n`;
+        } else {
+          diagram += `  ${c.id} --> TOT\n`;
         }
       }
       // Edges: scopes → total
@@ -1613,15 +1805,18 @@ function app() {
       if (diagram.includes('  S1[')) diagram += `  style S1 fill:#fee2e2,color:#dc2626,stroke:#dc2626\n`;
       if (diagram.includes('  S2[')) diagram += `  style S2 fill:#fef3c7,color:#d97706,stroke:#d97706\n`;
       if (diagram.includes('  S3[')) diagram += `  style S3 fill:#e0f2fe,color:#0369a1,stroke:#0369a1\n`;
-
-      const el = document.getElementById('mermaidFlowchart');
-      if (!el) return;
+      for (const c of categories) {
+        diagram += `  style ${c.id} fill:${c.color}22,color:#111827,stroke:${c.color}\n`;
+      }
       el.innerHTML = '';
 
       try {
-        const { svg } = await mermaid.render('mermaid-' + Date.now(), diagram);
+        const renderId = `mermaid-${scenarioId}-${version || Date.now()}`;
+        const { svg } = await mermaid.render(renderId, diagram);
+        if ((rootEl && version && rootEl._chartRenderVersion !== version) || this.selectedScenario?.scenario_id !== scenarioId) return;
         el.innerHTML = svg;
       } catch (err) {
+        if ((rootEl && version && rootEl._chartRenderVersion !== version) || this.selectedScenario?.scenario_id !== scenarioId) return;
         el.innerHTML = `<pre class="text-xs text-muted p-4 overflow-x-auto">${diagram}</pre>`;
       }
     },

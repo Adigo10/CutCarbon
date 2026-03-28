@@ -1,8 +1,9 @@
-from fastapi import APIRouter, BackgroundTasks, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from sqlalchemy import select, desc, func
 
-from app.models.database import AgentRunDB, AsyncSessionLocal
+from app.models.database import AgentRunDB, AsyncSessionLocal, UserDB
 from app.services.tinyfish_agent import run_and_update, REGISTERED_AGENTS, AGENT_TTL_HOURS
+from app.routers.auth import get_current_user
 
 router = APIRouter()
 
@@ -11,6 +12,7 @@ router = APIRouter()
 async def trigger_agents(
     background_tasks: BackgroundTasks,
     force: bool = Query(False, description="Bypass TTL cache and re-fetch all agents"),
+    current_user: UserDB = Depends(get_current_user),
 ):
     """Trigger all TinyFish web agents to refresh emission factor data."""
     background_tasks.add_task(run_and_update, force)
@@ -26,6 +28,7 @@ async def trigger_agents(
 @router.get("/run/sync")
 async def trigger_agents_sync(
     force: bool = Query(False, description="Bypass TTL cache"),
+    current_user: UserDB = Depends(get_current_user),
 ):
     """Synchronously run all agents and return results (may be slow)."""
     result = await run_and_update(force=force)
@@ -33,7 +36,7 @@ async def trigger_agents_sync(
 
 
 @router.get("/status")
-async def agent_status():
+async def agent_status(current_user: UserDB = Depends(get_current_user)):
     """Return last run info for each registered agent, including DB history."""
     from datetime import datetime, timedelta
     cutoff = datetime.utcnow() - timedelta(hours=AGENT_TTL_HOURS)
@@ -76,6 +79,7 @@ async def agent_status():
 async def agent_history(
     agent_name: str = Query(None, description="Filter by agent name"),
     limit: int = Query(50, le=200),
+    current_user: UserDB = Depends(get_current_user),
 ):
     """Return paginated agent run history from the database."""
     async with AsyncSessionLocal() as session:

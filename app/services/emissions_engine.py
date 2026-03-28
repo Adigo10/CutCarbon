@@ -347,9 +347,10 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
     # Data quality flag
     has_actual_data = any([
         scenario.travel_segments,
-        scenario.venue_energy and scenario.venue_energy.kwh_consumed,
+        scenario.venue_energy and (scenario.venue_energy.kwh_consumed or scenario.venue_energy.venue_area_m2),
         scenario.accommodation,
         scenario.catering,
+        scenario.waste,
         scenario.equipment,
         scenario.swag,
     ])
@@ -382,6 +383,7 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
     return ScenarioResult(
         name=scenario.name,
         event_name=scenario.event_name,
+        location=scenario.location,
         event_type=scenario.event_type.value,
         attendees=attendees,
         event_days=days,

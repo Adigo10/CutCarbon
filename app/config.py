@@ -1,4 +1,30 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
+import os
+
+from pydantic import BaseModel
+
+try:
+    from pydantic_settings import BaseSettings, SettingsConfigDict
+except ImportError:
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        load_dotenv = None
+
+    def SettingsConfigDict(**kwargs):
+        return kwargs
+
+    class BaseSettings(BaseModel):
+        def __init__(self, **values):
+            if load_dotenv:
+                load_dotenv(".env")
+
+            merged = {
+                name: os.environ[name]
+                for name in self.__class__.model_fields
+                if name in os.environ
+            }
+            merged.update(values)
+            super().__init__(**merged)
 
 
 class Settings(BaseSettings):

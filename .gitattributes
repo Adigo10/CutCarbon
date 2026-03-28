@@ -1,0 +1,5 @@
+# Normalize line endings automatically for text files.
+* text=auto
+
+# Keep Markdown files as LF across platforms to avoid CRLF conversion warnings.
+*.md text eol=lf

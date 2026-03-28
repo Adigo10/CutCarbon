@@ -19,8 +19,8 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.database import get_db, ScenarioDB, AgentRunDB
-from app.routers.auth import get_current_user_optional
+from app.models.database import get_db, ScenarioDB, AgentRunDB, UserDB
+from app.routers.auth import get_current_user
 
 router = APIRouter()
 
@@ -53,13 +53,15 @@ def _style_header(ws, row=1):
 @router.get("/scenarios.xlsx", summary="Download all scenarios as Excel")
 async def export_scenarios_xlsx(
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user_optional),
+    current_user: UserDB = Depends(get_current_user),
 ):
     from openpyxl import Workbook
 
-    q = select(ScenarioDB).order_by(desc(ScenarioDB.created_at))
-    if current_user:
-        q = q.where(ScenarioDB.user_id == current_user.id)
+    q = (
+        select(ScenarioDB)
+        .where(ScenarioDB.user_id == current_user.id)
+        .order_by(desc(ScenarioDB.created_at))
+    )
     rows = (await db.execute(q)).scalars().all()
 
     wb = Workbook()
@@ -68,7 +70,7 @@ async def export_scenarios_xlsx(
     ws = wb.active
     ws.title = "Scenarios"
     headers = [
-        "ID", "Name", "Event Type", "Attendees", "Days", "Mode",
+        "ID", "Name", "Location", "Event Type", "Attendees", "Days", "Mode",
         "Travel tCO2e", "Venue Energy tCO2e", "Accommodation tCO2e",
         "Catering tCO2e", "Materials & Waste tCO2e",
         "Total tCO2e", "Per Attendee tCO2e",
@@ -79,7 +81,8 @@ async def export_scenarios_xlsx(
     _style_header(ws)
     for s in rows:
         ws.append([
-            s.id, s.name, s.event_type, s.attendees, s.event_days, s.mode,
+            s.id, s.name, getattr(s, "location", None) or (s.input_payload or {}).get("location", ""),
+            s.event_type, s.attendees, s.event_days, s.mode,
             round(s.travel_tco2e or 0, 4),
             round(s.venue_energy_tco2e or 0, 4),
             round(s.accommodation_tco2e or 0, 4),
@@ -119,12 +122,18 @@ async def export_scenarios_xlsx(
 async def export_scenario_xlsx(
     scenario_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user),
 ):
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
     from openpyxl.chart import BarChart, Reference
 
-    s = await db.get(ScenarioDB, scenario_id)
+    s = await db.scalar(
+        select(ScenarioDB).where(
+            ScenarioDB.id == scenario_id,
+            ScenarioDB.user_id == current_user.id,
+        )
+    )
     if not s:
         raise HTTPException(status_code=404, detail="Scenario not found")
 
@@ -143,6 +152,7 @@ async def export_scenario_xlsx(
 
     # Metadata
     meta = [
+        ("Location", getattr(s, "location", None) or (s.input_payload or {}).get("location", "")),
         ("Event Type", s.event_type),
         ("Attendees", s.attendees),
         ("Event Days", s.event_days),
@@ -262,6 +272,7 @@ async def export_emission_factors_xlsx():
 async def export_agent_runs_xlsx(
     db: AsyncSession = Depends(get_db),
     limit: int = 500,
+    current_user: UserDB = Depends(get_current_user),
 ):
     from openpyxl import Workbook
 
@@ -312,17 +323,20 @@ async def export_emission_factors_json():
 @router.get("/scenarios.json", summary="Download all scenarios as raw JSON")
 async def export_scenarios_json(
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user_optional),
+    current_user: UserDB = Depends(get_current_user),
 ):
-    q = select(ScenarioDB).order_by(desc(ScenarioDB.created_at))
-    if current_user:
-        q = q.where(ScenarioDB.user_id == current_user.id)
+    q = (
+        select(ScenarioDB)
+        .where(ScenarioDB.user_id == current_user.id)
+        .order_by(desc(ScenarioDB.created_at))
+    )
     rows = (await db.execute(q)).scalars().all()
 
     data = [
         {
             "scenario_id": s.id,
             "name": s.name,
+            "location": getattr(s, "location", None) or (s.input_payload or {}).get("location"),
             "event_type": s.event_type,
             "attendees": s.attendees,
             "event_days": s.event_days,

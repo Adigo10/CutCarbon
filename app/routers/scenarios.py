@@ -27,6 +27,7 @@ def _db_to_result(s: ScenarioDB) -> dict:
         "scenario_id": s.id,
         "name": s.name,
         "event_name": s.event_name,
+        "location": getattr(s, "location", None) or ((s.input_payload or {}).get("location")),
         "event_type": event_type,
         "attendees": s.attendees,
         "event_days": s.event_days,
@@ -62,6 +63,7 @@ def _save_result(scenario_id: str, result: ScenarioResult, payload: EventScenari
         id=scenario_id,
         name=result.name,
         event_name=result.event_name,
+        location=result.location or payload.location,
         event_type=result.event_type,
         attendees=result.attendees,
         event_days=result.event_days,
@@ -91,6 +93,7 @@ def _apply_result_to_existing(existing: ScenarioDB, result: ScenarioResult, payl
     """Apply a ScenarioResult onto an existing ScenarioDB row."""
     existing.name = result.name
     existing.event_name = result.event_name
+    existing.location = result.location or payload.location
     existing.event_type = result.event_type
     existing.attendees = result.attendees
     existing.event_days = result.event_days
@@ -256,6 +259,7 @@ async def clone_scenario(
         id=new_id,
         name=name,
         event_name=orig.event_name,
+        location=getattr(orig, "location", None),
         event_type=getattr(orig, "event_type", "conference") or "conference",
         attendees=orig.attendees,
         event_days=orig.event_days,
@@ -347,6 +351,7 @@ async def export_scenario(
         "report_title": f"Carbon Footprint Report - {s.event_name}",
         "methodology": "GHG Protocol Corporate Standard, ISO 14064-1",
         "scenario": data,
+        "location": getattr(s, "location", None) or ((s.input_payload or {}).get("location")),
         "scope_breakdown": data["emissions"]["scopes"],
         "total_emissions_tco2e": s.total_tco2e,
         "per_attendee_tco2e": s.per_attendee_tco2e,

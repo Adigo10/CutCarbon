@@ -181,7 +181,7 @@ class EventScenarioInput(BaseModel):
     attendees: int
     event_days: int = 1
     mode: ScenarioMode = ScenarioMode.BASIC
-    travel_segments: List[TravelSegment] = []
+    travel_segments: List[TravelSegment] = Field(default_factory=list)
     venue_energy: Optional[VenueEnergy] = None
     accommodation: Optional[AccommodationGroup] = None
     catering: Optional[CateringGroup] = None
@@ -227,12 +227,13 @@ class ScenarioResult(BaseModel):
     scenario_id: str = Field(default_factory=lambda: str(uuid4())[:8])
     name: str
     event_name: str
+    location: str = ""
     event_type: str = "conference"
     attendees: int
     event_days: int
     emissions: EmissionBreakdown
     benchmark: Optional[BenchmarkComparison] = None
-    assumptions: Dict[str, Any] = {}
+    assumptions: Dict[str, Any] = Field(default_factory=dict)
     created_at: str = ""
 
 
@@ -253,19 +254,20 @@ class ChatResponse(BaseModel):
     reply: str
     extracted_data: Optional[Dict[str, Any]] = None
     updated_scenario: Optional[EventScenarioInput] = None
-    suggestions: List[str] = []
+    suggestions: List[str] = Field(default_factory=list)
 
 
 # -- Financial models ----------------------------------------------------------
 
 class FinancialRequest(BaseModel):
+    scenario_id: Optional[str] = None
     baseline_tco2e: float
     reduced_tco2e: float
     region: str = "singapore"
     energy_kwh_saved: float = 0.0
     meal_switches: int = 0
     attendees: int = 0
-    actions_taken: List[str] = []
+    actions_taken: List[str] = Field(default_factory=list)
 
 
 class TaxSaving(BaseModel):
@@ -294,8 +296,8 @@ class ComplianceCheck(BaseModel):
     framework: str
     status: str  # compliant | partial | non_compliant | not_applicable
     score_pct: float
-    gaps: List[str] = []
-    recommendations: List[str] = []
+    gaps: List[str] = Field(default_factory=list)
+    recommendations: List[str] = Field(default_factory=list)
 
 
 class ComplianceReport(BaseModel):
@@ -340,8 +342,8 @@ class OffsetPortfolioSummary(BaseModel):
     total_purchased_tco2e: float
     total_retired_tco2e: float
     total_cost_usd: float
-    by_project_type: Dict[str, float]
-    by_registry: Dict[str, float]
+    by_project_type: Dict[str, float] = Field(default_factory=dict)
+    by_registry: Dict[str, float] = Field(default_factory=dict)
     coverage_pct: Optional[float] = None  # vs a scenario's total emissions
 
 

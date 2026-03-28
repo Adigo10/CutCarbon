@@ -1162,7 +1162,7 @@
     <!-- Download cards -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
       <div class="card flex flex-col items-center text-center py-6 hover:border-accent cursor-pointer transition-colors" style="border-color:var(--border)"
-        @click="downloadFile('/api/exports/scenarios.xlsx', 'scenarios.xlsx')">
+        @click="downloadFileAuth('/api/exports/scenarios.xlsx', 'scenarios.xlsx')">
         <i class="fas fa-table text-3xl mb-3 text-accent"></i>
         <div class="font-semibold text-sm mb-1">Scenarios (Excel)</div>
         <div class="text-xs text-muted">All scenarios with category and scope breakdown</div>
@@ -1183,7 +1183,7 @@
         <span class="badge badge-blue mt-3">.xlsx</span>
       </div>
       <div class="card flex flex-col items-center text-center py-6 hover:border-accent cursor-pointer transition-colors" style="border-color:var(--border)"
-        @click="downloadFile('/api/exports/agent-runs.xlsx', 'agent-runs.xlsx')">
+        @click="downloadFileAuth('/api/exports/agent-runs.xlsx', 'agent-runs.xlsx')">
         <i class="fas fa-robot text-3xl mb-3" style="color:#7c3aed"></i>
         <div class="font-semibold text-sm mb-1">Agent Runs (Excel)</div>
         <div class="text-xs text-muted">TinyFish run history with provenance data</div>

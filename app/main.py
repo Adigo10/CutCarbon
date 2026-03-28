@@ -1,7 +1,6 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
 from pathlib import Path
 
 from app.models.database import init_db
@@ -29,18 +28,21 @@ app.include_router(offsets.router,   prefix="/api/offsets",   tags=["Carbon Offs
 app.include_router(agents.router,    prefix="/api/agents",    tags=["TinyFish Agents"])
 app.include_router(exports.router,   prefix="/api/exports",   tags=["Data Exports"])
 
-STATIC_DIR = Path(__file__).parent.parent / "static"
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+BASE_DIR = Path(__file__).resolve().parent.parent
+LEGACY_STATIC_DIR = BASE_DIR / "static"
+FRONTEND_DIST_DIR = BASE_DIR / "frontend" / "dist"
 
-
-@app.get("/", include_in_schema=False)
-async def serve_index():
-    return FileResponse(str(STATIC_DIR / "index.html"))
+if LEGACY_STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(LEGACY_STATIC_DIR)), name="static")
 
 
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "EventCarbon Co-Pilot", "version": "2.0.0"}
+
+
+frontend_dir = FRONTEND_DIST_DIR if (FRONTEND_DIST_DIR / "index.html").exists() else LEGACY_STATIC_DIR
+app.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")
 
 
 @app.on_event("startup")
