@@ -31,6 +31,20 @@ The app combines **three power sources**:
 - 🤖 **OpenAI function calling** for natural language event data extraction
 - 🌐 **TinyFish web agents** for live emission factor updates from authoritative sources
 
+### Feature Summary
+
+| Feature Area | Capabilities |
+|---|---|
+| **Emissions** | 7 categories: travel, venue energy, accommodation, catering, waste, equipment, merchandise. Scope 1/2/3 per GHG Protocol. Basic (proxy) and advanced (detailed) modes. |
+| **AI Co-Pilot** | Natural language → structured scenario. Context-aware chat. Reduction suggestions. On-the-fly calculations. |
+| **Live Data** | 10 TinyFish agents refresh grid factors (SG/UK/AU/US/EU), carbon prices (SG/EU/UK ETS), aviation factors (ICAO), and food emissions (OWID). See `TINYFISH_AGENTS.md`. |
+| **Scenarios** | Create, edit, clone, compare. Data quality tracking (estimated / partial / verified). Instant recalculation. |
+| **Financial** | Carbon tax savings by region (SG, EU, UK, AU, USA). Green incentive identification. ROI calculator with payback period and NPV. |
+| **Carbon Credits** | Browse 10+ project types. Purchase and retire credits. Registry tracking (Gold Standard, VCS, ACR, etc.). Carbon neutral certification. |
+| **Compliance** | GHG Protocol, ISO 20121, SBTi, and regional (SG/EU/UK/USA) scoring. |
+| **Exports** | PDF report, Excel workbook, JSON (re-importable), CSV. |
+| **Auth** | JWT-based login/register. User-isolated data. 12-hour session. |
+
 ---
 
 ## Getting Started
@@ -734,45 +748,59 @@ Export formats:
 
 **Web Scraping Agent Status**
 
-CutCarbon runs **6 autonomous agents** to keep emission factors up-to-date:
+CutCarbon runs **10 autonomous agents** to keep emission factors up-to-date. For full specifications including validation bounds, unit conversions, and data destinations, see `TINYFISH_AGENTS.md`.
 
 ```
 AGENT STATUS
-├─ EMA (European Environment Agency)
+├─ EMA (Singapore Electricity Market Authority)
 │  ├─ Last run: 2 hours ago ✓
 │  ├─ Status: Completed
-│  ├─ Factors updated: Travel modes (EU)
-│  └─ Next run: 24h
+│  └─ Factors updated: Singapore grid factor (kg CO₂e/kWh)
 │
 ├─ DEFRA (UK Department for Environment)
 │  ├─ Last run: 15 hours ago ✓
 │  ├─ Status: Completed
-│  ├─ Factors updated: UK travel, electricity
-│  └─ Next run: 12h
+│  └─ Factors updated: UK grid factor (kg CO₂e/kWh)
 │
-├─ ICAO (International Civil Aviation)
-│  ├─ Last run: 4 hours ago ✓
+├─ EPA eGRID (US Environmental Protection Agency)
+│  ├─ Last run: 10 hours ago ✓
 │  ├─ Status: Completed
-│  ├─ Factors updated: Flight emissions calculator
-│  └─ Next run: 48h
+│  └─ Factors updated: USA grid factor (auto-converted from lb/MWh)
 │
-├─ NEA (Singapore National Environment)
+├─ EEA (European Environment Agency)
 │  ├─ Last run: 8 hours ago ✓
 │  ├─ Status: Completed
-│  ├─ Factors updated: Singapore grid mix
-│  └─ Next run: 24h
+│  └─ Factors updated: EU average grid factor (auto-converted from g/kWh)
 │
-├─ Ember Climate (Electricity data)
+├─ Clean Energy Regulator (Australia NGER)
+│  ├─ Last run: 9 hours ago ✓
+│  ├─ Status: Completed
+│  └─ Factors updated: Australia grid factor (kg CO₂e/kWh)
+│
+├─ NEA (Singapore National Environment Agency)
+│  ├─ Last run: 8 hours ago ✓
+│  ├─ Status: Completed
+│  └─ Factors updated: Singapore carbon tax rate (SGD/tCO₂e)
+│
+├─ Ember Climate (EU ETS price)
 │  ├─ Last run: 6 hours ago ✓
 │  ├─ Status: Completed
-│  ├─ Factors updated: Global grid intensity
-│  └─ Next run: 24h
+│  └─ Factors updated: EU ETS carbon price (EUR/tCO₂e)
 │
-└─ Our World in Data (Food, general stats)
+├─ UK Government (UK ETS price)
+│  ├─ Last run: 7 hours ago ✓
+│  ├─ Status: Completed
+│  └─ Factors updated: UK ETS carbon price (GBP/tCO₂e)
+│
+├─ ICAO (International Civil Aviation Organization)
+│  ├─ Last run: 4 hours ago ✓
+│  ├─ Status: Completed
+│  └─ Factors updated: Short/long-haul flight factors (kg CO₂e/pax-km)
+│
+└─ Our World in Data (Food emissions)
    ├─ Last run: 12 hours ago ✓
    ├─ Status: Completed
-   ├─ Factors updated: Catering emissions
-   └─ Next run: 48h
+   └─ Factors updated: Meal emissions (beef, chicken, vegetarian, vegan)
 
 [Trigger Manual Refresh] [View Full History]
 ```
@@ -890,7 +918,7 @@ A: Yes, through:
 Example: 6,912 tCO2e event → Reduce to 5,000 → Offset remaining 5,000 = Carbon Neutral ✓
 
 **Q: Is data automatically updated?**
-A: Yes! TinyFish agents refresh emission factors from official sources 1-2x daily. Your calculations always use the latest data.
+A: Yes. 10 TinyFish agents refresh emission factors on a 12-hour cycle from official sources (grid factors, carbon prices, aviation factors, food emissions). Your calculations always use the latest data. See `TINYFISH_AGENTS.md` for the full agent roster and data sources.
 
 ---
 
@@ -942,6 +970,36 @@ A: Yes! Download as:
 - **API Docs**: `/docs` endpoint (Swagger/OpenAPI)
 - **Feedback**: Report issues or suggest features via GitHub
 - **Contact**: sustainability@cutcarbon.co
+
+---
+
+## Feature Completeness
+
+### Implemented
+
+- Emission calculations (all 7 categories: travel, venue energy, accommodation, catering, waste, equipment, merchandise)
+- Chat AI (OpenAI function calling for natural language → structured scenario)
+- Scenario CRUD (create, read, update, clone, delete) with basic and advanced modes
+- Comparison view (2+ scenarios side-by-side)
+- Financial analysis (tax savings, green incentives, ROI)
+- Compliance scoring (GHG Protocol, ISO 20121, SBTi, regional)
+- Offset portfolio management (browse, purchase, retire)
+- Dashboard visualizations (KPI cards, pie/bar/line/scope charts, benchmarks)
+- Data exports (PDF, Excel, JSON, CSV)
+- 10 TinyFish web agents updating emission factors and carbon prices on a 12-hour cycle
+- Authentication (JWT-based login/register, user-isolated data)
+- Database persistence (SQLite locally, Postgres-ready)
+
+### Partial / Future
+
+- Real-time collaboration (multi-user editing)
+- Advanced water footprint
+- Biodiversity impact assessment
+- Blockchain-based carbon credit verification
+- Mobile app (currently web-only)
+- Integration with event management tools (Eventbrite, etc.)
+- Custom emission factor upload
+- Predictive ML (forecast future emissions from event history)
 
 ---
 

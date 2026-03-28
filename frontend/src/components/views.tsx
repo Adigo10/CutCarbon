@@ -163,17 +163,12 @@ export function ChatView({
             <span className="eyebrow">Conversation</span>
             <h3>AI co-pilot</h3>
           </div>
-          <p>Use natural language to sketch the event before pushing the data into the builder.</p>
         </div>
 
         {!messages.length ? (
           <div className="chat-empty">
             <Glyph label="AI" tone="cyan" />
-            <h3>Describe the event in plain English.</h3>
-            <p>
-              The assistant can infer attendees, travel, venue region, catering, and other
-              assumptions for the scenario builder.
-            </p>
+            <h3>Describe your event</h3>
             <div className="prompt-grid">
               {START_SUGGESTIONS.map((suggestion) => (
                 <button key={suggestion} className="prompt-chip" onClick={() => onUseSuggestion(suggestion)} type="button">
@@ -191,15 +186,14 @@ export function ChatView({
                 </div>
                 {message.extracted_data && Object.keys(message.extracted_data).length ? (
                   <div className="extracted-box">
-                    <span>Structured data detected</span>
                     <Button tone="soft" onClick={() => onApplyExtracted(message.extracted_data ?? {})}>
-                      Apply to scenario builder
+                      Apply to scenario
                     </Button>
                   </div>
                 ) : null}
               </article>
             ))}
-            {chatLoading ? <div className="typing-row">Co-pilot is drafting the next step…</div> : null}
+            {chatLoading ? <div className="typing-row">Drafting…</div> : null}
           </div>
         )}
 
@@ -213,11 +207,11 @@ export function ChatView({
                 onSend()
               }
             }}
-            placeholder="Describe your event, ask for a reduction idea, or request a financial lens."
-            rows={4}
+            placeholder="Describe the event, ask for reduction ideas, or request financial analysis…"
+            rows={3}
           />
           <Button tone="primary" busy={chatLoading} onClick={onSend}>
-            Send prompt
+            Send
           </Button>
         </div>
       </Panel>
@@ -226,42 +220,25 @@ export function ChatView({
         <Panel>
           <div className="panel-heading">
             <div>
-              <span className="eyebrow">Context</span>
-              <h3>Active scenario link</h3>
+              <span className="eyebrow">Active scenario</span>
+              <h3>Context</h3>
             </div>
           </div>
           {selectedScenario ? (
             <div className="signal-grid">
               <article className="signal-card">
-                <span className="eyebrow">Scenario</span>
+                <span className="eyebrow">{selectedScenario.location}</span>
                 <strong>{selectedScenario.name}</strong>
-                <p>{selectedScenario.location}</p>
               </article>
               <article className="signal-card">
-                <span className="eyebrow">Total footprint</span>
+                <span className="eyebrow">Footprint</span>
                 <strong>{formatTons(selectedScenario.emissions.total_tco2e)}</strong>
                 <p>{formatKgPerAttendee(selectedScenario.emissions.per_attendee_tco2e)} per attendee</p>
               </article>
             </div>
           ) : (
-            <EmptyState title="No selected scenario" body="Create or select a scenario to give the co-pilot more context." />
+            <EmptyState title="No scenario selected" body="Create a scenario to give the co-pilot context." />
           )}
-        </Panel>
-
-        <Panel>
-          <div className="panel-heading">
-            <div>
-              <span className="eyebrow">Suggested prompts</span>
-              <h3>Analyst shortcuts</h3>
-            </div>
-          </div>
-          <div className="prompt-column">
-            {START_SUGGESTIONS.map((suggestion) => (
-              <button key={suggestion} className="prompt-row" onClick={() => onUseSuggestion(suggestion)} type="button">
-                {suggestion}
-              </button>
-            ))}
-          </div>
         </Panel>
       </div>
     </div>
@@ -1231,6 +1208,7 @@ interface ComplianceViewProps {
   setInput: Dispatch<SetStateAction<ComplianceInput>>
   report: ComplianceReport | null
   loading: boolean
+  scenarios: Scenario[]
   selectedScenario: Scenario | null
   onCheck: () => void
 }
@@ -1240,6 +1218,7 @@ export function ComplianceView({
   setInput,
   report,
   loading,
+  scenarios,
   selectedScenario,
   onCheck,
 }: ComplianceViewProps) {
@@ -1254,6 +1233,31 @@ export function ComplianceView({
           {selectedScenario ? <Badge tone="fresh">Selected {selectedScenario.name}</Badge> : null}
         </div>
         <div className="form-grid">
+          <label className="field">
+            <span>Linked scenario</span>
+            <select
+              value={selectedScenario?.scenario_id ?? ''}
+              onChange={(event) => {
+                const nextId = event.target.value
+                const nextScenario = scenarios.find((scenario) => scenario.scenario_id === nextId) ?? null
+                if (nextScenario) {
+                  setInput((current) => ({
+                    ...current,
+                    total_tco2e: nextScenario.emissions.total_tco2e,
+                    attendees: nextScenario.attendees,
+                    event_days: nextScenario.event_days,
+                  }))
+                }
+              }}
+            >
+              <option value="">General checker</option>
+              {scenarios.map((scenario) => (
+                <option key={scenario.scenario_id} value={scenario.scenario_id}>
+                  {scenario.name}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="field">
             <span>Region</span>
             <select

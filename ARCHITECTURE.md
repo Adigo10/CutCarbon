@@ -68,13 +68,17 @@
 │  ├─ OpenAI API → GPT-4 function calling               │
 │  │  (Extracts event data from chat)                    │
 │  │                                                      │
-│  ├─ TinyFish Agents (6x Headless Browser)             │
-│  │  ├─ EMA ← European Environment Agency               │
-│  │  ├─ DEFRA ← UK Department for Environment          │
-│  │  ├─ ICAO ← International Aviation                   │
-│  │  ├─ NEA ← Singapore National Environment            │
-│  │  ├─ Ember Climate ← Global electricity              │
-│  │  └─ Our World in Data ← Food emissions              │
+│  ├─ TinyFish Agents (10x Headless Browser)            │
+│  │  ├─ EMA ← Singapore Electricity Market Authority   │
+│  │  ├─ DEFRA ← UK Dept for Environment (GHG factors) │
+│  │  ├─ EPA eGRID ← US grid emission factors           │
+│  │  ├─ EEA ← EU European Environment Agency           │
+│  │  ├─ Clean Energy Reg. ← Australia NGER             │
+│  │  ├─ NEA ← Singapore National Environment Agency    │
+│  │  ├─ Ember Climate ← EU ETS carbon price            │
+│  │  ├─ UK Govt ← UK ETS carbon price                  │
+│  │  ├─ ICAO ← International Aviation (flight factors) │
+│  │  └─ Our World in Data ← Food/catering emissions    │
 │  │                                                      │
 │  └─ Data Files (JSON)                                 │
 │     ├─ emission_factors.json → Updated by agents      │
@@ -579,9 +583,11 @@ Token expiry (24 hours):
 
 ## 📊 Emission Factor Data Flow
 
+For full per-agent specifications, validation bounds, unit conversions, caching behavior, and the developer guide for adding new agents, see `TINYFISH_AGENTS.md`.
+
 ```
 ┌──────────────────────────────────────────────────────────┐
-│ DATA SOURCES (Updated by TinyFish Agents Daily)          │
+│ DATA SOURCES (Updated by TinyFish Agents, 12h TTL cache) │
 └──────────────────────────────────────────────────────────┘
 
 ┌─────────────────────┐         ┌─────────────────────┐

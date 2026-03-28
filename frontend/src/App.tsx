@@ -666,6 +666,7 @@ function App() {
           setInput={setComplianceInput}
           report={complianceReport}
           loading={complianceLoading}
+          scenarios={scenarios}
           selectedScenario={selectedScenario}
           onCheck={handleCheckCompliance}
         />

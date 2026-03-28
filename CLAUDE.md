@@ -48,11 +48,11 @@ Set in `.env` at project root:
 - `emissions_engine.py` — Deterministic GHG Protocol calculations (travel, venue energy, accommodation, catering, waste). All emission factors loaded from `app/data/emission_factors.json`
 - `financial_engine.py` — Carbon tax savings by region (SG, EU, UK, AU, USA), incentive matching, compliance scoring. Data from `app/data/tax_incentives.json`
 - `openai_service.py` — Chat with function calling tools (`update_event_scenario`, `request_financial_analysis`) to convert plain text into structured `EventScenarioInput`
-- `tinyfish_agent.py` — 6 headless browser agents that fetch live emission factors from EMA, DEFRA, NEA, Ember Climate, ICAO, and Our World in Data, then merge results back into `emission_factors.json` with provenance
+- `tinyfish_agent.py` — 10 TinyFish web agents that fetch live emission factors and carbon prices from EMA, DEFRA, EPA eGRID, EEA, Clean Energy Regulator AU, NEA, Ember Climate, UK Government, ICAO, and Our World in Data, then merge results back into `emission_factors.json` with provenance. See `TINYFISH_AGENTS.md` for full specifications.
 
 **Data flow**: Chat input -> OpenAI extracts structured data -> Emissions engine calculates -> Financial engine prices carbon -> Compliance engine scores against frameworks (GHG Protocol, ISO 20121, SBTi, SGX, EU CSRD)
 
-**Database**: SQLAlchemy async ORM (`app/models/database.py`). Tables auto-created on startup via `init_db()`. Key models: `EventDB`, `ScenarioDB`, `ChatMessageDB`, `FinancialReportDB`, `EmissionFactorDB`. SQLite locally; Postgres-ready.
+**Database**: SQLAlchemy async ORM (`app/models/database.py`). Tables auto-created on startup via `init_db()`. Key models: `EventDB`, `ScenarioDB`, `ChatMessageDB`, `FinancialReportDB`, `EmissionFactorDB`, `AgentRunDB`. SQLite locally; Postgres-ready.
 
 **Schemas**: All Pydantic request/response models in `app/models/schemas.py`. Key enums: `TravelMode`, `TravelClass`, `AccommodationType`, `CateringType`, `GridRegion`.
 
@@ -76,3 +76,13 @@ Set in `.env` at project root:
 - CORS is wide open (`allow_origins=["*"]`) — tighten for production
 - No test suite currently exists
 - No Alembic migrations in use — tables auto-created on startup
+
+## Documentation
+
+| File | Audience | Contents |
+|---|---|---|
+| `CLAUDE.md` | Developers / AI assistants | Commands, env vars, architecture summary |
+| `ARCHITECTURE.md` | Engineers | System diagram, data flows, auth flow, timelines |
+| `USER_GUIDE.md` | End users | Complete usage manual, feature reference |
+| `QUICK_START.md` | New users | 5-minute onboarding walkthrough |
+| `TINYFISH_AGENTS.md` | Developers / Data auditors | Agent specs, sources, validation, caching, API |

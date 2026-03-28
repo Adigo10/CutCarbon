@@ -23,7 +23,9 @@
       "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0IiwiZXhwIjoxNzQ3NzA5OTQ0fQ.mfNeJ7xrl_9GkgiudGGAGj-GLofz7ehdGxlANkhUBpw\" __NEW_LINE_cba9c866b699169f__ echo \"=== Compliance check for baseline ===\" curl -s -X POST \"http://localhost:8000/api/financial/compliance?total_tco2e=1221.21&has_scope3=true&has_ghg_report=false&region=singapore&event_days=3&attendees=800\" -H \"Authorization: Bearer $TOKEN\")",
       "Bash(find /c/Users/adity/Projects/CutCarbon -type f -not -path */.carbon_venv/* -not -path */.git/* -not -path */__pycache__/* ! -name *.pyc ! -name *.db -exec ls -lh {})",
       "Bash(2)",
-      "Bash(sort -k2)"
+      "Bash(sort -k2)",
+      "Bash(npm run:*)",
+      "Bash(cd:*)"
     ]
   }
 }

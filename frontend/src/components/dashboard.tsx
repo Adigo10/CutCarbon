@@ -380,30 +380,6 @@ export function DashboardView({
 
   return (
     <div className="workspace-grid">
-      <Panel className="hero-shell hero-shell-compact">
-        <div className="hero-copy">
-          <span className="eyebrow">Executive brief</span>
-          <p className="hero-compact-copy">Portfolio at a glance. Focus area: {hotspot.label} emissions.</p>
-          <div className="hero-signal-row">
-            <Badge tone="fresh">{scenarios.length} scenario{scenarios.length === 1 ? '' : 's'}</Badge>
-            <Badge tone="cyan">{intensityBand(selectedScenario)}</Badge>
-          </div>
-        </div>
-        <div className="hero-summary">
-          <span className="eyebrow">Active scenario</span>
-          <strong>{selectedScenario.name}</strong>
-          <p>{formatTons(selectedScenario.emissions.total_tco2e, 3)}</p>
-          <div className="hero-actions hero-actions-row">
-            <Button tone="soft" onClick={() => onOpenTab('scenarios')}>
-              Edit scenario
-            </Button>
-            <Button tone="primary" onClick={() => onOpenTab('financial')}>
-              Price the plan
-            </Button>
-          </div>
-        </div>
-      </Panel>
-
       <Panel className="scenario-picker-panel">
         <div className="scenario-picker-head">
           <span className="eyebrow">Scenarios</span>
@@ -421,6 +397,35 @@ export function DashboardView({
               <small>{formatTons(scenario.emissions.total_tco2e)}</small>
             </button>
           ))}
+        </div>
+      </Panel>
+
+      <Panel className="hero-shell hero-shell-compact hero-shell-minimal">
+        <div className="hero-copy">
+          <span className="eyebrow" style={{ opacity: 0.6, marginBottom: '0.1rem' }}>Portfolio overview</span>
+          <p className="hero-compact-copy">
+            <strong>{selectedScenario.name}</strong> • {formatTons(selectedScenario.emissions.total_tco2e, 3)} • {hotspot.label}
+          </p>
+        </div>
+        <div className="hero-summary">
+          <div className="hero-summary-metrics">
+            <div className="metric-mini">
+              <small>Scenarios</small>
+              <strong>{scenarios.length}</strong>
+            </div>
+            <div className="metric-mini">
+              <small>Intensity</small>
+              <strong>{intensityBand(selectedScenario)}</strong>
+            </div>
+          </div>
+          <div className="hero-actions hero-actions-row">
+            <Button tone="soft" onClick={() => onOpenTab('scenarios')}>
+              Edit
+            </Button>
+            <Button tone="primary" onClick={() => onOpenTab('financial')}>
+              Price
+            </Button>
+          </div>
         </div>
       </Panel>
 

@@ -395,7 +395,8 @@ DATA & EXPORTS
 📖 **For detailed help:**
 - Read [USER_GUIDE.md](USER_GUIDE.md) (comprehensive manual)
 - Check inline tooltips (hover over `?` icons)
-- Review [CLAUDE.md](CLAUDE.md) (technical architecture)
+- Review [CLAUDE.md](CLAUDE.md) (developer/technical reference)
+- Review [TINYFISH_AGENTS.md](TINYFISH_AGENTS.md) (data sources & agent specs)
 
 💬 **For AI help:**
 - Open **AI Co-Pilot** tab and ask anything

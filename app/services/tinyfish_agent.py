@@ -10,6 +10,12 @@ client.agent.stream(...)            → streaming with callbacks
 Optimization: Results are cached in the AgentRunDB table for AGENT_TTL_HOURS.
 Agents are skipped on re-run if a successful result exists within the TTL window.
 Use force=True in run_all_agents() to bypass the cache.
+
+Agents registered (10 total):
+  Grid factors:  singapore, uk, australia, usa, eu_average
+  Carbon prices: singapore_tax, eu_ets, uk_ets
+  Travel:        icao_flights
+  Catering:      food_factors
 """
 import asyncio
 import json
@@ -29,6 +35,26 @@ from app.config import settings
 AGENT_TTL_HOURS = 12
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
+
+# Sanity bounds for grid emission factors (kg CO2e/kWh).
+# Rejects clearly wrong values from misparses.
+_GRID_FACTOR_BOUNDS: dict[str, tuple[float, float]] = {
+    "singapore":   (0.30, 0.70),
+    "uk":          (0.10, 0.45),
+    "australia":   (0.40, 1.00),
+    "usa":         (0.25, 0.60),
+    "eu_average":  (0.15, 0.50),
+}
+_GRID_FACTOR_BOUNDS_DEFAULT = (0.01, 2.00)
+
+
+def _validated_grid_factor(value: Optional[float], region: str) -> Optional[float]:
+    """Return value if it falls within expected bounds for region, else None."""
+    if value is None:
+        return None
+    lo, hi = _GRID_FACTOR_BOUNDS.get(region, _GRID_FACTOR_BOUNDS_DEFAULT)
+    return value if lo <= value <= hi else None
+
 
 # ── Shared client factory ─────────────────────────────────────────────────────
 
@@ -165,7 +191,7 @@ class SingaporeGridFactorAgent(TinyFishAgent):
         return {
             "category": "venue_energy",
             "region": "singapore",
-            "factor_value": factor,
+            "factor_value": _validated_grid_factor(factor, "singapore"),
             "unit": "kg_co2e_per_kwh",
             "source": "EMA Singapore (via TinyFish)",
         }
@@ -175,9 +201,10 @@ class UKGridFactorAgent(TinyFishAgent):
     def __init__(self):
         super().__init__(
             name="uk_grid_factor",
-            url="https://www.gov.uk/government/collections/government-conversion-factors-for-company-reporting",
+            url="https://www.gov.uk/government/publications/greenhouse-gas-reporting-conversion-factors-2024",
             goal=(
-                "Find the latest UK electricity grid emission factor in kg CO2e per kWh from DEFRA conversion factors. "
+                "Find the UK electricity grid emission factor (Scope 2, location-based) in kg CO2e per kWh "
+                "from the latest DEFRA/BEIS greenhouse gas conversion factors publication. "
                 "Return ONLY JSON: {\"factor\": <number>, \"unit\": \"kg_co2e_per_kwh\", \"year\": <year>}"
             ),
             category="venue_energy",
@@ -186,12 +213,15 @@ class UKGridFactorAgent(TinyFishAgent):
     def parse_result(self, text: str) -> dict:
         match = re.search(r'"factor"\s*:\s*([\d.]+)', text)
         factor = float(match.group(1)) if match else None
+        if factor is None:
+            match = re.search(r'(0\.\d{2,4})\s*kg\s*CO2e?\s*/\s*kWh', text, re.IGNORECASE)
+            factor = float(match.group(1)) if match else None
         return {
             "category": "venue_energy",
             "region": "uk",
-            "factor_value": factor,
+            "factor_value": _validated_grid_factor(factor, "uk"),
             "unit": "kg_co2e_per_kwh",
-            "source": "UK DEFRA (via TinyFish)",
+            "source": "UK DEFRA 2024 (via TinyFish)",
         }
 
 
@@ -305,6 +335,121 @@ class CateringEmissionFactorAgent(TinyFishAgent):
         }
 
 
+class AustraliaGridFactorAgent(TinyFishAgent):
+    def __init__(self):
+        super().__init__(
+            name="au_grid_factor",
+            url="https://www.cleanenergyregulator.gov.au/NGER/National-greenhouse-and-energy-reporting-scheme-measurement/Emission-factor-profile",
+            goal=(
+                "Find the Australian national electricity grid emission factor (Scope 2) in kg CO2e per kWh "
+                "from the Clean Energy Regulator NGER emission factor profile. "
+                "Return ONLY JSON: {\"factor\": <number>, \"unit\": \"kg_co2e_per_kwh\", \"year\": <year>}"
+            ),
+            category="venue_energy",
+        )
+
+    def parse_result(self, text: str) -> dict:
+        match = re.search(r'"factor"\s*:\s*([\d.]+)', text)
+        factor = float(match.group(1)) if match else None
+        if factor is None:
+            match = re.search(r'(0\.\d{2,4})\s*kg\s*CO2e?\s*/\s*kWh', text, re.IGNORECASE)
+            factor = float(match.group(1)) if match else None
+        return {
+            "category": "venue_energy",
+            "region": "australia",
+            "factor_value": _validated_grid_factor(factor, "australia"),
+            "unit": "kg_co2e_per_kwh",
+            "source": "Clean Energy Regulator Australia (via TinyFish)",
+        }
+
+
+class USAGridFactorAgent(TinyFishAgent):
+    def __init__(self):
+        super().__init__(
+            name="usa_grid_factor",
+            url="https://www.epa.gov/egrid/summary-data",
+            goal=(
+                "Find the US national average electricity grid emission factor (CO2e per kWh) "
+                "from the EPA eGRID summary data. Look for the US Total row and the CO2e output emission rate. "
+                "Convert from lb/MWh to kg/kWh if needed (divide by 2204.62). "
+                "Return ONLY JSON: {\"factor\": <number in kg_co2e_per_kwh>, \"unit\": \"kg_co2e_per_kwh\", \"year\": <year>}"
+            ),
+            category="venue_energy",
+        )
+
+    def parse_result(self, text: str) -> dict:
+        match = re.search(r'"factor"\s*:\s*([\d.]+)', text)
+        factor = float(match.group(1)) if match else None
+        if factor is None:
+            match = re.search(r'(0\.\d{2,4})\s*kg\s*CO2e?\s*/\s*kWh', text, re.IGNORECASE)
+            factor = float(match.group(1)) if match else None
+        # eGRID reports lb/MWh; if value > 2 it's probably lb/MWh still
+        if factor and factor > 2:
+            factor = round(factor / 2204.62, 4)
+        return {
+            "category": "venue_energy",
+            "region": "usa",
+            "factor_value": _validated_grid_factor(factor, "usa"),
+            "unit": "kg_co2e_per_kwh",
+            "source": "EPA eGRID (via TinyFish)",
+        }
+
+
+class EUGridFactorAgent(TinyFishAgent):
+    def __init__(self):
+        super().__init__(
+            name="eu_grid_factor",
+            url="https://www.eea.europa.eu/en/analysis/indicators/co2-intensity-of-electricity-generation",
+            goal=(
+                "Find the EU average (EU-27) electricity CO2 intensity in grams of CO2 per kWh or kg CO2e per kWh "
+                "from the European Environment Agency indicator page. "
+                "Return ONLY JSON: {\"factor\": <number in kg_co2e_per_kwh>, \"unit\": \"kg_co2e_per_kwh\", \"year\": <year>}"
+            ),
+            category="venue_energy",
+        )
+
+    def parse_result(self, text: str) -> dict:
+        match = re.search(r'"factor"\s*:\s*([\d.]+)', text)
+        factor = float(match.group(1)) if match else None
+        if factor is None:
+            match = re.search(r'([\d.]+)\s*g\s*CO2e?\s*/\s*kWh', text, re.IGNORECASE)
+            if match:
+                factor = round(float(match.group(1)) / 1000, 4)  # g→kg
+        # If reported in g/kWh it will be >1; convert
+        if factor and factor > 2:
+            factor = round(factor / 1000, 4)
+        return {
+            "category": "venue_energy",
+            "region": "eu_average",
+            "factor_value": _validated_grid_factor(factor, "eu_average"),
+            "unit": "kg_co2e_per_kwh",
+            "source": "EEA (via TinyFish)",
+        }
+
+
+class UKETSPriceAgent(TinyFishAgent):
+    def __init__(self):
+        super().__init__(
+            name="uk_ets_price",
+            url="https://www.gov.uk/guidance/uk-emissions-trading-scheme-uk-ets",
+            goal=(
+                "Find the current UK ETS (Emissions Trading Scheme) carbon allowance price in GBP per tonne of CO2 equivalent. "
+                "Return ONLY JSON: {\"price_gbp\": <number>, \"date\": \"<YYYY-MM-DD or recent month>\"}"
+            ),
+            category="carbon_tax",
+        )
+
+    def parse_result(self, text: str) -> dict:
+        match = re.search(r'"price_gbp"\s*:\s*([\d.]+)', text)
+        price = float(match.group(1)) if match else None
+        return {
+            "category": "carbon_tax",
+            "region": "uk",
+            "price_gbp_per_tco2e": price,
+            "source": "UK ETS (via TinyFish)",
+        }
+
+
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
 async def _get_cached_run(agent_name: str) -> Optional[dict]:
@@ -349,10 +494,17 @@ async def _save_agent_run(agent: "TinyFishAgent", result: Optional[dict], error:
 # ── Agent registry ─────────────────────────────────────────────────────────────
 
 REGISTERED_AGENTS: list[TinyFishAgent] = [
+    # Grid emission factors
     SingaporeGridFactorAgent(),
     UKGridFactorAgent(),
+    AustraliaGridFactorAgent(),
+    USAGridFactorAgent(),
+    EUGridFactorAgent(),
+    # Carbon prices / taxes
     SingaporeCarbonTaxAgent(),
     EUETSPriceAgent(),
+    UKETSPriceAgent(),
+    # Travel & catering
     FlightEmissionFactorAgent(),
     CateringEmissionFactorAgent(),
 ]
@@ -397,9 +549,47 @@ async def run_all_agents(force: bool = False) -> dict:
     return output
 
 
+async def _upsert_emission_factors(rows: list[tuple]) -> None:
+    """
+    Write/update EmissionFactorDB rows from agent results.
+    Each tuple: (category, subcategory, region, value, unit, source_url)
+    """
+    from app.models.database import EmissionFactorDB, AsyncSessionLocal
+    now = datetime.utcnow()
+    async with AsyncSessionLocal() as session:
+        for category, subcategory, region, value, unit, source in rows:
+            # Check for existing row to update
+            existing = await session.scalar(
+                select(EmissionFactorDB)
+                .where(EmissionFactorDB.category == category)
+                .where(EmissionFactorDB.subcategory == subcategory)
+                .where(EmissionFactorDB.region == region)
+                .limit(1)
+            )
+            if existing:
+                existing.factor_value = value
+                existing.unit = unit
+                existing.source_url = source
+                existing.last_updated = now
+                existing.is_verified = True
+            else:
+                session.add(EmissionFactorDB(
+                    category=category,
+                    subcategory=subcategory,
+                    region=region,
+                    factor_value=value,
+                    unit=unit,
+                    source_url=source,
+                    methodology_tag="tinyfish_agent",
+                    last_updated=now,
+                    is_verified=True,
+                ))
+        await session.commit()
+
+
 async def merge_fetched_factors(results: dict) -> dict:
     """
-    Merge freshly fetched factors into emission_factors.json.
+    Merge freshly fetched factors into emission_factors.json and EmissionFactorDB.
     Only overwrites values where the agent returned a non-None result.
     """
     ef_path = _DATA_DIR / "emission_factors.json"
@@ -407,60 +597,91 @@ async def merge_fetched_factors(results: dict) -> dict:
         ef = json.load(f)
 
     updated = []
+    db_rows = []  # (category, subcategory, region, value, unit, source)
 
-    # Singapore grid
-    sg = results.get("sg_grid_factor", {})
-    if sg and sg.get("factor_value"):
-        old = ef["venue_energy"]["grids"]["singapore"]["factor"]
-        ef["venue_energy"]["grids"]["singapore"]["factor"] = sg["factor_value"]
-        ef["venue_energy"]["grids"]["singapore"]["source"] = sg.get("source", "EMA SG via TinyFish")
-        prov = sg.get("_provenance", {})
-        ef["venue_energy"]["grids"]["singapore"]["last_fetched"] = prov.get("fetched_at")
-        updated.append(f"SG grid: {old} → {sg['factor_value']} kg CO₂e/kWh")
+    def _patch_grid(region_key: str, agent_key: str, label: str):
+        r = results.get(agent_key, {})
+        v = r.get("factor_value") if isinstance(r, dict) else None
+        if v:
+            old = ef["venue_energy"]["grids"][region_key]["factor"]
+            ef["venue_energy"]["grids"][region_key]["factor"] = v
+            ef["venue_energy"]["grids"][region_key]["source"] = r.get("source", f"{label} via TinyFish")
+            ef["venue_energy"]["grids"][region_key]["last_fetched"] = datetime.utcnow().isoformat()
+            updated.append(f"{label} grid: {old} → {v} kg CO₂e/kWh")
+            db_rows.append(("venue_energy", "grid", region_key, v, "kg_co2e_per_kwh", r.get("source", "")))
 
-    # UK grid
-    uk = results.get("uk_grid_factor", {})
-    if uk and uk.get("factor_value"):
-        old = ef["venue_energy"]["grids"]["uk"]["factor"]
-        ef["venue_energy"]["grids"]["uk"]["factor"] = uk["factor_value"]
-        updated.append(f"UK grid: {old} → {uk['factor_value']} kg CO₂e/kWh")
+    _patch_grid("singapore",  "sg_grid_factor",  "SG")
+    _patch_grid("uk",         "uk_grid_factor",  "UK")
+    _patch_grid("australia",  "au_grid_factor",  "AU")
+    _patch_grid("usa",        "usa_grid_factor", "USA")
+    _patch_grid("eu_average", "eu_grid_factor",  "EU avg")
 
     # Singapore carbon tax
     sg_tax = results.get("sg_carbon_tax", {})
-    if sg_tax and sg_tax.get("current_rate_sgd"):
+    if isinstance(sg_tax, dict) and sg_tax.get("current_rate_sgd"):
         ef.setdefault("carbon_tax_live", {})["singapore_current_sgd"] = sg_tax["current_rate_sgd"]
         if sg_tax.get("next_rate_sgd"):
             ef["carbon_tax_live"]["singapore_next_sgd"] = sg_tax["next_rate_sgd"]
         updated.append(f"SG carbon tax: SGD {sg_tax['current_rate_sgd']}/tCO₂e")
+        db_rows.append(("carbon_tax", "current_rate", "singapore", sg_tax["current_rate_sgd"], "sgd_per_tco2e", sg_tax.get("source", "")))
 
     # EU ETS
-    eu = results.get("eu_ets_price", {})
-    if eu and eu.get("price_eur_per_tco2e"):
-        ef.setdefault("carbon_tax_live", {})["eu_ets_eur"] = eu["price_eur_per_tco2e"]
-        updated.append(f"EU ETS: €{eu['price_eur_per_tco2e']}/tCO₂e")
+    eu_ets = results.get("eu_ets_price", {})
+    if isinstance(eu_ets, dict) and eu_ets.get("price_eur_per_tco2e"):
+        ef.setdefault("carbon_tax_live", {})["eu_ets_eur"] = eu_ets["price_eur_per_tco2e"]
+        updated.append(f"EU ETS: €{eu_ets['price_eur_per_tco2e']}/tCO₂e")
+        db_rows.append(("carbon_tax", "ets_price", "eu", eu_ets["price_eur_per_tco2e"], "eur_per_tco2e", eu_ets.get("source", "")))
+
+    # UK ETS
+    uk_ets = results.get("uk_ets_price", {})
+    if isinstance(uk_ets, dict) and uk_ets.get("price_gbp_per_tco2e"):
+        ef.setdefault("carbon_tax_live", {})["uk_ets_gbp"] = uk_ets["price_gbp_per_tco2e"]
+        updated.append(f"UK ETS: £{uk_ets['price_gbp_per_tco2e']}/tCO₂e")
+        db_rows.append(("carbon_tax", "ets_price", "uk", uk_ets["price_gbp_per_tco2e"], "gbp_per_tco2e", uk_ets.get("source", "")))
 
     # Aviation factors
     icao = results.get("icao_flight_factors", {})
-    if icao and icao.get("short_haul_economy"):
-        ef["travel"]["short_haul_flight"]["economy"] = icao["short_haul_economy"]
-        updated.append(f"ICAO short-haul economy: {icao['short_haul_economy']}")
-    if icao and icao.get("long_haul_economy"):
-        ef["travel"]["long_haul_flight"]["economy"] = icao["long_haul_economy"]
-        updated.append(f"ICAO long-haul economy: {icao['long_haul_economy']}")
+    if isinstance(icao, dict):
+        if icao.get("short_haul_economy"):
+            ef["travel"]["short_haul_flight"]["economy"] = icao["short_haul_economy"]
+            updated.append(f"ICAO short-haul economy: {icao['short_haul_economy']}")
+            db_rows.append(("travel", "short_haul_flight", "global", icao["short_haul_economy"], "kg_co2e_per_passenger_km", icao.get("source", "")))
+        if icao.get("long_haul_economy"):
+            ef["travel"]["long_haul_flight"]["economy"] = icao["long_haul_economy"]
+            updated.append(f"ICAO long-haul economy: {icao['long_haul_economy']}")
+            db_rows.append(("travel", "long_haul_flight", "global", icao["long_haul_economy"], "kg_co2e_per_passenger_km", icao.get("source", "")))
+        if icao.get("long_haul_business"):
+            ef["travel"]["long_haul_flight"]["business"] = icao["long_haul_business"]
+            updated.append(f"ICAO long-haul business: {icao['long_haul_business']}")
 
     # Catering factors
     food = results.get("food_emission_factors", {})
-    if food and food.get("beef_factor"):
-        ef["catering"]["red_meat_meal"]["factor"] = food["beef_factor"]
-        updated.append(f"Beef meal: {food['beef_factor']} kg CO₂e")
-    if food and food.get("vegetarian_factor"):
-        ef["catering"]["vegetarian_meal"]["factor"] = food["vegetarian_factor"]
-        updated.append(f"Vegetarian meal: {food['vegetarian_factor']} kg CO₂e")
+    if isinstance(food, dict):
+        if food.get("beef_factor"):
+            ef["catering"]["red_meat_meal"]["factor"] = food["beef_factor"]
+            updated.append(f"Beef meal: {food['beef_factor']} kg CO₂e")
+            db_rows.append(("catering", "red_meat_meal", "global", food["beef_factor"], "kg_co2e_per_meal", food.get("source", "")))
+        if food.get("chicken_factor"):
+            ef["catering"]["white_meat_meal"]["factor"] = food["chicken_factor"]
+            updated.append(f"Chicken meal: {food['chicken_factor']} kg CO₂e")
+            db_rows.append(("catering", "white_meat_meal", "global", food["chicken_factor"], "kg_co2e_per_meal", food.get("source", "")))
+        if food.get("vegetarian_factor"):
+            ef["catering"]["vegetarian_meal"]["factor"] = food["vegetarian_factor"]
+            updated.append(f"Vegetarian meal: {food['vegetarian_factor']} kg CO₂e")
+            db_rows.append(("catering", "vegetarian_meal", "global", food["vegetarian_factor"], "kg_co2e_per_meal", food.get("source", "")))
+        if food.get("vegan_factor"):
+            ef["catering"]["vegan_meal"]["factor"] = food["vegan_factor"]
+            updated.append(f"Vegan meal: {food['vegan_factor']} kg CO₂e")
+            db_rows.append(("catering", "vegan_meal", "global", food["vegan_factor"], "kg_co2e_per_meal", food.get("source", "")))
 
     if updated:
         ef["last_agent_update"] = datetime.utcnow().isoformat()
         with open(ef_path, "w") as f:
             json.dump(ef, f, indent=2)
+
+    # Persist updated factors to EmissionFactorDB
+    if db_rows:
+        await _upsert_emission_factors(db_rows)
 
     return {"updated_fields": updated, "total": len(updated)}
 
