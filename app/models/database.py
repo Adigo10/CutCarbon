@@ -69,6 +69,8 @@ class ScenarioDB(Base):
     accommodation_tco2e = Column(Float, default=0.0)
     catering_tco2e = Column(Float, default=0.0)
     materials_waste_tco2e = Column(Float, default=0.0)
+    equipment_tco2e = Column(Float, default=0.0)
+    swag_tco2e = Column(Float, default=0.0)
     total_tco2e = Column(Float, default=0.0)
     per_attendee_tco2e = Column(Float, default=0.0)
     data_quality = Column(String, default="estimated")
@@ -80,6 +82,7 @@ class ScenarioDB(Base):
 
     assumptions = Column(JSON, default={})
     input_payload = Column(JSON, default={})
+    factors_snapshot = Column(JSON, default={})
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     user_id = Column(Integer, nullable=True)
@@ -177,8 +180,11 @@ async def init_db():
             "ALTER TABLE scenarios ADD COLUMN scope1_tco2e FLOAT DEFAULT 0.0",
             "ALTER TABLE scenarios ADD COLUMN scope2_tco2e FLOAT DEFAULT 0.0",
             "ALTER TABLE scenarios ADD COLUMN scope3_tco2e FLOAT DEFAULT 0.0",
+            "ALTER TABLE scenarios ADD COLUMN equipment_tco2e FLOAT DEFAULT 0.0",
+            "ALTER TABLE scenarios ADD COLUMN swag_tco2e FLOAT DEFAULT 0.0",
             "ALTER TABLE scenarios ADD COLUMN event_type TEXT DEFAULT 'conference'",
             "ALTER TABLE scenarios ADD COLUMN updated_at DATETIME",
+            "ALTER TABLE scenarios ADD COLUMN factors_snapshot JSON DEFAULT '{}'",
             # agent_runs table added via Base.metadata.create_all; no ALTER needed
         ]
         for sql in migrations:

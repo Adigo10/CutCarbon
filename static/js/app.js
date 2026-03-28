@@ -47,6 +47,7 @@ function app() {
     scopeChart: null,
     intensityTrendChart: null,
     opportunityChart: null,
+    factorsChart: null,
     dashboardRenderTimer: null,
     dashboardStabilizeTimer: null,
     dashboardChartError: '',
@@ -363,11 +364,20 @@ function app() {
 
     // -- Scenarios -------------------------------------------------------------
     _applyScenarios(list) {
+      const currentSelectedId = this.selectedScenario?.scenario_id || null;
       this.scenarios = list;
       if (list.length > 0) {
         this.bestScenario = [...list].sort((a, b) => a.emissions.total_tco2e - b.emissions.total_tco2e)[0];
-        if (!this.selectedScenario) this.selectedScenario = list[0];
+        this.selectedScenario = currentSelectedId
+          ? (list.find(s => s.scenario_id === currentSelectedId) || list[0])
+          : list[0];
         this.potentialSavings = Math.round(this.bestScenario.emissions.total_tco2e * 0.3 * 25 * 0.74);
+        if (this.selectedScenario) this.loadScenarioIntoFinCalc(this.selectedScenario);
+        this.scheduleDashboardRender();
+      } else {
+        this.selectedScenario = null;
+        this.bestScenario = null;
+        this.potentialSavings = null;
         this.scheduleDashboardRender();
       }
     },
@@ -693,6 +703,7 @@ function app() {
           this.drawPathwayChart();
           this.drawScopeChart();
           this.drawOpportunityChart();
+          this.drawFactorsChart();
         }
         this.drawIntensityTrendChart();
         // Successful render — always clear any stale error
@@ -990,6 +1001,65 @@ function app() {
       });
     },
 
+    drawFactorsChart() {
+      if (this.factorsChart) {
+        this.factorsChart.destroy();
+        this.factorsChart = null;
+      }
+      const s = this.selectedScenario;
+      const snap = s?.factors_snapshot;
+      if (!snap || !Object.keys(snap).length) return;
+      const ctx = document.getElementById('factorsChart');
+      if (!ctx) return;
+
+      const rows = [
+        { label: 'Long-haul flight', unit: 'kg/pkm', value: snap.travel_long_haul_economy_kg_per_pkm, color: '#0ea5e9' },
+        { label: 'Short-haul flight', unit: 'kg/pkm', value: snap.travel_short_haul_economy_kg_per_pkm, color: '#38bdf8' },
+        { label: 'Car (petrol)', unit: 'kg/pkm', value: snap.travel_car_petrol_kg_per_pkm, color: '#f59e0b' },
+        { label: `Grid (${(snap.venue_grid_region || 'global').replace('_', ' ')})`, unit: 'kg/kWh', value: snap.venue_grid_kg_per_kwh, color: '#eab308' },
+        { label: `Catering (${(snap.catering_type || 'mixed').replace(/_/g, ' ')})`, unit: 'kg/meal', value: snap.catering_kg_per_meal, color: '#22c55e' },
+        { label: `Accommodation`, unit: 'kg/room-night÷10', value: (snap.accommodation_kg_per_room_night || 0) / 10, color: '#8b5cf6' },
+        { label: 'Waste (landfill)', unit: 'kg/kg', value: snap.waste_landfill_kg_per_kg, color: '#6b7280' },
+      ].filter(r => r.value > 0);
+
+      const version = snap.ef_version ? ` · EF v${snap.ef_version}` : '';
+      this.factorsChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: rows.map(r => `${r.label} (${r.unit})`),
+          datasets: [{
+            label: 'Factor value',
+            data: rows.map(r => r.value),
+            backgroundColor: rows.map(r => `${r.color}cc`),
+            borderColor: rows.map(r => r.color),
+            borderWidth: 1,
+            borderRadius: 5,
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          indexAxis: 'y',
+          scales: {
+            x: {
+              ticks: { color: '#6b7280', font: { size: 10 }, callback: v => v.toFixed(3) },
+              grid: { color: '#e5e7eb' },
+              title: { display: true, text: `kg CO2e per unit${version}`, color: '#9ca3af', font: { size: 10 } },
+            },
+            y: { ticks: { color: '#6b7280', font: { size: 10 } }, grid: { display: false } },
+          },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: ctx => ` ${ctx.raw.toFixed(4)} kg CO2e / ${rows[ctx.dataIndex]?.unit || 'unit'}`,
+              },
+            },
+          },
+        },
+      });
+    },
+
     // -- Chat ------------------------------------------------------------------
     async sendChat() {
       const text = this.chatInput.trim();
@@ -1222,16 +1292,57 @@ function app() {
     // -- TinyFish agents -------------------------------------------------------
     async refreshAgents() {
       this.agentsRunning = true;
-      this.showToast('TinyFish agents dispatched...', 'fas fa-sync-alt text-blue');
+      this.showToast('Refreshing factors and recalculating scenarios...', 'fas fa-sync-alt text-blue');
+      const previouslySelectedId = this.selectedScenario?.scenario_id || null;
+      let agentOk = false;
+
+      // Step 1: refresh global emission factors via TinyFish (non-fatal if it fails)
       try {
-        await fetch(`${API}/api/agents/run`, { method: 'POST' });
-        setTimeout(() => {
-          this.agentsRunning = false;
-          this.showToast('Emission factors refreshed', 'fas fa-database text-accent');
-        }, 4000);
-      } catch {
-        this.agentsRunning = false;
+        const runRes = await fetch(`${API}/api/agents/run/sync?force=true`);
+        agentOk = runRes.ok;
+      } catch (_) {
+        // TinyFish unavailable — proceed to recalculate with existing factors
       }
+
+      // Step 2: recalculate all scenarios (always, regardless of TinyFish result)
+      if (this.token) {
+        try {
+          const recalcRes = await fetch(`${API}/api/scenarios/recalculate/all`, {
+            method: 'POST',
+            headers: this.authHeaders(),
+          });
+          if (!recalcRes.ok) throw new Error('Recalculate request failed');
+
+          const recalc = await recalcRes.json();
+          if (Array.isArray(recalc.scenarios)) {
+            this._applyScenarios(recalc.scenarios);
+            if (previouslySelectedId) {
+              const restored = this.scenarios.find(s => s.scenario_id === previouslySelectedId);
+              if (restored) this.selectScenario(restored);
+            }
+          }
+
+          const agentNote = agentOk ? '' : ' (factors unchanged — agent offline)';
+          if (recalc.failed_count > 0) {
+            this.showToast(
+              `${recalc.updated_count} scenarios recalculated, ${recalc.failed_count} failed${agentNote}`,
+              'fas fa-triangle-exclamation text-gold'
+            );
+          } else {
+            this.showToast(`${recalc.updated_count} scenario(s) recalculated${agentNote}`, 'fas fa-database text-accent');
+          }
+        } catch (e) {
+          this.showToast(`Recalculate failed: ${e.message}`, 'fas fa-triangle-exclamation text-red');
+        }
+      } else {
+        this.showToast(
+          agentOk ? 'Emission factors refreshed' : 'Agent offline — factors unchanged',
+          'fas fa-database text-accent'
+        );
+      }
+
+      try { await this.loadAgentStatus(); } catch (_) {}
+      this.agentsRunning = false;
     },
 
     async refreshAgentsForceful() {

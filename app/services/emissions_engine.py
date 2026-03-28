@@ -387,6 +387,39 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
     )
 
 
+def build_factors_snapshot(scenario: EventScenarioInput) -> dict:
+    """Capture the emission factor values used for this scenario calculation."""
+    grid_key = "global_average"
+    if scenario.venue_energy and scenario.venue_energy.grid_region:
+        grid_key = scenario.venue_energy.grid_region.value
+    grid_ef = EF["venue_energy"]["grids"].get(grid_key, EF["venue_energy"]["grids"]["global_average"])["factor"]
+
+    accom_type = "standard_hotel"
+    if scenario.accommodation:
+        accom_type = scenario.accommodation.accommodation_type.value
+    accom_ef = EF["accommodation"].get(accom_type, EF["accommodation"]["standard_hotel"])["factor"]
+
+    catering_type = "mixed_buffet"
+    if scenario.catering:
+        catering_type = scenario.catering.catering_type.value
+    catering_ef = EF["catering"].get(catering_type, EF["catering"]["mixed_buffet"])["factor"]
+
+    return {
+        "travel_long_haul_economy_kg_per_pkm": EF["travel"]["long_haul_flight"]["economy"],
+        "travel_short_haul_economy_kg_per_pkm": EF["travel"]["short_haul_flight"]["economy"],
+        "travel_car_petrol_kg_per_pkm": EF["travel"]["car_petrol"]["factor"],
+        "venue_grid_kg_per_kwh": grid_ef,
+        "venue_grid_region": grid_key,
+        "accommodation_kg_per_room_night": accom_ef,
+        "accommodation_type": accom_type,
+        "catering_kg_per_meal": catering_ef,
+        "catering_type": catering_type,
+        "waste_landfill_kg_per_kg": EF["materials_waste"]["general_landfill"]["factor"],
+        "ef_version": EF.get("version", "unknown"),
+        "captured_at": datetime.utcnow().isoformat(),
+    }
+
+
 def get_reduction_suggestions(result: ScenarioResult, target_pct: float = 30.0) -> list[dict]:
     """Generate ranked reduction suggestions to hit target % reduction."""
     emissions = result.emissions
