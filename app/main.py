@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse
 from pathlib import Path
 
 from app.models.database import init_db
-from app.routers import chat, scenarios, financial, agents, auth, offsets
+from app.routers import chat, scenarios, financial, agents, auth, offsets, exports
 
 app = FastAPI(
     title="EventCarbon Co-Pilot",
@@ -27,6 +27,7 @@ app.include_router(scenarios.router, prefix="/api/scenarios", tags=["Scenarios"]
 app.include_router(financial.router, prefix="/api/financial", tags=["Financial"])
 app.include_router(offsets.router,   prefix="/api/offsets",   tags=["Carbon Offsets"])
 app.include_router(agents.router,    prefix="/api/agents",    tags=["TinyFish Agents"])
+app.include_router(exports.router,   prefix="/api/exports",   tags=["Data Exports"])
 
 STATIC_DIR = Path(__file__).parent.parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

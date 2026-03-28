@@ -6,18 +6,27 @@ browser to extract live emission-factor and carbon-price data.
 SDK: https://pypi.org/project/tinyfish/
 client.agent.run(goal=..., url=...) → AgentRunResponse.result (str)
 client.agent.stream(...)            → streaming with callbacks
+
+Optimization: Results are cached in the AgentRunDB table for AGENT_TTL_HOURS.
+Agents are skipped on re-run if a successful result exists within the TTL window.
+Use force=True in run_all_agents() to bypass the cache.
 """
 import asyncio
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
+
+from sqlalchemy import select, desc
 
 from tinyfish.client import AsyncTinyFish
 from tinyfish.agent.types import CompleteEvent, ProgressEvent
 
 from app.config import settings
+
+# How long a successful agent result stays valid before the agent re-runs.
+AGENT_TTL_HOURS = 12
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
 
@@ -296,6 +305,47 @@ class CateringEmissionFactorAgent(TinyFishAgent):
         }
 
 
+# ── DB helpers ────────────────────────────────────────────────────────────────
+
+async def _get_cached_run(agent_name: str) -> Optional[dict]:
+    """
+    Return the most recent successful AgentRunDB result if it is within TTL,
+    or None if the agent needs to run again.
+    """
+    from app.models.database import AgentRunDB, AsyncSessionLocal
+    cutoff = datetime.utcnow() - timedelta(hours=AGENT_TTL_HOURS)
+    async with AsyncSessionLocal() as session:
+        row = await session.scalar(
+            select(AgentRunDB)
+            .where(AgentRunDB.agent_name == agent_name)
+            .where(AgentRunDB.status == "success")
+            .where(AgentRunDB.fetched_at >= cutoff)
+            .order_by(desc(AgentRunDB.fetched_at))
+            .limit(1)
+        )
+    return row.result_json if row else None
+
+
+async def _save_agent_run(agent: "TinyFishAgent", result: Optional[dict], error: Optional[str] = None):
+    """Persist an agent run result (or error) to AgentRunDB."""
+    from app.models.database import AgentRunDB, AsyncSessionLocal
+    provenance = (result or {}).get("_provenance", {})
+    row = AgentRunDB(
+        agent_name=agent.name,
+        category=agent.category,
+        source_url=agent.url,
+        status="error" if error else "success",
+        run_id=provenance.get("run_id"),
+        num_steps=provenance.get("num_steps"),
+        result_json={k: v for k, v in (result or {}).items() if k != "_provenance"},
+        error=error,
+        fetched_at=datetime.utcnow(),
+    )
+    async with AsyncSessionLocal() as session:
+        session.add(row)
+        await session.commit()
+
+
 # ── Agent registry ─────────────────────────────────────────────────────────────
 
 REGISTERED_AGENTS: list[TinyFishAgent] = [
@@ -310,9 +360,31 @@ REGISTERED_AGENTS: list[TinyFishAgent] = [
 
 # ── Orchestrator ───────────────────────────────────────────────────────────────
 
-async def run_all_agents() -> dict:
-    """Run all registered TinyFish agents concurrently."""
-    tasks = [agent.run() for agent in REGISTERED_AGENTS]
+async def _run_agent_with_cache(agent: TinyFishAgent, force: bool) -> dict:
+    """
+    Run a single agent with TTL cache check.
+    Returns the result dict, tagging it with a 'cache_hit' key when served from DB.
+    """
+    if not force:
+        cached = await _get_cached_run(agent.name)
+        if cached is not None:
+            print(f"[TinyFish:{agent.name}] Cache hit — skipping API call (TTL {AGENT_TTL_HOURS}h).")
+            return {**cached, "_cache_hit": True}
+
+    result = await agent.run()
+    if result is not None:
+        await _save_agent_run(agent, result)
+    else:
+        await _save_agent_run(agent, None, error="Agent returned no data")
+    return result or {"status": "no_data"}
+
+
+async def run_all_agents(force: bool = False) -> dict:
+    """
+    Run all registered TinyFish agents concurrently, respecting the TTL cache.
+    Pass force=True to bypass the cache and always call the TinyFish API.
+    """
+    tasks = [_run_agent_with_cache(agent, force) for agent in REGISTERED_AGENTS]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     output = {}
@@ -320,7 +392,7 @@ async def run_all_agents() -> dict:
         if isinstance(result, Exception):
             output[agent.name] = {"error": str(result)}
         else:
-            output[agent.name] = result or {"status": "no_data"}
+            output[agent.name] = result
 
     return output
 
@@ -393,20 +465,23 @@ async def merge_fetched_factors(results: dict) -> dict:
     return {"updated_fields": updated, "total": len(updated)}
 
 
-async def run_and_update() -> dict:
+async def run_and_update(force: bool = False) -> dict:
     """Full pipeline: run all TinyFish agents → merge → return summary."""
-    results = await run_all_agents()
+    results = await run_all_agents(force=force)
     merge_summary = await merge_fetched_factors(results)
     return {
         "agent_results": {
             k: {
+                "cache_hit": v.get("_cache_hit", False) if isinstance(v, dict) else False,
                 "status": v.get("_provenance", {}).get("status", "ok") if isinstance(v, dict) else "error",
                 "run_id": v.get("_provenance", {}).get("run_id") if isinstance(v, dict) else None,
                 "steps": v.get("_provenance", {}).get("num_steps") if isinstance(v, dict) else None,
-                "data": {kk: vv for kk, vv in v.items() if kk != "_provenance"} if isinstance(v, dict) else v,
+                "data": {kk: vv for kk, vv in v.items() if kk not in ("_provenance", "_cache_hit")} if isinstance(v, dict) else v,
             }
             for k, v in results.items()
         },
         "merge_summary": merge_summary,
         "ran_at": datetime.utcnow().isoformat(),
+        "ttl_hours": AGENT_TTL_HOURS,
+        "forced": force,
     }

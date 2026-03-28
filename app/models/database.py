@@ -144,6 +144,21 @@ class OffsetPurchaseDB(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class AgentRunDB(Base):
+    __tablename__ = "agent_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    agent_name = Column(String, nullable=False, index=True)
+    category = Column(String, nullable=True)
+    source_url = Column(String, nullable=True)
+    status = Column(String, default="success")  # success | error | skipped
+    run_id = Column(String, nullable=True)
+    num_steps = Column(Integer, nullable=True)
+    result_json = Column(JSON, nullable=True)
+    error = Column(Text, nullable=True)
+    fetched_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 # -- Session dependency --------------------------------------------------------
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -164,6 +179,7 @@ async def init_db():
             "ALTER TABLE scenarios ADD COLUMN scope3_tco2e FLOAT DEFAULT 0.0",
             "ALTER TABLE scenarios ADD COLUMN event_type TEXT DEFAULT 'conference'",
             "ALTER TABLE scenarios ADD COLUMN updated_at DATETIME",
+            # agent_runs table added via Base.metadata.create_all; no ALTER needed
         ]
         for sql in migrations:
             try:

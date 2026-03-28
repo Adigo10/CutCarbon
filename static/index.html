@@ -7,6 +7,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.5/dist/cdn.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
   <style>
     [x-cloak] { display: none !important; }
@@ -139,7 +140,7 @@
     <div class="px-4 pb-2 text-xs text-muted uppercase tracking-widest">Navigation</div>
     <template x-for="item in navItems" :key="item.id">
       <div class="nav-item" :class="{'active': activeTab === item.id}"
-        @click="activeTab = item.id; if(item.id==='offsets') loadOffsetData(); if(item.id==='dashboard' && scenarios.length > 0) $nextTick(() => setTimeout(() => drawCharts(), 0))">
+        @click="switchTab(item.id)">
         <i :class="item.icon"></i>
         <span x-text="item.label"></span>
         <span x-show="item.id === 'scenarios' && scenarios.length > 0"
@@ -182,7 +183,11 @@
   </div>
 
   <!-- DASHBOARD -->
-  <div x-show="activeTab === 'dashboard'" x-transition>
+  <div x-show="activeTab === 'dashboard'" x-transition x-effect="if (activeTab === 'dashboard') scheduleDashboardRender()">
+    <div x-show="dashboardChartError" class="mb-4 rounded-lg px-4 py-3 text-sm" style="background:var(--red-bg);color:var(--red);border:1px solid rgba(220,38,38,0.25)">
+      <i class="fas fa-triangle-exclamation mr-2"></i>
+      <span x-text="dashboardChartError"></span>
+    </div>
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
       <div class="kpi-card glow">
         <div class="text-xs text-muted uppercase tracking-widest mb-1">Total Scenarios</div>
@@ -263,6 +268,17 @@
         </div>
       </div>
     </div>
+    <!-- Mermaid Flowchart -->
+    <div class="card mb-4" x-show="selectedScenario" x-transition>
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="font-semibold flex items-center gap-2"><i class="fas fa-diagram-project text-accent"></i> Emission Flow Diagram</h3>
+        <button class="btn-ghost text-xs" @click="renderFlowchart()"><i class="fas fa-refresh mr-1"></i>Regenerate</button>
+      </div>
+      <div id="mermaidFlowchart" class="overflow-x-auto text-center" style="min-height:120px">
+        <div class="text-xs text-muted py-8">Select a scenario to generate its flowchart.</div>
+      </div>
+    </div>
+
     <!-- Quick actions -->
     <div class="card mt-4" x-show="!selectedScenario && scenarios.length === 0">
       <h3 class="font-semibold mb-4">Get Started</h3>
@@ -917,6 +933,146 @@
         <p class="text-muted text-sm">Configure inputs and run compliance check</p>
       </div>
     </div>
+  </div>
+
+  <!-- DATA & EXPORTS -->
+  <div x-show="activeTab === 'data'" x-transition>
+
+    <!-- Download cards -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div class="card flex flex-col items-center text-center py-6 hover:border-accent cursor-pointer transition-colors" style="border-color:var(--border)"
+        @click="downloadFile('/api/exports/scenarios.xlsx', 'scenarios.xlsx')">
+        <i class="fas fa-table text-3xl mb-3 text-accent"></i>
+        <div class="font-semibold text-sm mb-1">Scenarios (Excel)</div>
+        <div class="text-xs text-muted">All scenarios with category and scope breakdown</div>
+        <span class="badge badge-green mt-3">.xlsx</span>
+      </div>
+      <div class="card flex flex-col items-center text-center py-6 hover:border-accent cursor-pointer transition-colors" style="border-color:var(--border)"
+        @click="downloadScenarioReport()">
+        <i class="fas fa-file-contract text-3xl mb-3 text-gold"></i>
+        <div class="font-semibold text-sm mb-1">Scenario Report (Excel)</div>
+        <div class="text-xs text-muted">Full report for selected scenario with charts</div>
+        <span class="badge badge-yellow mt-3">.xlsx</span>
+      </div>
+      <div class="card flex flex-col items-center text-center py-6 hover:border-accent cursor-pointer transition-colors" style="border-color:var(--border)"
+        @click="downloadFile('/api/exports/emission-factors.xlsx', 'emission-factors.xlsx')">
+        <i class="fas fa-database text-3xl mb-3 text-blue"></i>
+        <div class="font-semibold text-sm mb-1">Emission Factors (Excel)</div>
+        <div class="text-xs text-muted">Full emission factor catalog with sources</div>
+        <span class="badge badge-blue mt-3">.xlsx</span>
+      </div>
+      <div class="card flex flex-col items-center text-center py-6 hover:border-accent cursor-pointer transition-colors" style="border-color:var(--border)"
+        @click="downloadFile('/api/exports/agent-runs.xlsx', 'agent-runs.xlsx')">
+        <i class="fas fa-robot text-3xl mb-3" style="color:#7c3aed"></i>
+        <div class="font-semibold text-sm mb-1">Agent Runs (Excel)</div>
+        <div class="text-xs text-muted">TinyFish run history with provenance data</div>
+        <span class="badge mt-3" style="background:#ede9fe;color:#7c3aed;border:1px solid rgba(124,58,237,0.25)">.xlsx</span>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+      <div class="card flex flex-col items-center text-center py-6 hover:border-accent cursor-pointer transition-colors" style="border-color:var(--border)"
+        @click="downloadFileAuth('/api/exports/scenarios.json', 'scenarios.json')">
+        <i class="fas fa-code text-3xl mb-3 text-accent"></i>
+        <div class="font-semibold text-sm mb-1">Raw Scenarios (JSON)</div>
+        <div class="text-xs text-muted">Machine-readable export with full input payloads</div>
+        <span class="badge badge-green mt-3">.json</span>
+      </div>
+      <div class="card flex flex-col items-center text-center py-6 hover:border-accent cursor-pointer transition-colors" style="border-color:var(--border)"
+        @click="downloadFile('/api/exports/emission-factors.json', 'emission-factors.json')" >
+        <i class="fas fa-leaf text-3xl mb-3 text-accent"></i>
+        <div class="font-semibold text-sm mb-1">Emission Factors (JSON)</div>
+        <div class="text-xs text-muted">Raw emission_factors.json as served by the backend</div>
+        <span class="badge badge-green mt-3">.json</span>
+      </div>
+    </div>
+
+    <!-- TinyFish agent status -->
+    <div class="card mb-4">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="font-semibold flex items-center gap-2"><i class="fas fa-robot text-accent"></i> TinyFish Agent Status</h3>
+        <div class="flex gap-2">
+          <button class="btn-ghost text-xs" @click="loadAgentStatus()"><i class="fas fa-refresh mr-1"></i>Refresh</button>
+          <button class="btn-ghost text-xs" @click="refreshAgentsForceful()">
+            <i class="fas fa-bolt mr-1 text-gold"></i>Force Re-fetch
+          </button>
+        </div>
+      </div>
+      <div x-show="agentStatus.length === 0" class="text-xs text-muted py-4 text-center">Loading agent status...</div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs" x-show="agentStatus.length > 0">
+          <thead>
+            <tr class="border-b" style="border-color:var(--border)">
+              <th class="text-left py-2 text-muted font-medium">Agent</th>
+              <th class="text-left py-2 text-muted font-medium">Category</th>
+              <th class="text-left py-2 text-muted font-medium">Last Run</th>
+              <th class="text-left py-2 text-muted font-medium">Status</th>
+              <th class="text-left py-2 text-muted font-medium">Cache</th>
+              <th class="text-left py-2 text-muted font-medium">TTL</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="a in agentStatus" :key="a.name">
+              <tr class="border-b" style="border-color:var(--border)">
+                <td class="py-2 font-mono font-medium" x-text="a.name"></td>
+                <td class="py-2 text-muted" x-text="a.category"></td>
+                <td class="py-2 text-muted" x-text="a.last_run ? new Date(a.last_run).toLocaleString() : 'Never'"></td>
+                <td class="py-2">
+                  <span class="badge" :class="a.last_status === 'success' ? 'badge-green' : a.last_status === 'error' ? 'badge-red' : 'badge-yellow'"
+                    x-text="a.last_status || 'pending'"></span>
+                </td>
+                <td class="py-2">
+                  <span class="badge" :class="a.cache_valid ? 'badge-green' : 'badge-yellow'"
+                    x-text="a.cache_valid ? 'Valid' : 'Stale'"></span>
+                </td>
+                <td class="py-2 text-muted" x-text="a.ttl_hours + 'h'"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Agent run history -->
+    <div class="card">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="font-semibold flex items-center gap-2"><i class="fas fa-history text-accent"></i> Agent Run History</h3>
+        <button class="btn-ghost text-xs" @click="loadAgentHistory()"><i class="fas fa-refresh mr-1"></i>Load</button>
+      </div>
+      <div x-show="agentHistory.length === 0" class="text-xs text-muted py-4 text-center">Click Load to fetch run history</div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs" x-show="agentHistory.length > 0">
+          <thead>
+            <tr class="border-b" style="border-color:var(--border)">
+              <th class="text-left py-2 text-muted font-medium">#</th>
+              <th class="text-left py-2 text-muted font-medium">Agent</th>
+              <th class="text-left py-2 text-muted font-medium">Status</th>
+              <th class="text-left py-2 text-muted font-medium">Run ID</th>
+              <th class="text-left py-2 text-muted font-medium">Steps</th>
+              <th class="text-left py-2 text-muted font-medium">Fetched At</th>
+              <th class="text-left py-2 text-muted font-medium">Data Preview</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="r in agentHistory" :key="r.id">
+              <tr class="border-b hover:bg-surface-2" style="border-color:var(--border)">
+                <td class="py-2 text-muted" x-text="r.id"></td>
+                <td class="py-2 font-mono font-medium" x-text="r.agent_name"></td>
+                <td class="py-2">
+                  <span class="badge" :class="r.status === 'success' ? 'badge-green' : r.status === 'error' ? 'badge-red' : 'badge-yellow'"
+                    x-text="r.status"></span>
+                </td>
+                <td class="py-2 text-muted font-mono truncate" style="max-width:120px" :title="r.run_id" x-text="r.run_id ? r.run_id.slice(0,12) + '…' : '—'"></td>
+                <td class="py-2 text-muted" x-text="r.num_steps || '—'"></td>
+                <td class="py-2 text-muted" x-text="r.fetched_at ? new Date(r.fetched_at).toLocaleString() : '—'"></td>
+                <td class="py-2 text-muted font-mono truncate" style="max-width:180px" x-text="r.data ? JSON.stringify(r.data).slice(0,60) + '…' : r.error || '—'"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
   </div>
 
 </main>

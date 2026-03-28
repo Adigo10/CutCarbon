@@ -13,6 +13,7 @@ function app() {
       { id: 'financial',  label: 'Financial',       icon: 'fas fa-coins',            desc: 'Carbon tax savings, incentives and ROI calculator' },
       { id: 'offsets',    label: 'Carbon Credits',  icon: 'fas fa-certificate',      desc: 'Browse offset projects, track portfolio, retire credits' },
       { id: 'compliance', label: 'Compliance',      icon: 'fas fa-shield-halved',    desc: 'GHG Protocol, ISO 20121, SBTi and regional compliance' },
+      { id: 'data',       label: 'Data & Exports',  icon: 'fas fa-file-export',      desc: 'Download data as Excel or JSON, view agent run history' },
     ],
     quickActions: [],
 
@@ -32,6 +33,10 @@ function app() {
     toast: { show: false, message: '', icon: 'fas fa-check text-accent' },
     agentsRunning: false,
 
+    // -- Data & Exports --------------------------------------------------------
+    agentStatus: [],
+    agentHistory: [],
+
     // -- Dashboard -------------------------------------------------------------
     bestScenario: null,
     potentialSavings: null,
@@ -40,6 +45,10 @@ function app() {
     comparisonChart: null,
     pathwayChart: null,
     scopeChart: null,
+    dashboardRenderTimer: null,
+    dashboardStabilizeTimer: null,
+    dashboardChartError: '',
+    dashboardRenderAttempts: 0,
 
     emissionCategories: [
       { key: 'travel_tco2e',           label: 'Travel',        color: '#0369a1', icon: 'fa-plane' },
@@ -151,12 +160,23 @@ function app() {
 
     // -- Init ------------------------------------------------------------------
     async init() {
+      // Initialise Mermaid with dark-friendly theme
+      if (typeof mermaid !== 'undefined') {
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', fontFamily: 'Inter, system-ui, sans-serif' });
+      }
+
       this.quickActions = [
         { icon: 'fas fa-robot', title: 'Ask the Co-Pilot', desc: 'Describe your event in plain English', handler: () => this.activeTab = 'chat' },
         { icon: 'fas fa-chart-pie', title: 'Build a Scenario', desc: 'Fill in the structured form', handler: () => this.activeTab = 'scenarios' },
         { icon: 'fas fa-coins', title: 'Calculate Savings', desc: 'See carbon tax & incentive benefits', handler: () => this.activeTab = 'financial' },
         { icon: 'fas fa-certificate', title: 'Offset Credits', desc: 'Browse and manage carbon offsets', handler: () => this.activeTab = 'offsets' },
       ];
+
+      // Redraw charts when viewport changes to keep canvases visible and sized correctly.
+      window.addEventListener('resize', () => {
+        if (this.activeTab === 'dashboard') this.scheduleDashboardRender();
+      });
+
       if (this.token) {
         try {
           // Fetch user info and scenarios in parallel
@@ -177,6 +197,84 @@ function app() {
           localStorage.removeItem('cc_token');
         }
       }
+    },
+
+    switchTab(tabId) {
+      this.activeTab = tabId;
+      if (tabId === 'offsets') this.loadOffsetData();
+      if (tabId === 'data') this.loadAgentStatus();
+      if (tabId === 'dashboard') this.scheduleDashboardRender();
+    },
+
+    scheduleDashboardRender() {
+      if (this.dashboardRenderTimer) {
+        clearTimeout(this.dashboardRenderTimer);
+        this.dashboardRenderTimer = null;
+      }
+      if (this.dashboardStabilizeTimer) {
+        clearTimeout(this.dashboardStabilizeTimer);
+        this.dashboardStabilizeTimer = null;
+      }
+      // Increment version on the DOM element (non-reactive) so any in-progress retry loops
+      // from a previous render cycle abort without triggering Alpine's x-effect again.
+      const el = this.$el;
+      const version = (el._chartRenderVersion = (el._chartRenderVersion || 0) + 1);
+
+      this.$nextTick(() => {
+        // Wait for x-show/x-transition layout before Chart.js measures canvas dimensions.
+        this.dashboardRenderTimer = setTimeout(() => {
+          if (this.activeTab !== 'dashboard' || el._chartRenderVersion !== version) return;
+          if (!this.selectedScenario && this.scenarios.length > 0) this.selectedScenario = this.scenarios[0];
+
+          // Wait for Alpine to process the selectedScenario reactive update (removes display:none
+          // from x-show="selectedScenario" canvas containers) before checking canvas dimensions.
+          this.$nextTick(() => {
+            if (el._chartRenderVersion !== version) return;
+            this.dashboardRenderAttempts = 0;
+            this.drawChartsWhenReady(true, false, version, el);
+            this.renderFlowchart();
+
+            // A second delayed pass avoids zero-size canvases during transitions.
+            // reportErrors=true so that persistent failures are surfaced after this final attempt.
+            this.dashboardStabilizeTimer = setTimeout(() => {
+              if (this.activeTab !== 'dashboard' || el._chartRenderVersion !== version) return;
+              this.drawChartsWhenReady(false, true, version, el);
+            }, 420);
+          });
+        }, 120);
+      });
+    },
+
+    drawChartsWhenReady(resetError = true, reportErrors = false, version = 0, el = null) {
+      if (version && el && el._chartRenderVersion !== version) return;
+
+      const categoryCanvas = document.getElementById('categoryChart');
+      const comparisonCanvas = document.getElementById('comparisonChart');
+      const hasScenarioCanvas = !this.selectedScenario || (
+        categoryCanvas && categoryCanvas.clientWidth > 0 && categoryCanvas.clientHeight > 0
+      );
+      // If there are no scenarios the comparison canvas stays display:none — treat as ready (nothing to draw).
+      const hasComparisonCanvas = this.scenarios.length === 0 || !comparisonCanvas || (
+        comparisonCanvas.clientWidth > 0 && comparisonCanvas.clientHeight > 0
+      );
+
+      if (hasScenarioCanvas && hasComparisonCanvas) {
+        this.drawCharts(resetError, reportErrors);
+        return;
+      }
+
+      if (this.dashboardRenderAttempts >= 8) {
+        this.drawCharts(resetError, reportErrors);
+        return;
+      }
+
+      this.dashboardRenderAttempts += 1;
+      const attempt = this.dashboardRenderAttempts;
+      setTimeout(() => {
+        if (this.activeTab !== 'dashboard') return;
+        if (version && el && el._chartRenderVersion !== version) return;
+        this.drawChartsWhenReady(resetError && attempt === 1, reportErrors, version, el);
+      }, 140);
     },
 
     // -- Auth ------------------------------------------------------------------
@@ -266,8 +364,7 @@ function app() {
         this.bestScenario = [...list].sort((a, b) => a.emissions.total_tco2e - b.emissions.total_tco2e)[0];
         if (!this.selectedScenario) this.selectedScenario = list[0];
         this.potentialSavings = Math.round(this.bestScenario.emissions.total_tco2e * 0.3 * 25 * 0.74);
-        // Use setTimeout(0) after $nextTick so browser reflows before Chart.js measures canvas dimensions
-        this.$nextTick(() => setTimeout(() => this.drawCharts(), 0));
+        this.scheduleDashboardRender();
       }
     },
 
@@ -315,7 +412,7 @@ function app() {
         this.newScenario.name = '';
         this.newScenario.travel_segments = [];
         this.showToast(`Scenario "${scenario.name}" ${isEdit ? 'updated' : 'calculated'}: ${scenario.emissions.total_tco2e.toFixed(2)} tCO2e`);
-        this.$nextTick(() => setTimeout(() => this.drawCharts(), 0));
+        this.scheduleDashboardRender();
         this.complianceScore = Math.round(50 + (scenario.emissions.per_attendee_tco2e < 0.5 ? 30 : 0));
       } catch (e) {
         this.showToast('Error: ' + e.message, 'fas fa-triangle-exclamation text-red');
@@ -434,7 +531,7 @@ function app() {
         const cloned = await res.json();
         this.scenarios.unshift(cloned);
         this.showToast('Scenario cloned: ' + name);
-        this.$nextTick(() => setTimeout(() => this.drawCharts(), 0));
+        this.scheduleDashboardRender();
       } catch (e) {
         this.showToast('Clone failed', 'fas fa-triangle-exclamation text-red');
       }
@@ -450,7 +547,7 @@ function app() {
       if (this.selectedScenario?.scenario_id === id) this.selectedScenario = this.scenarios[0] || null;
       this.suggestions = [];
       this.showToast('Scenario deleted');
-      this.$nextTick(() => setTimeout(() => this.drawCharts(), 0));
+      this.scheduleDashboardRender();
     },
 
     async exportScenario(s) {
@@ -479,7 +576,7 @@ function app() {
       this.complianceInput.total_tco2e = s.emissions.total_tco2e;
       this.complianceInput.attendees = s.attendees;
       this.complianceInput.event_days = s.event_days;
-      this.$nextTick(() => setTimeout(() => this.drawCharts(), 0));
+      this.scheduleDashboardRender();
     },
 
     async getSuggestions(scenario) {
@@ -504,12 +601,28 @@ function app() {
     },
 
     // -- Charts ----------------------------------------------------------------
-    drawCharts() {
-      this.drawCategoryChart();
-      this.drawComparisonChart();
-      if (this.selectedScenario) {
-        this.drawPathwayChart();
-        this.drawScopeChart();
+    drawCharts(resetError = true, reportErrors = true) {
+      if (resetError) this.dashboardChartError = '';
+
+      if (typeof Chart === 'undefined') {
+        if (reportErrors) this.dashboardChartError = 'Chart.js failed to load. Check internet/CDN access and refresh.';
+        return;
+      }
+
+      try {
+        this.drawCategoryChart();
+        this.drawComparisonChart();
+        if (this.selectedScenario) {
+          this.drawPathwayChart();
+          this.drawScopeChart();
+        }
+        // Successful render — always clear any stale error
+        this.dashboardChartError = '';
+      } catch (err) {
+        if (reportErrors) {
+          const msg = err && err.message ? err.message : 'Unknown chart rendering error';
+          this.dashboardChartError = `Dashboard charts failed to render: ${msg}`;
+        }
       }
     },
 
@@ -911,6 +1024,148 @@ function app() {
         }, 4000);
       } catch {
         this.agentsRunning = false;
+      }
+    },
+
+    async refreshAgentsForceful() {
+      this.agentsRunning = true;
+      this.showToast('Force re-fetching all agents...', 'fas fa-bolt text-gold');
+      try {
+        await fetch(`${API}/api/agents/run?force=true`, { method: 'POST' });
+        setTimeout(async () => {
+          this.agentsRunning = false;
+          await this.loadAgentStatus();
+          this.showToast('Force refresh dispatched', 'fas fa-bolt text-gold');
+        }, 4000);
+      } catch {
+        this.agentsRunning = false;
+      }
+    },
+
+    // -- Data & Exports --------------------------------------------------------
+    async loadAgentStatus() {
+      try {
+        const res = await fetch(`${API}/api/agents/status`);
+        if (res.ok) this.agentStatus = await res.json();
+      } catch (e) {
+        console.error('Failed to load agent status:', e);
+      }
+    },
+
+    async loadAgentHistory() {
+      try {
+        const res = await fetch(`${API}/api/agents/history?limit=50`);
+        if (res.ok) this.agentHistory = await res.json();
+      } catch (e) {
+        console.error('Failed to load agent history:', e);
+      }
+    },
+
+    downloadFile(url, filename) {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+    },
+
+    downloadFileAuth(url, filename) {
+      // For auth-protected endpoints, fetch with bearer token then trigger download
+      fetch(url, { headers: { 'Authorization': `Bearer ${this.token}` } })
+        .then(r => r.blob())
+        .then(blob => {
+          const objUrl = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = objUrl;
+          a.download = filename;
+          a.click();
+          URL.revokeObjectURL(objUrl);
+        })
+        .catch(() => this.showToast('Download failed', 'fas fa-triangle-exclamation text-red'));
+    },
+
+    downloadScenarioReport() {
+      if (!this.selectedScenario) {
+        this.showToast('Select a scenario first', 'fas fa-triangle-exclamation text-gold');
+        return;
+      }
+      this.downloadFile(
+        `/api/exports/scenarios/${this.selectedScenario.scenario_id}.xlsx`,
+        `report_${this.selectedScenario.scenario_id}.xlsx`
+      );
+    },
+
+    // -- Mermaid flowchart -----------------------------------------------------
+    async renderFlowchart() {
+      const s = this.selectedScenario;
+      if (!s) return;
+
+      const em = s.emissions;
+      const total = em.total_tco2e || 0.001;
+      const fmt = v => (v || 0).toFixed(3) + ' t';
+
+      const categories = [
+        { key: 'travel_tco2e',          label: 'Travel',        id: 'TR', scope: 3, color: '#0369a1' },
+        { key: 'venue_energy_tco2e',     label: 'Venue Energy',  id: 'VE', scope: 2, color: '#1a9e6e' },
+        { key: 'accommodation_tco2e',    label: 'Accommodation', id: 'AC', scope: 3, color: '#d97706' },
+        { key: 'catering_tco2e',         label: 'Catering',      id: 'CA', scope: 3, color: '#ea580c' },
+        { key: 'materials_waste_tco2e',  label: 'Waste',         id: 'WA', scope: 3, color: '#7c3aed' },
+      ].filter(c => (em[c.key] || 0) > 0);
+
+      const scopes = s.emissions.scopes || {};
+      const s1 = (scopes.scope1_tco2e || 0).toFixed(3);
+      const s2 = (scopes.scope2_tco2e || 0).toFixed(3);
+      const s3 = (scopes.scope3_tco2e || 0).toFixed(3);
+
+      let diagram = `flowchart TD\n`;
+      diagram += `  EVT["🏢 ${s.name}\\n${s.attendees || '?'} attendees · ${s.event_days || '?'} days"]\n`;
+
+      // Category nodes
+      for (const c of categories) {
+        diagram += `  ${c.id}["${c.label}\\n${fmt(em[c.key])}"]\n`;
+      }
+
+      // Scope nodes
+      if (parseFloat(s1) > 0) diagram += `  S1["Scope 1\\nDirect\\n${s1} t"]\n`;
+      if (parseFloat(s2) > 0) diagram += `  S2["Scope 2\\nEnergy\\n${s2} t"]\n`;
+      if (parseFloat(s3) > 0) diagram += `  S3["Scope 3\\nIndirect\\n${s3} t"]\n`;
+
+      // Total node
+      diagram += `  TOT(["Total\\n${fmt(total)}\\n${fmt(em.per_attendee_tco2e)}/attendee"])\n`;
+
+      // Edges: event → categories
+      for (const c of categories) {
+        diagram += `  EVT --> ${c.id}\n`;
+      }
+      // Edges: categories → scopes
+      for (const c of categories) {
+        const scopeId = `S${c.scope}`;
+        if (diagram.includes(`  ${scopeId}[`)) {
+          diagram += `  ${c.id} --> ${scopeId}\n`;
+        }
+      }
+      // Edges: scopes → total
+      for (const sid of ['S1', 'S2', 'S3']) {
+        if (diagram.includes(`  ${sid}[`)) {
+          diagram += `  ${sid} --> TOT\n`;
+        }
+      }
+
+      // Style
+      diagram += `  style EVT fill:#1a9e6e,color:#fff,stroke:#15805a\n`;
+      diagram += `  style TOT fill:#1a9e6e,color:#fff,stroke:#15805a\n`;
+      if (diagram.includes('  S1[')) diagram += `  style S1 fill:#fee2e2,color:#dc2626,stroke:#dc2626\n`;
+      if (diagram.includes('  S2[')) diagram += `  style S2 fill:#fef3c7,color:#d97706,stroke:#d97706\n`;
+      if (diagram.includes('  S3[')) diagram += `  style S3 fill:#e0f2fe,color:#0369a1,stroke:#0369a1\n`;
+
+      const el = document.getElementById('mermaidFlowchart');
+      if (!el) return;
+      el.innerHTML = '';
+
+      try {
+        const { svg } = await mermaid.render('mermaid-' + Date.now(), diagram);
+        el.innerHTML = svg;
+      } catch (err) {
+        el.innerHTML = `<pre class="text-xs text-muted p-4 overflow-x-auto">${diagram}</pre>`;
       }
     },
   };

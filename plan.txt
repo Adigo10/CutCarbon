@@ -1,0 +1,46 @@
+CutCarbon — Implementation Plan
+================================
+
+COMPLETED
+---------
+[x] JWT auth (register, login, /me)
+[x] Carbon offset management (projects, portfolio, retire/cancel)
+[x] Scope 3 negative value clamp fix in emissions_engine.py
+
+[x] TinyFish API usage optimisation (2026-03-28)
+    - Added AGENT_TTL_HOURS = 12 constant
+    - AgentRunDB table stores every run result with provenance
+    - run_all_agents(force=False): checks DB cache before calling TinyFish API
+    - force=True query param on POST /api/agents/run bypasses cache
+    - /api/agents/status now shows cache_valid per agent
+    - /api/agents/history endpoint for paginated run history
+
+[x] Data exports (2026-03-28)
+    - GET /api/exports/scenarios.xlsx      — all user scenarios w/ scope breakdown + input payload sheet
+    - GET /api/exports/scenarios/{id}.xlsx — single scenario report with embedded bar chart
+    - GET /api/exports/emission-factors.xlsx — flattened emission factor catalog
+    - GET /api/exports/agent-runs.xlsx     — TinyFish run history
+    - GET /api/exports/scenarios.json      — raw JSON (auth-protected)
+    - GET /api/exports/emission-factors.json — raw emission_factors.json
+
+[x] Mermaid flowchart on Dashboard (2026-03-28)
+    - Mermaid.js v10 added via CDN
+    - renderFlowchart() generates flowchart TD diagram from selectedScenario
+    - Shows: Event -> Categories -> Scopes (1/2/3) -> Total
+    - Auto-renders when scenario selected/created/updated
+    - Regenerate button on dashboard card
+
+[x] Data & Exports tab in frontend (2026-03-28)
+    - New nav item "Data & Exports" (fas fa-file-export)
+    - Download cards for all 6 export endpoints
+    - TinyFish agent status table (cache valid/stale per agent)
+    - Force Re-fetch button (bypasses TTL)
+    - Agent run history table (50 most recent runs)
+
+PENDING / STRETCH
+-----------------
+[ ] Supplier forms + ingestion (structured email / shareable link)
+[ ] Multi-event history and year-over-year progress view
+[ ] Automatic offset suggestion with live provider links (TinyFish agents)
+[ ] PostgreSQL migration guide / Alembic setup
+[ ] Test suite (pytest + httpx async)

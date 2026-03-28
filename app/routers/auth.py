@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from typing import Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -54,6 +55,26 @@ async def get_current_user(
     if user is None or not user.is_active:
         raise credentials_exc
     return user
+
+
+oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
+
+
+async def get_current_user_optional(
+    token: Optional[str] = Depends(oauth2_scheme_optional),
+    db: AsyncSession = Depends(get_db),
+) -> Optional[UserDB]:
+    """Like get_current_user but returns None instead of raising for missing/bad tokens."""
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        user_id = int(payload.get("sub"))
+    except (JWTError, TypeError, ValueError):
+        return None
+    result = await db.execute(select(UserDB).where(UserDB.id == user_id))
+    user = result.scalar_one_or_none()
+    return user if (user and user.is_active) else None
 
 
 @router.post("/register", response_model=TokenWithUser, status_code=201)
