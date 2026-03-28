@@ -320,7 +320,7 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
     equip_kg, equip_s1, equip_s2, eq_notes = _equipment_emissions(scenario.equipment, days)
     scope1_total += equip_s1
     scope2_total += equip_s2
-    scope3_total += (equip_kg - equip_s1 - equip_s2)  # freight portion
+    scope3_total += max(0, equip_kg - equip_s1 - equip_s2)  # freight portion (clamped)
 
     # Swag (Scope 3)
     swag_kg, sw_notes = _swag_emissions(scenario.swag, attendees)
