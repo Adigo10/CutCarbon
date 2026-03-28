@@ -6,8 +6,8 @@
 ┌─────────────────────────────────────────────────────────┐
 │                    WEB BROWSER                          │
 │  ┌──────────────────────────────────────────────────┐   │
-│  │  Alpine.js Single-Page Application               │   │
-│  │  (HTML + CSS + JS)                               │   │
+│  │  React 19 + TypeScript Application               │   │
+│  │  (Vite SPA + fetch-based API client)             │   │
 │  │                                                  │   │
 │  │  ├─ Auth: Login/Register view                   │   │
 │  │  ├─ Dashboard: KPI cards, charts, benchmarks    │   │

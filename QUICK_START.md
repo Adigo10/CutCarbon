@@ -2,6 +2,28 @@
 
 ## 🚀 Start Here
 
+## 💻 Run Locally
+
+For the current React app, use one of these workflows:
+
+```bash
+# Backend + FastAPI-served React build
+pip install -r requirements.txt
+cd frontend
+npm install
+npm run build
+cd ..
+uvicorn app.main:app --reload --port 8000
+
+# React development server (optional, in a second terminal)
+cd frontend
+npm run dev
+```
+
+- Open `http://localhost:8000` to use the backend with the built React app.
+- Open `http://localhost:5173` for live React development against the local API.
+- Open `http://localhost:8000/docs` for Swagger.
+
 ### 1. Login / Register (30 seconds)
 
 ```

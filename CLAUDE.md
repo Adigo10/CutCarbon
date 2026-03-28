@@ -5,16 +5,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Running the Application
 
 ```bash
-# Install dependencies
+# Backend API + production-style frontend serving
 pip install -r requirements.txt
 
-# Run dev server (auto-reload)
+# Build React frontend so FastAPI can serve it at /
+cd frontend
+npm install
+npm run build
+cd ..
+
+# Run backend (auto-reload)
 uvicorn app.main:app --reload --port 8000
 
 # Access points
-# Frontend: http://localhost:8000/
+# FastAPI-served frontend: http://localhost:8000/
 # Swagger docs: http://localhost:8000/docs
 # Health check: http://localhost:8000/health
+
+# Frontend development server (optional, for React work)
+cd frontend
+npm run dev
+# React dev UI: http://localhost:5173/
 ```
 
 ## Environment Variables
@@ -45,9 +56,12 @@ Set in `.env` at project root:
 
 **Schemas**: All Pydantic request/response models in `app/models/schemas.py`. Key enums: `TravelMode`, `TravelClass`, `AccommodationType`, `CateringType`, `GridRegion`.
 
-**Frontend**: Single-page app served as static files.
-- `static/index.html` — Alpine.js + Tailwind CSS (dark green theme) + Chart.js
-- `static/js/app.js` — Alpine.js state management with 5 tabs: Dashboard, AI Co-Pilot, Scenarios, Financial, Compliance
+**Frontend**: React 19 + TypeScript single-page app in `frontend/`, bundled with Vite.
+- `frontend/src/App.tsx` — app shell, auth/session state, tab orchestration, API workflows
+- `frontend/src/components/` — dashboard widgets, charts, tab views, and UI primitives
+- `frontend/src/lib/api.ts` — typed fetch helpers for FastAPI endpoints
+- `frontend/dist/` — production build served by FastAPI at `/` when present
+- `static/` — legacy fallback UI kept for compatibility while the React app becomes the default
 
 **Static data files** (`app/data/`):
 - `emission_factors.json` — Factor catalog with source URLs and methodology tags (ICAO, DEFRA, IEA, etc.)

@@ -67,7 +67,7 @@ Welcome to **CutCarbon** — the AI-powered event carbon accounting platform. Th
 ### 4. **[ARCHITECTURE.md](ARCHITECTURE.md)** — System Design 🏗️
 **Technical architecture & flows** | Best for: Developers, system designers, understanding data flow
 
-- **System Architecture Diagram** — Frontend (Alpine.js), Backend (FastAPI), Database, External services
+- **System Architecture Diagram** — Frontend (React + Vite), Backend (FastAPI), Database, External services
 - **Complete User Journey** — Flowchart from login → scenario creation → offset → reporting
 - **Data Flow: Chat → Calculation → Result** — Step-by-step breakdown of OpenAI integration
 - **Authentication Flow** — Registration, login, JWT tokens, session persistence
@@ -162,9 +162,12 @@ CutCarbon/
 │     ├─ tax_incentives.json .... Regional tax rates
 │     └─ carbon_offsets.json .... Offset project catalog
 │
-├─ static/
-│  ├─ index.html ................ Single-page app shell
-│  └─ js/app.js ................. Alpine.js application (3000+ lines)
+├─ frontend/
+│  ├─ src/ ...................... React source code
+│  ├─ public/ ................... Favicons and static assets
+│  └─ dist/ ..................... Built frontend served by FastAPI
+│
+├─ static/ ...................... Legacy UI fallback during migration
 │
 ├─ tests/ ........................ (None currently, opportunity!)
 │

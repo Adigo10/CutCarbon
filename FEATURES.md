@@ -246,63 +246,42 @@ Output:
 ### Framework Coverage
 
 #### 1. GHG Protocol
-- **Scope 1, 2, 3 breakdown**
-- **Category-level analysis** (travel, energy, waste, etc.)
-- **Calculation methodology** documented
-- **Assumptions transparently listed**
-- **Score**: 0-100 (completeness)
+- Scope 1/2/3 and category-level accounting
+- Documented assumptions and methodology
+- Score: 0-100 (completeness)
 
-#### 2. ISO 20121 (Event Sustainability)
-- **Environmental impact assessment**
-- **Stakeholder engagement checklist**
-- **Resource efficiency targets** (energy, water, waste)
-- **Supply chain management requirements**
-- **Post-event review process**
-- **Score**: 0-100 (framework compliance)
+#### 2. ISO 20121
+- Event sustainability planning and controls
+- Resource and supply-chain checks
+- Score: 0-100 (framework compliance)
 
-#### 3. SBTi (Science-Based Targets)
-- **2030 net-zero pathway** (50% reduction target)
-- **2050 net-zero pathway** (100% reduction)
-- **Annual progress tracking**
-- **Recommended actions to stay on track**
-- **Score**: 0-100 (alignment with 1.5°C pathway)
+#### 3. SBTi
+- 2030/2050 decarbonization pathway checks
+- Progress tracking and action guidance
+- Score: 0-100 (1.5C alignment)
 
 #### 4. Regional Regulations
-- **Singapore** Carbon Tax (mandatory if > 25k tCO2e/year)
-- **EU** CBAM & ETS (for imported goods & operations)
-- **UK** Carbon Price Floor (mandatory for UK operations)
-- **USA** IRA & regional schemes (tax credits available)
-- **Score**: 0-100 (regulatory compliance)
+- Singapore, EU, UK, and USA carbon policy checks
+- Score: 0-100 (regulatory compliance)
 
 ### Export Capabilities
 
 **PDF Report**
-- Executive summary
-- Emissions breakdown charts
-- Scope classification
-- Reduction suggestions
-- Offset strategy
-- Compliance scorecard
-- Assumptions & methodology
+- Executive summary (key metrics + top actions)
+- Emissions and scope breakdown
+- Reduction and offset plan
+- Compliance status + methodology notes
 
 **Excel Workbook**
-- All input parameters
-- Calculation spreadsheets
-- Charts & graphs
-- Benchmark comparisons
-- Financial analysis
-- Compliance checklist
+- Inputs, calculations, charts, and benchmarks
+- Financial and compliance sheets
 
 **JSON Export**
-- Full scenario payload (re-importable)
-- All calculations with formula reference
-- Suitable for API integration
-- Machine-readable format
+- Re-importable scenario payload + calculations
+- API-ready machine-readable format
 
 **CSV Export**
-- Key metrics only
-- Quick analysis in your tools
-- Simplified format
+- Key metrics only for quick analysis
 
 ---
 
