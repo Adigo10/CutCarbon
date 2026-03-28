@@ -45,6 +45,8 @@ function app() {
     comparisonChart: null,
     pathwayChart: null,
     scopeChart: null,
+    intensityTrendChart: null,
+    opportunityChart: null,
     dashboardRenderTimer: null,
     dashboardStabilizeTimer: null,
     dashboardChartError: '',
@@ -111,6 +113,8 @@ function app() {
       energy_kwh: 0,
       meal_switches: 0,
       actions: [],
+      linked_scenario_id: null,
+      linked_scenario_name: null,
     },
     finResult: null,
     finLoading: false,
@@ -572,11 +576,35 @@ function app() {
     selectScenario(s) {
       this.selectedScenario = s;
       this.suggestions = [];
-      this.finCalc.baseline = s.emissions.total_tco2e;
+      this.loadScenarioIntoFinCalc(s);
       this.complianceInput.total_tco2e = s.emissions.total_tco2e;
       this.complianceInput.attendees = s.attendees;
       this.complianceInput.event_days = s.event_days;
       this.scheduleDashboardRender();
+    },
+
+    loadScenarioIntoFinCalc(s) {
+      const p = s.input_payload || {};
+      const attendees = s.attendees || 0;
+      const days = s.event_days || 1;
+      const renewablePct = p.venue_energy?.renewable_pct || 0;
+
+      // Proxy kWh formula mirrors the backend emissions engine
+      const proxyKwh = attendees * 2.0 * days * 30;
+      const kwhSavable = Math.round(proxyKwh * (1 - renewablePct / 100));
+
+      const cateringType = p.catering?.catering_type || 'mixed_buffet';
+      const switchPct = { meat_heavy: 0.60, seafood_heavy: 0.40, mixed_buffet: 0.35,
+                          vegetarian: 0.0, vegan: 0.0 }[cateringType] || 0.30;
+      const totalMeals = attendees * days * 2;
+      const mealSwitches = Math.round(totalMeals * switchPct);
+
+      this.finCalc.baseline = s.emissions.total_tco2e;
+      this.finCalc.energy_kwh = kwhSavable;
+      this.finCalc.meal_switches = mealSwitches;
+      this.finCalc.linked_scenario_id = s.scenario_id;
+      this.finCalc.linked_scenario_name = s.name;
+      this.finResult = null;
     },
 
     async getSuggestions(scenario) {
@@ -600,6 +628,55 @@ function app() {
       });
     },
 
+    topEmissionSource(scenario) {
+      if (!scenario?.emissions) return { label: 'N/A', key: null, value: 0 };
+      const top = this.emissionCategories
+        .map(c => ({ key: c.key, label: c.label, value: scenario.emissions[c.key] || 0 }))
+        .sort((a, b) => b.value - a.value)[0];
+      return top || { label: 'N/A', key: null, value: 0 };
+    },
+
+    scenarioRank(scenario) {
+      if (!scenario || this.scenarios.length === 0) return 0;
+      const sorted = [...this.scenarios].sort((a, b) => (a.emissions?.total_tco2e || 0) - (b.emissions?.total_tco2e || 0));
+      return Math.max(1, sorted.findIndex(s => s.scenario_id === scenario.scenario_id) + 1);
+    },
+
+    scenarioGapToBest(scenario) {
+      if (!scenario || !this.bestScenario) return 0;
+      const best = this.bestScenario.emissions?.total_tco2e || 0;
+      const current = scenario.emissions?.total_tco2e || 0;
+      if (best <= 0 || current <= 0) return 0;
+      return ((current - best) / current) * 100;
+    },
+
+    emissionIntensityBand(scenario) {
+      const kg = (scenario?.emissions?.per_attendee_tco2e || 0) * 1000;
+      if (kg === 0) return 'No intensity data';
+      if (kg < 90) return 'Low-intensity profile';
+      if (kg < 180) return 'Moderate-intensity profile';
+      return 'High-intensity profile';
+    },
+
+    estimatedReductionOpportunity(scenario) {
+      if (!scenario?.emissions) return 0;
+      const reductionFactors = {
+        travel_tco2e: 0.22,
+        venue_energy_tco2e: 0.45,
+        accommodation_tco2e: 0.18,
+        catering_tco2e: 0.35,
+        materials_waste_tco2e: 0.40,
+        equipment_tco2e: 0.25,
+        swag_tco2e: 0.50,
+      };
+
+      return this.emissionCategories.reduce((sum, cat) => {
+        const value = scenario.emissions[cat.key] || 0;
+        const factor = reductionFactors[cat.key] || 0;
+        return sum + value * factor;
+      }, 0);
+    },
+
     // -- Charts ----------------------------------------------------------------
     drawCharts(resetError = true, reportErrors = true) {
       if (resetError) this.dashboardChartError = '';
@@ -615,7 +692,9 @@ function app() {
         if (this.selectedScenario) {
           this.drawPathwayChart();
           this.drawScopeChart();
+          this.drawOpportunityChart();
         }
+        this.drawIntensityTrendChart();
         // Successful render — always clear any stale error
         this.dashboardChartError = '';
       } catch (err) {
@@ -693,6 +772,75 @@ function app() {
       });
     },
 
+    drawIntensityTrendChart() {
+      const ctx = document.getElementById('intensityTrendChart');
+      if (!ctx || this.scenarios.length === 0) return;
+      if (this.intensityTrendChart) this.intensityTrendChart.destroy();
+
+      const rows = [...this.scenarios]
+        .sort((a, b) => {
+          const aKey = (a.created_at || '').toString();
+          const bKey = (b.created_at || '').toString();
+          if (aKey && bKey) return aKey.localeCompare(bKey);
+          return (a.scenario_id || 0) - (b.scenario_id || 0);
+        })
+        .slice(-10);
+
+      const labels = rows.map(s => s.name.length > 16 ? `${s.name.slice(0, 16)}...` : s.name);
+      const totals = rows.map(s => s.emissions?.total_tco2e || 0);
+      const intensityKg = rows.map(s => (s.emissions?.per_attendee_tco2e || 0) * 1000);
+
+      this.intensityTrendChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            {
+              label: 'Total tCO2e',
+              data: totals,
+              borderColor: '#1a9e6e',
+              backgroundColor: 'rgba(26,158,110,0.18)',
+              fill: true,
+              tension: 0.28,
+              pointRadius: 3,
+              yAxisID: 'yTotal',
+            },
+            {
+              label: 'kg CO2e / attendee',
+              data: intensityKg,
+              borderColor: '#0369a1',
+              backgroundColor: 'transparent',
+              borderDash: [6, 4],
+              tension: 0.28,
+              pointRadius: 2,
+              yAxisID: 'yIntensity',
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          scales: {
+            x: { ticks: { color: '#6b7280', font: { size: 10 } }, grid: { color: '#e5e7eb' } },
+            yTotal: {
+              position: 'left',
+              ticks: { color: '#1a9e6e', callback: v => `${v.toFixed(1)} t` },
+              grid: { color: '#e5e7eb' },
+            },
+            yIntensity: {
+              position: 'right',
+              ticks: { color: '#0369a1', callback: v => `${v.toFixed(0)} kg` },
+              grid: { drawOnChartArea: false },
+            },
+          },
+          plugins: {
+            legend: { labels: { color: '#6b7280', boxWidth: 10, font: { size: 10 } } },
+          },
+        },
+      });
+    },
+
     drawComparisonChart() {
       const ctx = document.getElementById('comparisonChart');
       if (!ctx || this.scenarios.length === 0) return;
@@ -724,6 +872,65 @@ function app() {
           },
           plugins: {
             legend: { labels: { color: '#6b7280', font: { size: 10 }, boxWidth: 10 } },
+          },
+        },
+      });
+    },
+
+    drawOpportunityChart() {
+      const s = this.selectedScenario;
+      if (!s?.emissions) return;
+
+      const ctx = document.getElementById('opportunityChart');
+      if (!ctx) return;
+      if (this.opportunityChart) this.opportunityChart.destroy();
+
+      const reductionFactors = {
+        travel_tco2e: 0.22,
+        venue_energy_tco2e: 0.45,
+        accommodation_tco2e: 0.18,
+        catering_tco2e: 0.35,
+        materials_waste_tco2e: 0.40,
+        equipment_tco2e: 0.25,
+        swag_tco2e: 0.50,
+      };
+
+      const rows = this.emissionCategories
+        .map(cat => {
+          const base = s.emissions[cat.key] || 0;
+          return {
+            label: cat.label,
+            value: +(base * (reductionFactors[cat.key] || 0)).toFixed(4),
+            color: cat.color,
+          };
+        })
+        .filter(r => r.value > 0)
+        .sort((a, b) => b.value - a.value)
+        .slice(0, 6);
+
+      this.opportunityChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: rows.map(r => r.label),
+          datasets: [{
+            label: 'Potential reduction (tCO2e)',
+            data: rows.map(r => r.value),
+            backgroundColor: rows.map(r => `${r.color}cc`),
+            borderColor: rows.map(r => r.color),
+            borderWidth: 1,
+            borderRadius: 6,
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          indexAxis: 'y',
+          scales: {
+            x: { ticks: { color: '#6b7280', callback: v => `${v} t` }, grid: { color: '#e5e7eb' } },
+            y: { ticks: { color: '#6b7280', font: { size: 11 } }, grid: { display: false } },
+          },
+          plugins: {
+            legend: { display: false },
           },
         },
       });
