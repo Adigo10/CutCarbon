@@ -355,109 +355,125 @@
         </div>
       </div>
 
-      <div class="grid grid-cols-1 xl:grid-cols-12 gap-4 mb-4">
-        <div class="analysis-card xl:col-span-4">
-          <h3><i class="fas fa-chart-pie text-accent"></i> Emissions Composition</h3>
-          <div x-show="selectedScenario" style="height:250px"><canvas id="categoryChart"></canvas></div>
-          <div x-show="!selectedScenario" class="text-sm text-muted py-8 text-center">Create a scenario to visualize category mix.</div>
-        </div>
-        <div class="analysis-card xl:col-span-4">
-          <h3><i class="fas fa-layer-group text-gold"></i> Scope Distribution</h3>
-          <div x-show="selectedScenario?.emissions?.scopes" style="height:250px"><canvas id="scopeChart"></canvas></div>
-          <div x-show="!selectedScenario?.emissions?.scopes" class="text-sm text-muted py-8 text-center">Scope 1/2/3 bars appear after scenario calculation.</div>
-        </div>
-        <div class="analysis-card xl:col-span-4">
-          <h3><i class="fas fa-wave-square text-blue"></i> Intensity Trend</h3>
-          <div x-show="scenarios.length > 0" style="height:250px"><canvas id="intensityTrendChart"></canvas></div>
-          <div x-show="scenarios.length === 0" class="text-sm text-muted py-8 text-center">No trend yet. Add multiple scenarios.</div>
+      <div class="mb-4" x-show="scenarios.length > 0">
+        <div class="section-label">Portfolio Comparison</div>
+        <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-2">
+          <p class="text-sm text-muted max-w-3xl">These fixed charts compare every saved scenario. The active scenario is highlighted where useful, but the data never filters down to just one scenario.</p>
+          <div class="dash-mono text-xs text-muted">sorted by lowest total emissions</div>
         </div>
       </div>
 
-      <div class="grid grid-cols-1 xl:grid-cols-12 gap-4 mb-4">
+      <div class="grid grid-cols-1 xl:grid-cols-12 gap-4 mb-5">
+        <div class="analysis-card xl:col-span-5">
+          <h3><i class="fas fa-wave-square text-blue"></i> All Scenario Scorecard</h3>
+          <div x-show="scenarios.length > 0" style="height:260px"><canvas id="portfolioChart"></canvas></div>
+          <div x-show="scenarios.length === 0" class="text-sm text-muted py-8 text-center">Build scenarios to compare totals and attendee intensity.</div>
+        </div>
         <div class="analysis-card xl:col-span-7">
-          <h3><i class="fas fa-chart-column text-accent"></i> Scenario Comparison Stack</h3>
-          <div x-show="scenarios.length > 0" style="height:260px"><canvas id="comparisonChart"></canvas></div>
+          <h3><i class="fas fa-chart-column text-accent"></i> Category Stack Across All Scenarios</h3>
+          <div x-show="scenarios.length > 0" style="height:300px"><canvas id="comparisonChart"></canvas></div>
           <div x-show="scenarios.length === 0" class="text-sm text-muted py-8 text-center">Build scenarios to unlock comparison analytics.</div>
         </div>
-        <div class="analysis-card xl:col-span-5" x-show="selectedScenario">
-          <h3><i class="fas fa-arrow-trend-down text-red"></i> Reduction Opportunity by Category</h3>
-          <div style="height:260px"><canvas id="opportunityChart"></canvas></div>
-        </div>
       </div>
 
-      <div class="grid grid-cols-1 gap-4 mb-4" x-show="selectedScenario">
-        <div class="analysis-card">
-          <h3><i class="fas fa-flask text-blue"></i> Applied Emission Factors
-            <span class="text-xs text-muted font-normal ml-2" x-text="selectedScenario?.factors_snapshot?.ef_version ? '· EF v' + selectedScenario.factors_snapshot.ef_version : ''"></span>
-          </h3>
-          <div x-show="selectedScenario?.factors_snapshot && Object.keys(selectedScenario.factors_snapshot).length > 0" style="height:220px"><canvas id="factorsChart"></canvas></div>
-          <div x-show="!selectedScenario?.factors_snapshot || Object.keys(selectedScenario.factors_snapshot || {}).length === 0" class="text-sm text-muted py-8 text-center">Factor snapshot unavailable. Click Refresh Factors to generate.</div>
+      <div x-show="selectedScenario">
+        <div class="mb-4">
+          <div class="section-label">Selected Scenario Diagnostics</div>
+          <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-2">
+            <p class="text-sm text-muted max-w-3xl">These charts follow the active scenario chip above so you can inspect its mix, scopes, reduction levers, and factor assumptions in detail.</p>
+            <div class="dash-mono text-xs text-muted" x-text="selectedScenario ? selectedScenario.name : ''"></div>
+          </div>
         </div>
-      </div>
 
-      <div class="grid grid-cols-1 xl:grid-cols-12 gap-4 mb-4" x-show="selectedScenario">
-        <div class="analysis-card xl:col-span-7">
-          <h3><i class="fas fa-route text-accent"></i> Pathway to Net Zero</h3>
-          <div style="height:260px"><canvas id="pathwayChart"></canvas></div>
-        </div>
-        <div class="analysis-card xl:col-span-5">
-          <h3><i class="fas fa-brain text-blue"></i> Decision Signals</h3>
-          <div class="space-y-3 text-sm">
-            <div class="p-3 rounded-xl" style="background:var(--surface-2);border:1px solid var(--border)">
-              <div class="text-xs text-muted mb-1 uppercase tracking-wider">Primary Hotspot</div>
-              <div class="font-semibold text-accent" x-text="selectedScenario ? topEmissionSource(selectedScenario).label : '—'"></div>
-              <div class="text-xs text-muted mt-1" x-text="selectedScenario ? topEmissionSource(selectedScenario).value.toFixed(3) + ' tCO2e' : ''"></div>
-            </div>
-            <div class="p-3 rounded-xl" style="background:var(--surface-2);border:1px solid var(--border)">
-              <div class="text-xs text-muted mb-1 uppercase tracking-wider">Scenario Rank</div>
-              <div class="font-semibold" x-text="selectedScenario ? ('#' + scenarioRank(selectedScenario) + ' of ' + scenarios.length) : '—'"></div>
-              <div class="text-xs text-muted mt-1">ranked by lowest total emissions</div>
-            </div>
-            <div class="p-3 rounded-xl" style="background:var(--surface-2);border:1px solid var(--border)">
-              <div class="text-xs text-muted mb-1 uppercase tracking-wider">Potential Tax Savings</div>
-              <div class="font-semibold text-gold" x-text="potentialSavings ? ('$' + potentialSavings.toLocaleString()) : '—'"></div>
-              <div class="text-xs text-muted mt-1">estimated at 30% reduction</div>
-            </div>
-            <div class="p-3 rounded-xl" style="background:var(--surface-2);border:1px solid var(--border)">
-              <div class="text-xs text-muted mb-1 uppercase tracking-wider">Compliance Signal</div>
-              <div class="font-semibold" :class="complianceScore >= 70 ? 'text-accent' : complianceScore >= 40 ? 'text-gold' : 'text-red'"
-                x-text="complianceScore ? complianceScore + '% score' : 'Run compliance check'"></div>
-              <div class="text-xs text-muted mt-1">aligned to selected frameworks</div>
-            </div>
+        <div class="grid grid-cols-1 xl:grid-cols-12 gap-4 mb-4">
+          <div class="analysis-card xl:col-span-4">
+            <h3><i class="fas fa-chart-pie text-accent"></i> Selected Scenario Mix</h3>
+            <div style="height:250px"><canvas id="categoryChart"></canvas></div>
+          </div>
+          <div class="analysis-card xl:col-span-4">
+            <h3><i class="fas fa-layer-group text-gold"></i> Selected Scenario Scopes</h3>
+            <div style="height:250px"><canvas id="scopeChart"></canvas></div>
+          </div>
+          <div class="analysis-card xl:col-span-4">
+            <h3><i class="fas fa-arrow-trend-down text-red"></i> Reduction Opportunity by Category</h3>
+            <div style="height:250px"><canvas id="opportunityChart"></canvas></div>
           </div>
         </div>
-      </div>
 
-      <div class="analysis-card mb-4" x-show="selectedScenario?.benchmark">
-        <h3><i class="fas fa-ranking-star text-gold"></i> Industry Benchmark Positioning</h3>
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <div class="p-3 rounded-xl" style="background:var(--surface-2)">
-            <div class="text-xs text-muted mb-1">Your emissions/attendee/day</div>
-            <div class="text-xl font-bold text-accent" x-text="selectedScenario?.benchmark?.your_per_attendee_day?.toFixed(3) + ' t'"></div>
-          </div>
-          <div class="p-3 rounded-xl" style="background:var(--surface-2)">
-            <div class="text-xs text-muted mb-1">Industry typical</div>
-            <div class="text-xl font-bold" x-text="selectedScenario?.benchmark?.industry_typical?.toFixed(3) + ' t'"></div>
-          </div>
-          <div class="p-3 rounded-xl" style="background:var(--surface-2)">
-            <div class="text-xs text-muted mb-1">Best practice</div>
-            <div class="text-xl font-bold text-accent" x-text="selectedScenario?.benchmark?.industry_best_practice?.toFixed(3) + ' t'"></div>
-          </div>
-          <div class="p-3 rounded-xl" style="background:var(--surface-2)">
-            <div class="text-xs text-muted mb-1">Your ranking</div>
-            <div class="text-xl font-bold" :class="{'text-accent': selectedScenario?.benchmark?.percentile_rank === 'best practice', 'text-gold': selectedScenario?.benchmark?.percentile_rank === 'below average', 'text-red': selectedScenario?.benchmark?.percentile_rank === 'above average'}"
-              x-text="selectedScenario?.benchmark?.percentile_rank"></div>
+        <div class="grid grid-cols-1 gap-4 mb-4">
+          <div class="analysis-card">
+            <h3><i class="fas fa-flask text-blue"></i> Applied Emission Factors
+              <span class="text-xs text-muted font-normal ml-2" x-text="selectedScenario?.factors_snapshot?.ef_version ? '· EF v' + selectedScenario.factors_snapshot.ef_version : ''"></span>
+            </h3>
+            <div x-show="selectedScenario?.factors_snapshot && Object.keys(selectedScenario.factors_snapshot).length > 0" style="height:220px"><canvas id="factorsChart"></canvas></div>
+            <div x-show="!selectedScenario?.factors_snapshot || Object.keys(selectedScenario.factors_snapshot || {}).length === 0" class="text-sm text-muted py-8 text-center">Factor snapshot unavailable. Click Refresh Factors to generate.</div>
           </div>
         </div>
-      </div>
 
-      <div class="analysis-card mb-4" x-show="selectedScenario" x-transition>
-        <div class="flex items-center justify-between mb-4">
-          <h3><i class="fas fa-diagram-project text-accent"></i> Emission Flow Diagram</h3>
-          <button class="btn-ghost text-xs" @click="renderFlowchart()"><i class="fas fa-refresh mr-1"></i>Regenerate</button>
+        <div class="grid grid-cols-1 xl:grid-cols-12 gap-4 mb-4">
+          <div class="analysis-card xl:col-span-7">
+            <h3><i class="fas fa-route text-accent"></i> Pathway to Net Zero</h3>
+            <div style="height:260px"><canvas id="pathwayChart"></canvas></div>
+          </div>
+          <div class="analysis-card xl:col-span-5">
+            <h3><i class="fas fa-brain text-blue"></i> Decision Signals</h3>
+            <div class="space-y-3 text-sm">
+              <div class="p-3 rounded-xl" style="background:var(--surface-2);border:1px solid var(--border)">
+                <div class="text-xs text-muted mb-1 uppercase tracking-wider">Primary Hotspot</div>
+                <div class="font-semibold text-accent" x-text="selectedScenario ? topEmissionSource(selectedScenario).label : '—'"></div>
+                <div class="text-xs text-muted mt-1" x-text="selectedScenario ? topEmissionSource(selectedScenario).value.toFixed(3) + ' tCO2e' : ''"></div>
+              </div>
+              <div class="p-3 rounded-xl" style="background:var(--surface-2);border:1px solid var(--border)">
+                <div class="text-xs text-muted mb-1 uppercase tracking-wider">Scenario Rank</div>
+                <div class="font-semibold" x-text="selectedScenario ? ('#' + scenarioRank(selectedScenario) + ' of ' + scenarios.length) : '—'"></div>
+                <div class="text-xs text-muted mt-1">ranked by lowest total emissions</div>
+              </div>
+              <div class="p-3 rounded-xl" style="background:var(--surface-2);border:1px solid var(--border)">
+                <div class="text-xs text-muted mb-1 uppercase tracking-wider">Potential Tax Savings</div>
+                <div class="font-semibold text-gold" x-text="selectedScenario && dashboardSavingsSignal(selectedScenario) !== null ? ('$' + dashboardSavingsSignal(selectedScenario).toLocaleString()) : '—'"></div>
+                <div class="text-xs text-muted mt-1" x-text="selectedScenario ? dashboardSavingsLabel(selectedScenario) : ''"></div>
+              </div>
+              <div class="p-3 rounded-xl" style="background:var(--surface-2);border:1px solid var(--border)">
+                <div class="text-xs text-muted mb-1 uppercase tracking-wider">Compliance Signal</div>
+                <div class="font-semibold" :class="complianceScore >= 70 ? 'text-accent' : complianceScore >= 40 ? 'text-gold' : 'text-red'"
+                  x-text="complianceScore ? complianceScore + '% score' : 'Run compliance check'"></div>
+                <div class="text-xs text-muted mt-1">latest compliance run in this workspace</div>
+              </div>
+            </div>
+          </div>
         </div>
-        <div id="mermaidFlowchart" class="overflow-x-auto text-center" style="min-height:120px">
-          <div class="text-xs text-muted py-8">Select a scenario to generate its flowchart.</div>
+
+        <div class="analysis-card mb-4" x-show="selectedScenario?.benchmark">
+          <h3><i class="fas fa-ranking-star text-gold"></i> Industry Benchmark Positioning</h3>
+          <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div class="p-3 rounded-xl" style="background:var(--surface-2)">
+              <div class="text-xs text-muted mb-1">Your emissions/attendee/day</div>
+              <div class="text-xl font-bold text-accent" x-text="selectedScenario?.benchmark?.your_per_attendee_day?.toFixed(3) + ' t'"></div>
+            </div>
+            <div class="p-3 rounded-xl" style="background:var(--surface-2)">
+              <div class="text-xs text-muted mb-1">Industry typical</div>
+              <div class="text-xl font-bold" x-text="selectedScenario?.benchmark?.industry_typical?.toFixed(3) + ' t'"></div>
+            </div>
+            <div class="p-3 rounded-xl" style="background:var(--surface-2)">
+              <div class="text-xs text-muted mb-1">Best practice</div>
+              <div class="text-xl font-bold text-accent" x-text="selectedScenario?.benchmark?.industry_best_practice?.toFixed(3) + ' t'"></div>
+            </div>
+            <div class="p-3 rounded-xl" style="background:var(--surface-2)">
+              <div class="text-xs text-muted mb-1">Your ranking</div>
+              <div class="text-xl font-bold" :class="{'text-accent': selectedScenario?.benchmark?.percentile_rank === 'best practice', 'text-gold': selectedScenario?.benchmark?.percentile_rank === 'below average', 'text-red': selectedScenario?.benchmark?.percentile_rank === 'above average'}"
+                x-text="selectedScenario?.benchmark?.percentile_rank"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="analysis-card mb-4" x-transition>
+          <div class="flex items-center justify-between mb-4">
+            <h3><i class="fas fa-diagram-project text-accent"></i> Emission Flow Diagram</h3>
+            <button class="btn-ghost text-xs" @click="renderFlowchart()"><i class="fas fa-refresh mr-1"></i>Regenerate</button>
+          </div>
+          <div id="mermaidFlowchart" class="overflow-x-auto text-center" style="min-height:120px">
+            <div class="text-xs text-muted py-8">Select a scenario to generate its flowchart.</div>
+          </div>
         </div>
       </div>
 

@@ -8,18 +8,26 @@ import uuid
 
 from app.models.database import get_db, ScenarioDB, UserDB
 from app.models.schemas import EventScenarioInput, ScenarioResult, ScenarioExport
-from app.services.emissions_engine import calculate_scenario, get_reduction_suggestions, build_factors_snapshot
+from app.services.emissions_engine import (
+    calculate_scenario,
+    get_reduction_suggestions,
+    build_factors_snapshot,
+    get_benchmark_comparison,
+)
 from app.routers.auth import get_current_user
 
 router = APIRouter()
 
 
 def _db_to_result(s: ScenarioDB) -> dict:
+    event_type = getattr(s, "event_type", "conference") or "conference"
+    per_attendee_day = round(s.per_attendee_tco2e / max(s.event_days or 1, 1), 4) if s.per_attendee_tco2e else 0
+    benchmark = get_benchmark_comparison(event_type, per_attendee_day)
     return {
         "scenario_id": s.id,
         "name": s.name,
         "event_name": s.event_name,
-        "event_type": getattr(s, "event_type", "conference") or "conference",
+        "event_type": event_type,
         "attendees": s.attendees,
         "event_days": s.event_days,
         "emissions": {
@@ -43,6 +51,7 @@ def _db_to_result(s: ScenarioDB) -> dict:
         "assumptions": s.assumptions or {},
         "input_payload": s.input_payload or {},
         "factors_snapshot": getattr(s, "factors_snapshot", None) or {},
+        "benchmark": benchmark.model_dump() if benchmark else None,
         "created_at": s.created_at.isoformat() if s.created_at else "",
     }
 

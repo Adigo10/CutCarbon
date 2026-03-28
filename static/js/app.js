@@ -39,13 +39,12 @@ function app() {
 
     // -- Dashboard -------------------------------------------------------------
     bestScenario: null,
-    potentialSavings: null,
     complianceScore: null,
     categoryChart: null,
+    portfolioChart: null,
     comparisonChart: null,
     pathwayChart: null,
     scopeChart: null,
-    intensityTrendChart: null,
     opportunityChart: null,
     factorsChart: null,
     dashboardRenderTimer: null,
@@ -254,16 +253,20 @@ function app() {
       if (version && el && el._chartRenderVersion !== version) return;
 
       const categoryCanvas = document.getElementById('categoryChart');
+      const portfolioCanvas = document.getElementById('portfolioChart');
       const comparisonCanvas = document.getElementById('comparisonChart');
       const hasScenarioCanvas = !this.selectedScenario || (
         categoryCanvas && categoryCanvas.clientWidth > 0 && categoryCanvas.clientHeight > 0
+      );
+      const hasPortfolioCanvas = this.scenarios.length === 0 || !portfolioCanvas || (
+        portfolioCanvas.clientWidth > 0 && portfolioCanvas.clientHeight > 0
       );
       // If there are no scenarios the comparison canvas stays display:none — treat as ready (nothing to draw).
       const hasComparisonCanvas = this.scenarios.length === 0 || !comparisonCanvas || (
         comparisonCanvas.clientWidth > 0 && comparisonCanvas.clientHeight > 0
       );
 
-      if (hasScenarioCanvas && hasComparisonCanvas) {
+      if (hasScenarioCanvas && hasPortfolioCanvas && hasComparisonCanvas) {
         this.drawCharts(resetError, reportErrors);
         return;
       }
@@ -352,8 +355,9 @@ function app() {
       this.scenarios = [];
       this.selectedScenario = null;
       this.bestScenario = null;
-      this.potentialSavings = null;
       this.complianceScore = null;
+      this.destroySelectedScenarioCharts();
+      this.destroyPortfolioCharts();
     },
 
     // -- Toast -----------------------------------------------------------------
@@ -371,13 +375,13 @@ function app() {
         this.selectedScenario = currentSelectedId
           ? (list.find(s => s.scenario_id === currentSelectedId) || list[0])
           : list[0];
-        this.potentialSavings = Math.round(this.bestScenario.emissions.total_tco2e * 0.3 * 25 * 0.74);
         if (this.selectedScenario) this.loadScenarioIntoFinCalc(this.selectedScenario);
         this.scheduleDashboardRender();
       } else {
         this.selectedScenario = null;
         this.bestScenario = null;
-        this.potentialSavings = null;
+        this.destroySelectedScenarioCharts();
+        this.destroyPortfolioCharts();
         this.scheduleDashboardRender();
       }
     },
@@ -646,18 +650,129 @@ function app() {
       return top || { label: 'N/A', key: null, value: 0 };
     },
 
+    shortScenarioName(name, maxLength = 18) {
+      if (!name) return 'Untitled';
+      return name.length > maxLength ? `${name.slice(0, maxLength)}...` : name;
+    },
+
+    reductionFactorForCategory(key) {
+      return {
+        travel_tco2e: 0.22,
+        venue_energy_tco2e: 0.45,
+        accommodation_tco2e: 0.18,
+        catering_tco2e: 0.35,
+        materials_waste_tco2e: 0.40,
+        equipment_tco2e: 0.25,
+        swag_tco2e: 0.50,
+      }[key] || 0;
+    },
+
+    portfolioScenarioRows() {
+      const rows = this.scenarios
+        .map((scenario) => {
+          const totalTco2e = scenario.emissions?.total_tco2e || 0;
+          const intensityKg = (scenario.emissions?.per_attendee_tco2e || 0) * 1000;
+          const perDayKg = (scenario.emissions?.per_attendee_day_tco2e || 0) * 1000;
+          const hotspot = this.topEmissionSource(scenario);
+
+          return {
+            scenario,
+            scenario_id: scenario.scenario_id,
+            name: scenario.name,
+            shortName: this.shortScenarioName(scenario.name),
+            totalTco2e,
+            intensityKg,
+            perDayKg,
+            attendees: scenario.attendees || 0,
+            eventDays: scenario.event_days || 0,
+            hotspotLabel: hotspot.label,
+            hotspotValue: hotspot.value,
+            isSelected: this.selectedScenario?.scenario_id === scenario.scenario_id,
+          };
+        })
+        .sort((a, b) => {
+          if (a.totalTco2e !== b.totalTco2e) return a.totalTco2e - b.totalTco2e;
+          return a.name.localeCompare(b.name);
+        });
+
+      const bestTotal = rows[0]?.totalTco2e || 0;
+      return rows.map((row, index) => ({
+        ...row,
+        rank: index + 1,
+        gapToBestPct: bestTotal > 0 && row.totalTco2e > 0 ? ((row.totalTco2e - bestTotal) / row.totalTco2e) * 100 : 0,
+      }));
+    },
+
+    selectedScenarioCategoryRows() {
+      const s = this.selectedScenario;
+      if (!s?.emissions) return [];
+
+      return this.emissionCategories
+        .map(cat => ({
+          key: cat.key,
+          label: cat.label,
+          color: cat.color,
+          value: s.emissions[cat.key] || 0,
+        }))
+        .filter(row => row.value > 0)
+        .sort((a, b) => b.value - a.value);
+    },
+
+    selectedScenarioScopeRows() {
+      const scopes = this.selectedScenario?.emissions?.scopes;
+      if (!scopes) return [];
+
+      return [
+        { label: 'Scope 1 (Direct)', value: scopes.scope1_tco2e || 0, color: '#dc2626' },
+        { label: 'Scope 2 (Energy)', value: scopes.scope2_tco2e || 0, color: '#d97706' },
+        { label: 'Scope 3 (Indirect)', value: scopes.scope3_tco2e || 0, color: '#0369a1' },
+      ];
+    },
+
+    selectedScenarioOpportunityRows() {
+      const s = this.selectedScenario;
+      if (!s?.emissions) return [];
+
+      return this.emissionCategories
+        .map(cat => {
+          const base = s.emissions[cat.key] || 0;
+          return {
+            key: cat.key,
+            label: cat.label,
+            color: cat.color,
+            value: +(base * this.reductionFactorForCategory(cat.key)).toFixed(4),
+          };
+        })
+        .filter(row => row.value > 0)
+        .sort((a, b) => b.value - a.value)
+        .slice(0, 6);
+    },
+
+    selectedScenarioFactorRows() {
+      const snap = this.selectedScenario?.factors_snapshot;
+      if (!snap || !Object.keys(snap).length) return [];
+
+      return [
+        { label: 'Long-haul flight', unit: 'kg/pkm', value: snap.travel_long_haul_economy_kg_per_pkm, color: '#0ea5e9' },
+        { label: 'Short-haul flight', unit: 'kg/pkm', value: snap.travel_short_haul_economy_kg_per_pkm, color: '#38bdf8' },
+        { label: 'Car (petrol)', unit: 'kg/pkm', value: snap.travel_car_petrol_kg_per_pkm, color: '#f59e0b' },
+        { label: `Grid (${(snap.venue_grid_region || 'global').replace('_', ' ')})`, unit: 'kg/kWh', value: snap.venue_grid_kg_per_kwh, color: '#eab308' },
+        { label: `Catering (${(snap.catering_type || 'mixed').replace(/_/g, ' ')})`, unit: 'kg/meal', value: snap.catering_kg_per_meal, color: '#22c55e' },
+        { label: 'Accommodation', unit: 'kg/room-night÷10', value: (snap.accommodation_kg_per_room_night || 0) / 10, color: '#8b5cf6' },
+        { label: 'Waste (landfill)', unit: 'kg/kg', value: snap.waste_landfill_kg_per_kg, color: '#6b7280' },
+      ].filter(row => row.value > 0);
+    },
+
     scenarioRank(scenario) {
       if (!scenario || this.scenarios.length === 0) return 0;
-      const sorted = [...this.scenarios].sort((a, b) => (a.emissions?.total_tco2e || 0) - (b.emissions?.total_tco2e || 0));
-      return Math.max(1, sorted.findIndex(s => s.scenario_id === scenario.scenario_id) + 1);
+      const row = this.portfolioScenarioRows().find(s => s.scenario_id === scenario.scenario_id);
+      return row ? row.rank : 0;
     },
 
     scenarioGapToBest(scenario) {
-      if (!scenario || !this.bestScenario) return 0;
-      const best = this.bestScenario.emissions?.total_tco2e || 0;
-      const current = scenario.emissions?.total_tco2e || 0;
-      if (best <= 0 || current <= 0) return 0;
-      return ((current - best) / current) * 100;
+      if (!scenario) return 0;
+      const row = this.portfolioScenarioRows().find(s => s.scenario_id === scenario.scenario_id);
+      return row ? row.gapToBestPct : 0;
     },
 
     emissionIntensityBand(scenario) {
@@ -670,21 +785,42 @@ function app() {
 
     estimatedReductionOpportunity(scenario) {
       if (!scenario?.emissions) return 0;
-      const reductionFactors = {
-        travel_tco2e: 0.22,
-        venue_energy_tco2e: 0.45,
-        accommodation_tco2e: 0.18,
-        catering_tco2e: 0.35,
-        materials_waste_tco2e: 0.40,
-        equipment_tco2e: 0.25,
-        swag_tco2e: 0.50,
-      };
-
       return this.emissionCategories.reduce((sum, cat) => {
         const value = scenario.emissions[cat.key] || 0;
-        const factor = reductionFactors[cat.key] || 0;
+        const factor = this.reductionFactorForCategory(cat.key);
         return sum + value * factor;
       }, 0);
+    },
+
+    dashboardSavingsSignal(scenario) {
+      if (!scenario?.emissions) return null;
+      if (this.finResult && this.finCalc.linked_scenario_id === scenario.scenario_id) {
+        return Math.round(this.finResult.total_financial_savings_usd);
+      }
+      return Math.round((scenario.emissions.total_tco2e || 0) * 0.3 * 25 * 0.74);
+    },
+
+    dashboardSavingsLabel(scenario) {
+      if (!scenario?.emissions) return 'not available';
+      if (this.finResult && this.finCalc.linked_scenario_id === scenario.scenario_id) {
+        return 'from linked financial analysis';
+      }
+      return 'modeled at 30% reduction';
+    },
+
+    destroyDashboardChart(key) {
+      if (this[key]) {
+        this[key].destroy();
+        this[key] = null;
+      }
+    },
+
+    destroySelectedScenarioCharts() {
+      ['categoryChart', 'pathwayChart', 'scopeChart', 'opportunityChart', 'factorsChart'].forEach(key => this.destroyDashboardChart(key));
+    },
+
+    destroyPortfolioCharts() {
+      ['portfolioChart', 'comparisonChart'].forEach(key => this.destroyDashboardChart(key));
     },
 
     // -- Charts ----------------------------------------------------------------
@@ -697,15 +833,23 @@ function app() {
       }
 
       try {
-        this.drawCategoryChart();
-        this.drawComparisonChart();
+        if (this.scenarios.length > 0) {
+          this.drawPortfolioChart();
+          this.drawComparisonChart();
+        } else {
+          this.destroyPortfolioCharts();
+        }
+
         if (this.selectedScenario) {
+          this.drawCategoryChart();
           this.drawPathwayChart();
           this.drawScopeChart();
           this.drawOpportunityChart();
           this.drawFactorsChart();
+        } else {
+          this.destroySelectedScenarioCharts();
         }
-        this.drawIntensityTrendChart();
+
         // Successful render — always clear any stale error
         this.dashboardChartError = '';
       } catch (err) {
@@ -717,16 +861,17 @@ function app() {
     },
 
     drawCategoryChart() {
-      const s = this.selectedScenario;
-      if (!s) return;
+      const rows = this.selectedScenarioCategoryRows();
       const ctx = document.getElementById('categoryChart');
-      if (!ctx) return;
-      if (this.categoryChart) this.categoryChart.destroy();
+      if (!ctx || rows.length === 0) {
+        this.destroyDashboardChart('categoryChart');
+        return;
+      }
+      this.destroyDashboardChart('categoryChart');
 
-      const cats = this.emissionCategories.filter(c => (s.emissions[c.key] || 0) > 0);
-      const labels = cats.map(c => c.label);
-      const data = cats.map(c => (s.emissions[c.key] || 0) * 1000);
-      const colors = cats.map(c => c.color);
+      const labels = rows.map(row => row.label);
+      const data = rows.map(row => row.value);
+      const colors = rows.map(row => row.color);
 
       this.categoryChart = new Chart(ctx, {
         type: 'doughnut',
@@ -744,7 +889,10 @@ function app() {
             },
             tooltip: {
               callbacks: {
-                label: ctx => ` ${ctx.label}: ${(ctx.raw / 1000).toFixed(3)} tCO2e (${((ctx.raw / data.reduce((a, b) => a + b, 0)) * 100).toFixed(1)}%)`,
+                label: (tooltipItem) => {
+                  const total = data.reduce((sum, value) => sum + value, 0) || 1;
+                  return ` ${tooltipItem.label}: ${Number(tooltipItem.raw).toFixed(3)} tCO2e (${((tooltipItem.raw / total) * 100).toFixed(1)}%)`;
+                },
               },
             },
           },
@@ -753,29 +901,26 @@ function app() {
     },
 
     drawScopeChart() {
-      const s = this.selectedScenario;
-      if (!s?.emissions?.scopes) return;
+      const rows = this.selectedScenarioScopeRows();
       const ctx = document.getElementById('scopeChart');
-      if (!ctx) return;
-      if (this.scopeChart) this.scopeChart.destroy();
-
-      const scopes = s.emissions.scopes;
-      const labels = ['Scope 1 (Direct)', 'Scope 2 (Energy)', 'Scope 3 (Indirect)'];
-      const data = [scopes.scope1_tco2e || 0, scopes.scope2_tco2e || 0, scopes.scope3_tco2e || 0];
-      const colors = ['#dc2626', '#d97706', '#0369a1'];
+      if (!ctx || rows.length === 0) {
+        this.destroyDashboardChart('scopeChart');
+        return;
+      }
+      this.destroyDashboardChart('scopeChart');
 
       this.scopeChart = new Chart(ctx, {
         type: 'bar',
         data: {
-          labels,
-          datasets: [{ data, backgroundColor: colors, borderRadius: 6, barThickness: 40 }],
+          labels: rows.map(row => row.label),
+          datasets: [{ data: rows.map(row => row.value), backgroundColor: rows.map(row => row.color), borderRadius: 6, barThickness: 40 }],
         },
         options: {
           responsive: true,
           maintainAspectRatio: false,
           indexAxis: 'y',
           scales: {
-            x: { ticks: { color: '#6b7280', callback: v => v + ' t' }, grid: { color: '#e5e7eb' } },
+            x: { ticks: { color: '#6b7280', callback: value => `${Number(value).toFixed(2)} t` }, grid: { color: '#e5e7eb' } },
             y: { ticks: { color: '#6b7280', font: { size: 11 } }, grid: { display: false } },
           },
           plugins: { legend: { display: false } },
@@ -783,47 +928,41 @@ function app() {
       });
     },
 
-    drawIntensityTrendChart() {
-      const ctx = document.getElementById('intensityTrendChart');
-      if (!ctx || this.scenarios.length === 0) return;
-      if (this.intensityTrendChart) this.intensityTrendChart.destroy();
+    drawPortfolioChart() {
+      const ctx = document.getElementById('portfolioChart');
+      const rows = this.portfolioScenarioRows();
+      if (!ctx || rows.length === 0) {
+        this.destroyDashboardChart('portfolioChart');
+        return;
+      }
+      this.destroyDashboardChart('portfolioChart');
 
-      const rows = [...this.scenarios]
-        .sort((a, b) => {
-          const aKey = (a.created_at || '').toString();
-          const bKey = (b.created_at || '').toString();
-          if (aKey && bKey) return aKey.localeCompare(bKey);
-          return (a.scenario_id || 0) - (b.scenario_id || 0);
-        })
-        .slice(-10);
-
-      const labels = rows.map(s => s.name.length > 16 ? `${s.name.slice(0, 16)}...` : s.name);
-      const totals = rows.map(s => s.emissions?.total_tco2e || 0);
-      const intensityKg = rows.map(s => (s.emissions?.per_attendee_tco2e || 0) * 1000);
-
-      this.intensityTrendChart = new Chart(ctx, {
-        type: 'line',
+      this.portfolioChart = new Chart(ctx, {
+        type: 'bar',
         data: {
-          labels,
+          labels: rows.map(row => row.shortName),
           datasets: [
             {
               label: 'Total tCO2e',
-              data: totals,
-              borderColor: '#1a9e6e',
-              backgroundColor: 'rgba(26,158,110,0.18)',
-              fill: true,
-              tension: 0.28,
-              pointRadius: 3,
+              data: rows.map(row => +row.totalTco2e.toFixed(3)),
+              backgroundColor: rows.map(row => row.isSelected ? '#1a9e6e' : 'rgba(26,158,110,0.24)'),
+              borderColor: rows.map(row => row.isSelected ? '#0f6b49' : '#1a9e6e'),
+              borderWidth: rows.map(row => row.isSelected ? 2 : 1),
+              borderRadius: 6,
               yAxisID: 'yTotal',
             },
             {
+              type: 'line',
               label: 'kg CO2e / attendee',
-              data: intensityKg,
+              data: rows.map(row => +row.intensityKg.toFixed(1)),
               borderColor: '#0369a1',
               backgroundColor: 'transparent',
               borderDash: [6, 4],
               tension: 0.28,
-              pointRadius: 2,
+              pointRadius: rows.map(row => row.isSelected ? 5 : 3),
+              pointBackgroundColor: rows.map(row => row.isSelected ? '#0f172a' : '#0369a1'),
+              pointBorderColor: rows.map(row => row.isSelected ? '#1a9e6e' : '#0369a1'),
+              pointBorderWidth: rows.map(row => row.isSelected ? 2 : 1),
               yAxisID: 'yIntensity',
             },
           ],
@@ -833,20 +972,34 @@ function app() {
           maintainAspectRatio: false,
           interaction: { mode: 'index', intersect: false },
           scales: {
-            x: { ticks: { color: '#6b7280', font: { size: 10 } }, grid: { color: '#e5e7eb' } },
+            x: { ticks: { color: '#6b7280', font: { size: 10 } }, grid: { display: false } },
             yTotal: {
               position: 'left',
-              ticks: { color: '#1a9e6e', callback: v => `${v.toFixed(1)} t` },
+              ticks: { color: '#1a9e6e', callback: value => `${Number(value).toFixed(1)} t` },
               grid: { color: '#e5e7eb' },
             },
             yIntensity: {
               position: 'right',
-              ticks: { color: '#0369a1', callback: v => `${v.toFixed(0)} kg` },
+              ticks: { color: '#0369a1', callback: value => `${Number(value).toFixed(0)} kg` },
               grid: { drawOnChartArea: false },
             },
           },
           plugins: {
             legend: { labels: { color: '#6b7280', boxWidth: 10, font: { size: 10 } } },
+            tooltip: {
+              callbacks: {
+                title: items => rows[items[0]?.dataIndex]?.name || items[0]?.label || '',
+                afterBody: items => {
+                  const row = rows[items[0]?.dataIndex];
+                  if (!row) return [];
+                  return [
+                    `Rank #${row.rank} of ${rows.length}`,
+                    `${row.attendees} attendees · ${row.eventDays} day${row.eventDays === 1 ? '' : 's'}`,
+                    `Top hotspot: ${row.hotspotLabel}`,
+                  ];
+                },
+              },
+            },
           },
         },
       });
@@ -854,70 +1007,66 @@ function app() {
 
     drawComparisonChart() {
       const ctx = document.getElementById('comparisonChart');
-      if (!ctx || this.scenarios.length === 0) return;
-      if (this.comparisonChart) this.comparisonChart.destroy();
+      const rows = this.portfolioScenarioRows();
+      if (!ctx || rows.length === 0) {
+        this.destroyDashboardChart('comparisonChart');
+        return;
+      }
+      this.destroyDashboardChart('comparisonChart');
 
-      const cats = this.emissionCategories;
-      const labels = this.scenarios.slice(0, 6).map(s => s.name);
-
-      const datasets = cats.map((cat) => ({
+      const datasets = this.emissionCategories.map((cat) => ({
         label: cat.label,
-        data: this.scenarios.slice(0, 6).map(s => (s.emissions[cat.key] || 0) * 1000),
-        backgroundColor: cat.color + 'cc',
+        data: rows.map(row => +(row.scenario.emissions[cat.key] || 0).toFixed(3)),
+        backgroundColor: `${cat.color}cc`,
+        borderColor: cat.color,
+        borderWidth: 1,
         borderRadius: 4,
       }));
 
       this.comparisonChart = new Chart(ctx, {
         type: 'bar',
-        data: { labels, datasets },
+        data: { labels: rows.map(row => row.shortName), datasets },
         options: {
           responsive: true,
           maintainAspectRatio: false,
+          indexAxis: 'y',
+          interaction: { mode: 'index', intersect: false },
           scales: {
-            x: { stacked: true, ticks: { color: '#6b7280', font: { size: 10 } }, grid: { color: '#e5e7eb' } },
+            x: {
+              stacked: true,
+              ticks: { color: '#6b7280', font: { size: 10 }, callback: value => `${Number(value).toFixed(1)} t` },
+              grid: { color: '#e5e7eb' },
+            },
             y: {
               stacked: true,
-              ticks: { color: '#6b7280', font: { size: 10 }, callback: v => v.toFixed(0) + ' kg' },
-              grid: { color: '#e5e7eb' },
+              ticks: { color: '#6b7280', font: { size: 10 } },
+              grid: { display: false },
             },
           },
           plugins: {
             legend: { labels: { color: '#6b7280', font: { size: 10 }, boxWidth: 10 } },
+            tooltip: {
+              callbacks: {
+                title: items => rows[items[0]?.dataIndex]?.name || items[0]?.label || '',
+                footer: items => {
+                  const row = rows[items[0]?.dataIndex];
+                  return row ? `Total: ${row.totalTco2e.toFixed(3)} tCO2e` : '';
+                },
+              },
+            },
           },
         },
       });
     },
 
     drawOpportunityChart() {
-      const s = this.selectedScenario;
-      if (!s?.emissions) return;
-
+      const rows = this.selectedScenarioOpportunityRows();
       const ctx = document.getElementById('opportunityChart');
-      if (!ctx) return;
-      if (this.opportunityChart) this.opportunityChart.destroy();
-
-      const reductionFactors = {
-        travel_tco2e: 0.22,
-        venue_energy_tco2e: 0.45,
-        accommodation_tco2e: 0.18,
-        catering_tco2e: 0.35,
-        materials_waste_tco2e: 0.40,
-        equipment_tco2e: 0.25,
-        swag_tco2e: 0.50,
-      };
-
-      const rows = this.emissionCategories
-        .map(cat => {
-          const base = s.emissions[cat.key] || 0;
-          return {
-            label: cat.label,
-            value: +(base * (reductionFactors[cat.key] || 0)).toFixed(4),
-            color: cat.color,
-          };
-        })
-        .filter(r => r.value > 0)
-        .sort((a, b) => b.value - a.value)
-        .slice(0, 6);
+      if (!ctx || rows.length === 0) {
+        this.destroyDashboardChart('opportunityChart');
+        return;
+      }
+      this.destroyDashboardChart('opportunityChart');
 
       this.opportunityChart = new Chart(ctx, {
         type: 'bar',
@@ -937,7 +1086,7 @@ function app() {
           maintainAspectRatio: false,
           indexAxis: 'y',
           scales: {
-            x: { ticks: { color: '#6b7280', callback: v => `${v} t` }, grid: { color: '#e5e7eb' } },
+            x: { ticks: { color: '#6b7280', callback: value => `${Number(value).toFixed(2)} t` }, grid: { color: '#e5e7eb' } },
             y: { ticks: { color: '#6b7280', font: { size: 11 } }, grid: { display: false } },
           },
           plugins: {
@@ -949,10 +1098,16 @@ function app() {
 
     drawPathwayChart() {
       const s = this.selectedScenario;
-      if (!s) return;
+      if (!s) {
+        this.destroyDashboardChart('pathwayChart');
+        return;
+      }
       const ctx = document.getElementById('pathwayChart');
-      if (!ctx) return;
-      if (this.pathwayChart) this.pathwayChart.destroy();
+      if (!ctx) {
+        this.destroyDashboardChart('pathwayChart');
+        return;
+      }
+      this.destroyDashboardChart('pathwayChart');
 
       const base = s.emissions.total_tco2e;
       const years = [2024, 2026, 2028, 2030, 2035, 2040, 2050];
@@ -990,7 +1145,7 @@ function app() {
           scales: {
             x: { ticks: { color: '#6b7280' }, grid: { color: '#e5e7eb' } },
             y: {
-              ticks: { color: '#6b7280', callback: v => v + ' t' },
+              ticks: { color: '#6b7280', callback: value => `${Number(value).toFixed(1)} t` },
               grid: { color: '#e5e7eb' },
             },
           },
@@ -1002,27 +1157,12 @@ function app() {
     },
 
     drawFactorsChart() {
-      if (this.factorsChart) {
-        this.factorsChart.destroy();
-        this.factorsChart = null;
-      }
-      const s = this.selectedScenario;
-      const snap = s?.factors_snapshot;
-      if (!snap || !Object.keys(snap).length) return;
+      this.destroyDashboardChart('factorsChart');
+      const rows = this.selectedScenarioFactorRows();
       const ctx = document.getElementById('factorsChart');
-      if (!ctx) return;
+      if (!ctx || rows.length === 0) return;
 
-      const rows = [
-        { label: 'Long-haul flight', unit: 'kg/pkm', value: snap.travel_long_haul_economy_kg_per_pkm, color: '#0ea5e9' },
-        { label: 'Short-haul flight', unit: 'kg/pkm', value: snap.travel_short_haul_economy_kg_per_pkm, color: '#38bdf8' },
-        { label: 'Car (petrol)', unit: 'kg/pkm', value: snap.travel_car_petrol_kg_per_pkm, color: '#f59e0b' },
-        { label: `Grid (${(snap.venue_grid_region || 'global').replace('_', ' ')})`, unit: 'kg/kWh', value: snap.venue_grid_kg_per_kwh, color: '#eab308' },
-        { label: `Catering (${(snap.catering_type || 'mixed').replace(/_/g, ' ')})`, unit: 'kg/meal', value: snap.catering_kg_per_meal, color: '#22c55e' },
-        { label: `Accommodation`, unit: 'kg/room-night÷10', value: (snap.accommodation_kg_per_room_night || 0) / 10, color: '#8b5cf6' },
-        { label: 'Waste (landfill)', unit: 'kg/kg', value: snap.waste_landfill_kg_per_kg, color: '#6b7280' },
-      ].filter(r => r.value > 0);
-
-      const version = snap.ef_version ? ` · EF v${snap.ef_version}` : '';
+      const version = this.selectedScenario?.factors_snapshot?.ef_version ? ` · EF v${this.selectedScenario.factors_snapshot.ef_version}` : '';
       this.factorsChart = new Chart(ctx, {
         type: 'bar',
         data: {
@@ -1042,7 +1182,7 @@ function app() {
           indexAxis: 'y',
           scales: {
             x: {
-              ticks: { color: '#6b7280', font: { size: 10 }, callback: v => v.toFixed(3) },
+              ticks: { color: '#6b7280', font: { size: 10 }, callback: value => Number(value).toFixed(3) },
               grid: { color: '#e5e7eb' },
               title: { display: true, text: `kg CO2e per unit${version}`, color: '#9ca3af', font: { size: 10 } },
             },
@@ -1157,7 +1297,6 @@ function app() {
           }),
         });
         this.finResult = await res.json();
-        this.potentialSavings = Math.round(this.finResult.total_financial_savings_usd);
         this.showToast(`Total savings: $${this.finResult.total_financial_savings_usd.toLocaleString()}`);
       } catch (e) {
         this.showToast('Calculation error: ' + e.message, 'fas fa-triangle-exclamation text-red');

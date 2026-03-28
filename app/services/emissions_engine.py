@@ -241,7 +241,7 @@ def _swag_emissions(swag, attendees: int) -> tuple[float, dict]:
     return total_kg, notes
 
 
-def _get_benchmark(event_type: str, per_attendee_day: float) -> Optional[BenchmarkComparison]:
+def get_benchmark_comparison(event_type: str, per_attendee_day: float) -> Optional[BenchmarkComparison]:
     """Compare against industry benchmarks."""
     benchmarks = EF.get("benchmarks", {})
     type_map = {
@@ -282,6 +282,11 @@ def _get_benchmark(event_type: str, per_attendee_day: float) -> Optional[Benchma
         percentile_rank=rank,
         gap_to_best_practice_pct=round(gap, 1),
     )
+
+
+def _get_benchmark(event_type: str, per_attendee_day: float) -> Optional[BenchmarkComparison]:
+    """Backward-compatible alias for older imports."""
+    return get_benchmark_comparison(event_type, per_attendee_day)
 
 
 def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
@@ -372,7 +377,7 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
     )
 
     # Benchmark
-    benchmark = _get_benchmark(scenario.event_type.value, per_attendee_day)
+    benchmark = get_benchmark_comparison(scenario.event_type.value, per_attendee_day)
 
     return ScenarioResult(
         name=scenario.name,
