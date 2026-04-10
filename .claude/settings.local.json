@@ -25,7 +25,11 @@
       "Bash(2)",
       "Bash(sort -k2)",
       "Bash(npm run:*)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(grep:*)",
+      "Bash(find .:*)",
+      "Bash(python3:*)",
+      "Bash(.carbon_venv/Scripts/pip install:*)"
     ]
   }
 }

@@ -38,6 +38,7 @@ import type {
   ReductionSuggestion,
   Scenario,
   ScenarioDraft,
+  ScenarioReportFormat,
 } from '../types'
 import { Badge, Button, EmptyState, Glyph, Panel } from './primitives'
 
@@ -258,7 +259,7 @@ interface ScenariosViewProps {
   onEdit: (scenario: Scenario) => void
   onClone: (scenario: Scenario) => void
   onDelete: (id: string) => void
-  onExport: (scenario: Scenario) => void
+  onDownloadReport: (scenario: Scenario, format: ScenarioReportFormat) => void
   onSelectScenario: (scenario: Scenario) => void
   onLoadSuggestions: (scenario: Scenario) => void
 }
@@ -276,12 +277,13 @@ export function ScenariosView({
   onEdit,
   onClone,
   onDelete,
-  onExport,
+  onDownloadReport,
   onSelectScenario,
   onLoadSuggestions,
 }: ScenariosViewProps) {
   const [query, setQuery] = useState('')
   const deferredQuery = useDeferredValue(query)
+  const reportFormats: ScenarioReportFormat[] = ['pdf', 'csv', 'xlsx', 'json']
   const filteredScenarios = scenarios.filter((scenario) =>
     `${scenario.name} ${scenario.location} ${scenario.event_type}`.toLowerCase().includes(deferredQuery.toLowerCase()),
   )
@@ -329,6 +331,7 @@ export function ScenariosView({
               <span>Attendees</span>
               <input
                 type="number"
+                min="1"
                 value={draft.attendees}
                 onChange={(event) => setDraft((current) => ({ ...current, attendees: Number(event.target.value) }))}
               />
@@ -337,6 +340,7 @@ export function ScenariosView({
               <span>Event days</span>
               <input
                 type="number"
+                min="1"
                 value={draft.event_days}
                 onChange={(event) => setDraft((current) => ({ ...current, event_days: Number(event.target.value) }))}
               />
@@ -480,6 +484,7 @@ export function ScenariosView({
                     </select>
                     <input
                       type="number"
+                      min="0"
                       value={segment.attendees}
                       onChange={(event) =>
                         setDraft((current) => ({
@@ -492,6 +497,7 @@ export function ScenariosView({
                     />
                     <input
                       type="number"
+                      min="0"
                       value={segment.distance_km}
                       onChange={(event) =>
                         setDraft((current) => ({
@@ -527,6 +533,7 @@ export function ScenariosView({
               <span>Stage area (m²)</span>
               <input
                 type="number"
+                min="0"
                 value={draft.stage_m2}
                 onChange={(event) => setDraft((current) => ({ ...current, stage_m2: Number(event.target.value) }))}
               />
@@ -535,6 +542,7 @@ export function ScenariosView({
               <span>Lighting days</span>
               <input
                 type="number"
+                min="0"
                 value={draft.lighting_days}
                 onChange={(event) =>
                   setDraft((current) => ({ ...current, lighting_days: Number(event.target.value) }))
@@ -545,6 +553,7 @@ export function ScenariosView({
               <span>Sound system days</span>
               <input
                 type="number"
+                min="0"
                 value={draft.sound_system_days}
                 onChange={(event) =>
                   setDraft((current) => ({ ...current, sound_system_days: Number(event.target.value) }))
@@ -555,6 +564,7 @@ export function ScenariosView({
               <span>LED screen area (m²)</span>
               <input
                 type="number"
+                min="0"
                 value={draft.led_screen_m2}
                 onChange={(event) =>
                   setDraft((current) => ({ ...current, led_screen_m2: Number(event.target.value) }))
@@ -565,6 +575,7 @@ export function ScenariosView({
               <span>Generator hours</span>
               <input
                 type="number"
+                min="0"
                 value={draft.generator_hours}
                 onChange={(event) =>
                   setDraft((current) => ({ ...current, generator_hours: Number(event.target.value) }))
@@ -588,6 +599,7 @@ export function ScenariosView({
               <span>T-shirts</span>
               <input
                 type="number"
+                min="0"
                 value={draft.tshirts}
                 onChange={(event) => setDraft((current) => ({ ...current, tshirts: Number(event.target.value) }))}
               />
@@ -596,6 +608,7 @@ export function ScenariosView({
               <span>Tote bags</span>
               <input
                 type="number"
+                min="0"
                 value={draft.tote_bags}
                 onChange={(event) => setDraft((current) => ({ ...current, tote_bags: Number(event.target.value) }))}
               />
@@ -604,6 +617,7 @@ export function ScenariosView({
               <span>Lanyards</span>
               <input
                 type="number"
+                min="0"
                 value={draft.lanyards}
                 onChange={(event) => setDraft((current) => ({ ...current, lanyards: Number(event.target.value) }))}
               />
@@ -612,6 +626,7 @@ export function ScenariosView({
               <span>Badges</span>
               <input
                 type="number"
+                min="0"
                 value={draft.badges}
                 onChange={(event) => setDraft((current) => ({ ...current, badges: Number(event.target.value) }))}
               />
@@ -698,9 +713,6 @@ export function ScenariosView({
                     <Button tone="soft" onClick={() => onLoadSuggestions(scenario)} type="button">
                       Reduce
                     </Button>
-                    <Button tone="soft" onClick={() => onExport(scenario)} type="button">
-                      Export
-                    </Button>
                     <Button tone="danger" onClick={() => onDelete(scenario.scenario_id)} type="button">
                       Delete
                     </Button>
@@ -741,6 +753,33 @@ export function ScenariosView({
                     </span>
                   </div>
                 </article>
+              ))}
+            </div>
+          </Panel>
+        ) : null}
+
+        {selectedScenario ? (
+          <Panel>
+            <div className="panel-heading">
+              <div>
+                <span className="eyebrow">Report package</span>
+                <h3>Download reporting outputs</h3>
+              </div>
+              <Badge tone="fresh">{selectedScenario.name}</Badge>
+            </div>
+            <p className="subtle-copy">
+              Export the selected scenario as a compliance-ready PDF, CSV, Excel workbook, or JSON package.
+            </p>
+            <div className="hero-actions">
+              {reportFormats.map((format) => (
+                <Button
+                  key={format}
+                  tone={format === 'pdf' ? 'primary' : 'soft'}
+                  onClick={() => onDownloadReport(selectedScenario, format)}
+                  type="button"
+                >
+                  {format.toUpperCase()}
+                </Button>
               ))}
             </div>
           </Panel>
@@ -822,6 +861,7 @@ export function FinancialView({
             <span>Baseline emissions</span>
             <input
               type="number"
+              min="0"
               value={calc.baseline}
               onChange={(event) => setCalc((current) => ({ ...current, baseline: Number(event.target.value) }))}
             />
@@ -845,6 +885,7 @@ export function FinancialView({
             <span>Energy saved (kWh)</span>
             <input
               type="number"
+              min="0"
               value={calc.energy_kwh}
               onChange={(event) => setCalc((current) => ({ ...current, energy_kwh: Number(event.target.value) }))}
             />
@@ -854,6 +895,7 @@ export function FinancialView({
             <span>Meal switches</span>
             <input
               type="number"
+              min="0"
               value={calc.meal_switches}
               onChange={(event) => setCalc((current) => ({ ...current, meal_switches: Number(event.target.value) }))}
             />
@@ -1038,6 +1080,7 @@ export function OffsetsView({
             <span>Quantity (tCO2e)</span>
             <input
               type="number"
+              min="0"
               value={draft.quantity_tco2e}
               onChange={(event) =>
                 setDraft((current) => ({ ...current, quantity_tco2e: Number(event.target.value) }))
@@ -1048,6 +1091,7 @@ export function OffsetsView({
             <span>Price per tCO2e</span>
             <input
               type="number"
+              min="0"
               value={draft.price_per_tco2e_usd}
               onChange={(event) =>
                 setDraft((current) => ({ ...current, price_per_tco2e_usd: Number(event.target.value) }))
@@ -1058,6 +1102,7 @@ export function OffsetsView({
             <span>Vintage year</span>
             <input
               type="number"
+              min="2000"
               value={draft.vintage_year}
               onChange={(event) => setDraft((current) => ({ ...current, vintage_year: Number(event.target.value) }))}
             />
@@ -1210,7 +1255,9 @@ interface ComplianceViewProps {
   loading: boolean
   scenarios: Scenario[]
   selectedScenario: Scenario | null
+  onSelectScenario: (scenario: Scenario) => void
   onCheck: () => void
+  onDownloadReport: (format: ScenarioReportFormat) => void
 }
 
 export function ComplianceView({
@@ -1220,8 +1267,12 @@ export function ComplianceView({
   loading,
   scenarios,
   selectedScenario,
+  onSelectScenario,
   onCheck,
+  onDownloadReport,
 }: ComplianceViewProps) {
+  const reportFormats: ScenarioReportFormat[] = ['pdf', 'csv', 'xlsx', 'json']
+
   return (
     <div className="split-view split-view-forms">
       <Panel className="input-panel">
@@ -1241,6 +1292,7 @@ export function ComplianceView({
                 const nextId = event.target.value
                 const nextScenario = scenarios.find((scenario) => scenario.scenario_id === nextId) ?? null
                 if (nextScenario) {
+                  onSelectScenario(nextScenario)
                   setInput((current) => ({
                     ...current,
                     total_tco2e: nextScenario.emissions.total_tco2e,
@@ -1275,6 +1327,7 @@ export function ComplianceView({
             <span>Total tCO2e</span>
             <input
               type="number"
+              min="0"
               value={input.total_tco2e}
               onChange={(event) => setInput((current) => ({ ...current, total_tco2e: Number(event.target.value) }))}
             />
@@ -1283,6 +1336,7 @@ export function ComplianceView({
             <span>Attendees</span>
             <input
               type="number"
+              min="1"
               value={input.attendees}
               onChange={(event) => setInput((current) => ({ ...current, attendees: Number(event.target.value) }))}
             />
@@ -1291,6 +1345,7 @@ export function ComplianceView({
             <span>Event days</span>
             <input
               type="number"
+              min="1"
               value={input.event_days}
               onChange={(event) => setInput((current) => ({ ...current, event_days: Number(event.target.value) }))}
             />
@@ -1317,6 +1372,19 @@ export function ComplianceView({
         <Button tone="primary" busy={loading} onClick={onCheck}>
           Run compliance check
         </Button>
+        <div className="hero-actions">
+          {reportFormats.map((format) => (
+            <Button
+              key={format}
+              tone={format === 'pdf' ? 'soft' : 'ghost'}
+              disabled={!selectedScenario}
+              onClick={() => onDownloadReport(format)}
+              type="button"
+            >
+              {format.toUpperCase()} report
+            </Button>
+          ))}
+        </div>
       </Panel>
 
       <div className="stacked-panels">
@@ -1384,22 +1452,27 @@ export function ComplianceView({
 }
 
 interface DataViewProps {
+  selectedScenario: Scenario | null
   agentStatus: AgentStatus[]
   agentHistory: AgentRun[]
   agentsRunning: boolean
   onDownload: (path: string, filename: string, auth?: boolean) => void
+  onDownloadReport: (format: ScenarioReportFormat) => void
   onRefreshStatus: () => void
   onForceRefresh: () => void
 }
 
 export function DataView({
+  selectedScenario,
   agentStatus,
   agentHistory,
   agentsRunning,
   onDownload,
+  onDownloadReport,
   onRefreshStatus,
   onForceRefresh,
 }: DataViewProps) {
+  const reportFormats: ScenarioReportFormat[] = ['pdf', 'csv', 'xlsx', 'json']
   const downloadCards = [
     ['/api/exports/scenarios.xlsx', 'scenarios.xlsx', 'Scenarios (Excel)', true],
     ['/api/exports/scenarios.json', 'scenarios.json', 'Scenarios (JSON)', true],
@@ -1410,6 +1483,33 @@ export function DataView({
 
   return (
     <div className="workspace-grid">
+      {selectedScenario ? (
+        <Panel>
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">Scenario reports</span>
+              <h3>{selectedScenario.name}</h3>
+            </div>
+            <Badge tone="fresh">{formatTons(selectedScenario.emissions.total_tco2e)}</Badge>
+          </div>
+          <p className="subtle-copy">
+            Download the selected scenario as a PDF, CSV, Excel workbook, or JSON package.
+          </p>
+          <div className="hero-actions">
+            {reportFormats.map((format) => (
+              <Button
+                key={format}
+                tone={format === 'pdf' ? 'primary' : 'soft'}
+                onClick={() => onDownloadReport(format)}
+                type="button"
+              >
+                {format.toUpperCase()}
+              </Button>
+            ))}
+          </div>
+        </Panel>
+      ) : null}
+
       <div className="download-grid">
         {downloadCards.map(([path, filename, label, auth]) => (
           <button key={filename} className="download-card" onClick={() => onDownload(path, filename, auth)} type="button">

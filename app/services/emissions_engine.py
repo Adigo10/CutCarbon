@@ -119,8 +119,12 @@ def _catering_emissions(catering, attendees: int, event_days: int) -> tuple[floa
         total_kg += bev_kg
 
     if catering.include_alcohol:
-        # Estimate: 2 drinks per attendee per day average
-        alcohol_kg = attendees * event_days * 2 * 0.45  # avg between beer and wine
+        # Estimate: 2 drinks per attendee per day average, using JSON factors
+        alcohol_data = EF["catering"]["alcohol"]
+        beer_ef = alcohol_data.get("beer_per_serving", {}).get("factor", 0.55)
+        spirits_ef = alcohol_data.get("spirits_per_serving", {}).get("factor", 0.35)
+        avg_drink_ef = (beer_ef + spirits_ef) / 2
+        alcohol_kg = attendees * event_days * 2 * avg_drink_ef
         total_kg += alcohol_kg
         notes["alcohol"] = f"Estimated {attendees * event_days * 2} alcoholic drinks"
 

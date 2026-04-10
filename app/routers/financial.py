@@ -4,9 +4,29 @@ from sqlalchemy import select
 from datetime import datetime
 
 from app.models.database import get_db, ScenarioDB, FinancialReportDB, UserDB
-from app.models.schemas import FinancialRequest, FinancialResult, ComplianceReport
+from app.models.schemas import ComplianceRequest, FinancialRequest, FinancialResult, ComplianceReport
 from app.services.financial_engine import generate_financial_report, get_compliance_report
+from app.services.emissions_engine import EF as _EF
 from app.routers.auth import get_current_user
+
+# Map financial region names to grid emission factor keys
+_REGION_TO_GRID = {
+    "singapore": "singapore",
+    "eu": "eu_average",
+    "european_union": "eu_average",
+    "uk": "uk",
+    "united_kingdom": "uk",
+    "australia": "australia",
+    "usa": "usa",
+    "usa_california": "usa",
+}
+
+
+def _grid_ef(region: str) -> float:
+    """Return electricity grid emission factor (kg CO2e/kWh) for a financial region."""
+    grid_key = _REGION_TO_GRID.get(region.lower(), "global_average")
+    grids = _EF["venue_energy"]["grids"]
+    return grids.get(grid_key, grids["global_average"])["factor"]
 
 router = APIRouter()
 
@@ -70,7 +90,7 @@ async def savings_for_scenario(
         baseline_tco2e=s.total_tco2e,
         reduced_tco2e=reduced_tco2e,
         region=region,
-        energy_kwh_saved=s.venue_energy_tco2e * 1000 / 0.4 * (reduction_pct / 100),
+        energy_kwh_saved=s.venue_energy_tco2e * 1000 / _grid_ef(region) * (reduction_pct / 100),
         meal_switches=int(s.attendees * s.event_days * 2 * (reduction_pct / 100)),
         attendees=s.attendees,
         actions_taken=["renewable_energy", "vegetarian_menu", "digital_materials"],
@@ -80,15 +100,14 @@ async def savings_for_scenario(
 
 @router.post("/compliance", response_model=ComplianceReport)
 async def check_compliance(
-    total_tco2e: float,
-    has_scope3: bool = True,
-    has_ghg_report: bool = False,
-    region: str = "singapore",
-    event_days: int = 1,
-    attendees: int = 100,
+    req: ComplianceRequest,
+    current_user: UserDB = Depends(get_current_user),
 ):
     """Check compliance across GHG Protocol, ISO 20121, SBTi and regional standards."""
-    return get_compliance_report(total_tco2e, has_scope3, has_ghg_report, region, event_days, attendees)
+    return get_compliance_report(
+        req.total_tco2e, req.has_scope3, req.has_ghg_report,
+        req.region, req.event_days, req.attendees,
+    )
 
 
 @router.get("/compliance/scenario/{scenario_id}")

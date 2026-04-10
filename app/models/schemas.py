@@ -206,7 +206,6 @@ class EmissionBreakdown(BaseModel):
     materials_waste_tco2e: float = 0.0
     equipment_tco2e: float = 0.0
     swag_tco2e: float = 0.0
-    digital_tco2e: float = 0.0
     total_tco2e: float = 0.0
     per_attendee_tco2e: float = 0.0
     per_attendee_day_tco2e: float = 0.0
@@ -224,7 +223,7 @@ class BenchmarkComparison(BaseModel):
 
 
 class ScenarioResult(BaseModel):
-    scenario_id: str = Field(default_factory=lambda: str(uuid4())[:8])
+    scenario_id: str = Field(default_factory=lambda: str(uuid4()))
     name: str
     event_name: str
     location: str = ""
@@ -292,6 +291,15 @@ class FinancialResult(BaseModel):
 
 # -- Compliance models ---------------------------------------------------------
 
+class ComplianceRequest(BaseModel):
+    total_tco2e: float
+    has_scope3: bool = True
+    has_ghg_report: bool = False
+    region: str = "singapore"
+    event_days: int = 1
+    attendees: int = 100
+
+
 class ComplianceCheck(BaseModel):
     framework: str
     status: str  # compliant | partial | non_compliant | not_applicable
@@ -357,6 +365,38 @@ class OffsetRecommendation(BaseModel):
     permanence: str
     co_benefits: List[str]
     sdgs: List[int]
+
+
+class ScenarioReportMetric(BaseModel):
+    key: str
+    label: str
+    value: float
+    unit: str = "tCO2e"
+    pct_total: Optional[float] = None
+
+
+class ScenarioComplianceOverrides(BaseModel):
+    region: str = "singapore"
+    has_scope3: bool = True
+    has_ghg_report: bool = False
+
+
+class ScenarioReportPayload(BaseModel):
+    report_title: str
+    exported_at: str = ""
+    methodology: str = "GHG Protocol, ISO 14064-1"
+    disclaimer: str = ""
+    scenario: Dict[str, Any]
+    categories: List[ScenarioReportMetric] = Field(default_factory=list)
+    scope_breakdown: ScopeBreakdown
+    benchmark: Optional[BenchmarkComparison] = None
+    assumptions: Dict[str, Any] = Field(default_factory=dict)
+    factor_snapshot: Dict[str, Any] = Field(default_factory=dict)
+    offset_portfolio: OffsetPortfolioSummary
+    compliance: ComplianceReport
+    compliance_overrides: ScenarioComplianceOverrides = Field(
+        default_factory=ScenarioComplianceOverrides
+    )
 
 
 # -- Export models -------------------------------------------------------------

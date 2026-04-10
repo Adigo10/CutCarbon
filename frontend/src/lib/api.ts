@@ -11,8 +11,10 @@ import type {
   OffsetPurchase,
   OffsetRecommendation,
   OffsetRegistry,
+  ReportDownloadOptions,
   ReductionSuggestion,
   Scenario,
+  ScenarioReportFormat,
   ScenarioInputPayload,
   TokenWithUser,
   UserOut,
@@ -98,6 +100,16 @@ async function download(path: string, filename: string, token?: string | null): 
   URL.revokeObjectURL(url)
 }
 
+function buildReportQuery(options?: ReportDownloadOptions): string {
+  const params = new URLSearchParams()
+  if (!options) return ''
+  if (options.region) params.set('region', options.region)
+  if (typeof options.has_scope3 === 'boolean') params.set('has_scope3', String(options.has_scope3))
+  if (typeof options.has_ghg_report === 'boolean') params.set('has_ghg_report', String(options.has_ghg_report))
+  const query = params.toString()
+  return query ? `?${query}` : ''
+}
+
 export const api = {
   login(email: string, password: string) {
     return request<TokenWithUser>('/api/auth/login', {
@@ -152,12 +164,22 @@ export const api = {
     }, token)
   },
 
-  getScenarioSuggestions(id: string, token: string) {
-    return request<ReductionSuggestion[]>(`/api/scenarios/${id}/suggestions?target_pct=30`, undefined, token)
+  getScenarioSuggestions(id: string, token: string, targetPct = 30) {
+    return request<ReductionSuggestion[]>(`/api/scenarios/${id}/suggestions?target_pct=${targetPct}`, undefined, token)
   },
 
-  exportScenario(id: string, token: string) {
-    return request<Record<string, unknown>>(`/api/scenarios/${id}/export`, undefined, token)
+  downloadScenarioReport(
+    id: string,
+    format: ScenarioReportFormat,
+    token: string,
+    options?: ReportDownloadOptions,
+  ) {
+    const suffix = buildReportQuery(options)
+    return download(
+      `/api/exports/scenarios/${id}.${format}${suffix}`,
+      `cutcarbon_report_${id}.${format}`,
+      token,
+    )
   },
 
   sendChat(messages: ChatMessage[], eventContext: Record<string, unknown>, token: string, scenarioId?: string | null) {
@@ -178,10 +200,11 @@ export const api = {
     }, token)
   },
 
-  checkCompliance(params: URLSearchParams) {
-    return request<ComplianceReport>(`/api/financial/compliance?${params.toString()}`, {
+  checkCompliance(payload: Record<string, unknown>, token: string) {
+    return request<ComplianceReport>('/api/financial/compliance', {
       method: 'POST',
-    })
+      body: JSON.stringify(payload),
+    }, token)
   },
 
   listOffsetProjects() {

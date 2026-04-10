@@ -7,7 +7,7 @@ from datetime import datetime
 import uuid
 
 from app.models.database import get_db, ScenarioDB, UserDB
-from app.models.schemas import EventScenarioInput, ScenarioResult, ScenarioExport
+from app.models.schemas import EventScenarioInput, ScenarioResult
 from app.services.emissions_engine import (
     calculate_scenario,
     get_reduction_suggestions,
@@ -15,6 +15,7 @@ from app.services.emissions_engine import (
     get_benchmark_comparison,
 )
 from app.routers.auth import get_current_user
+from app.routers.exports import build_scenario_report_payload
 
 router = APIRouter()
 
@@ -254,7 +255,7 @@ async def clone_scenario(
     if not orig:
         raise HTTPException(status_code=404, detail="Scenario not found")
 
-    new_id = str(uuid.uuid4())[:8]
+    new_id = str(uuid.uuid4())
     clone = ScenarioDB(
         id=new_id,
         name=name,
@@ -335,34 +336,23 @@ async def reduction_suggestions(
 @router.get("/{scenario_id}/export")
 async def export_scenario(
     scenario_id: str,
+    region: str = "singapore",
+    has_scope3: bool = True,
+    has_ghg_report: bool = False,
     db: AsyncSession = Depends(get_db),
     current_user: UserDB = Depends(get_current_user),
 ):
-    """Export scenario data as JSON for reporting."""
-    result = await db.execute(
-        select(ScenarioDB).where(ScenarioDB.id == scenario_id, ScenarioDB.user_id == current_user.id)
+    """Backward-compatible JSON report alias for a scenario."""
+    report = await build_scenario_report_payload(
+        scenario_id=scenario_id,
+        db=db,
+        current_user=current_user,
+        region=region,
+        has_scope3=has_scope3,
+        has_ghg_report=has_ghg_report,
     )
-    s = result.scalar_one_or_none()
-    if not s:
-        raise HTTPException(status_code=404, detail="Scenario not found")
-
-    data = _db_to_result(s)
-    export = {
-        "report_title": f"Carbon Footprint Report - {s.event_name}",
-        "methodology": "GHG Protocol Corporate Standard, ISO 14064-1",
-        "scenario": data,
-        "location": getattr(s, "location", None) or ((s.input_payload or {}).get("location")),
-        "scope_breakdown": data["emissions"]["scopes"],
-        "total_emissions_tco2e": s.total_tco2e,
-        "per_attendee_tco2e": s.per_attendee_tco2e,
-        "data_quality": s.data_quality,
-        "assumptions": s.assumptions or {},
-        "input_data": s.input_payload or {},
-        "exported_at": datetime.utcnow().isoformat(),
-        "disclaimer": "Calculations based on industry-standard emission factors. Actual emissions may vary. For verified reporting, engage an accredited third-party verifier.",
-    }
     return JSONResponse(
-        content=export,
+        content=report.model_dump(),
         headers={"Content-Disposition": f"attachment; filename=cutcarbon_{scenario_id}.json"},
     )
 

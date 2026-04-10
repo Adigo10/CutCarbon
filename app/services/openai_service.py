@@ -56,9 +56,11 @@ EXTRACTION_TOOLS = [
                             "properties": {
                                 "mode": {
                                     "type": "string",
-                                    "enum": ["short_haul_flight", "long_haul_flight", "train_europe",
-                                             "train_asia", "car_petrol", "car_ev", "bus_coach",
-                                             "mrt_metro", "taxi_rideshare"]
+                                    "enum": ["short_haul_flight", "long_haul_flight", "private_jet",
+                                             "train_europe", "train_asia", "train_uk", "train_high_speed",
+                                             "car_petrol", "car_diesel", "car_hybrid", "car_ev",
+                                             "bus_coach", "shuttle_bus", "mrt_metro", "taxi_rideshare",
+                                             "ferry", "e_scooter", "cycling"]
                                 },
                                 "travel_class": {"type": "string", "enum": ["economy", "business", "first"]},
                                 "attendees": {"type": "integer"},
@@ -70,19 +72,23 @@ EXTRACTION_TOOLS = [
                     },
                     "venue_grid_region": {
                         "type": "string",
-                        "enum": ["singapore", "eu_average", "uk", "australia", "usa", "china", "india", "global_average"]
+                        "enum": ["singapore", "eu_average", "uk", "australia", "usa", "china", "india",
+                                 "japan", "south_korea", "canada", "brazil", "uae", "south_africa",
+                                 "germany", "france", "nordics", "global_average"]
                     },
                     "venue_kwh": {"type": "number", "description": "Total kWh consumed at venue"},
                     "venue_area_m2": {"type": "number", "description": "Venue floor area in m²"},
                     "renewable_pct": {"type": "number", "description": "% of venue energy from renewables (0-100)"},
                     "accommodation_type": {
                         "type": "string",
-                        "enum": ["budget_hotel", "standard_hotel", "luxury_hotel", "serviced_apartment", "airbnb_shared"]
+                        "enum": ["budget_hotel", "standard_hotel", "luxury_hotel", "serviced_apartment",
+                                 "airbnb_shared", "eco_lodge", "hostel", "no_accommodation"]
                     },
                     "room_nights": {"type": "integer"},
                     "catering_type": {
                         "type": "string",
-                        "enum": ["red_meat_meal", "white_meat_meal", "vegetarian_meal", "vegan_meal", "mixed_buffet"]
+                        "enum": ["red_meat_meal", "white_meat_meal", "vegetarian_meal", "vegan_meal",
+                                 "mixed_buffet", "seafood_meal", "local_organic", "finger_food"]
                     },
                     "meals": {"type": "integer"},
                     "general_waste_kg": {"type": "number"},

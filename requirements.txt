@@ -16,5 +16,7 @@ python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 openpyxl==3.1.5
+reportlab==4.4.7
+pytest==7.1.2
 # For PostgreSQL: swap aiosqlite for asyncpg and update DATABASE_URL in .env
 # asyncpg==0.30.0

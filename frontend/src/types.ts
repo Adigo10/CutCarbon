@@ -296,6 +296,14 @@ export interface ComplianceReport {
   penalty_risk_usd: number
 }
 
+export interface ReportDownloadOptions {
+  region?: string
+  has_scope3?: boolean
+  has_ghg_report?: boolean
+}
+
+export type ScenarioReportFormat = 'json' | 'csv' | 'xlsx' | 'pdf'
+
 export interface AgentStatus {
   name: string
   category: string

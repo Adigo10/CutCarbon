@@ -37,9 +37,11 @@ import type {
   OffsetPurchase,
   OffsetRecommendation,
   OffsetRegistry,
+  ReportDownloadOptions,
   ReductionSuggestion,
   Scenario,
   ScenarioDraft,
+  ScenarioReportFormat,
   TabId,
   Toast,
   UserOut,
@@ -349,18 +351,15 @@ function App() {
     }
   }
 
-  async function handleExportScenario(scenario: Scenario) {
+  async function handleDownloadScenarioReport(
+    scenario: Scenario,
+    format: ScenarioReportFormat,
+    options?: ReportDownloadOptions,
+  ) {
     if (!token) return
     try {
-      const payload = await api.exportScenario(scenario.scenario_id, token)
-      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const anchor = document.createElement('a')
-      anchor.href = url
-      anchor.download = `cutcarbon_${scenario.scenario_id}.json`
-      anchor.click()
-      URL.revokeObjectURL(url)
-      pushToast('Scenario report exported', 'success')
+      await api.downloadScenarioReport(scenario.scenario_id, format, token, options)
+      pushToast(`${format.toUpperCase()} report downloaded`, 'success')
     } catch (error) {
       pushToast(error instanceof Error ? error.message : 'Export failed', 'danger')
     }
@@ -385,11 +384,7 @@ function App() {
     const nextMessage: ChatMessage = { role: 'user', content }
     const nextMessages = [...chatMessages, nextMessage]
     setChatMessages(nextMessages)
-    if (!messageOverride) {
-      setChatInput('')
-    } else {
-      setChatInput('')
-    }
+    setChatInput('')
     setChatLoading(true)
     try {
       const response = await api.sendChat(
@@ -506,17 +501,20 @@ function App() {
   }
 
   async function handleCheckCompliance() {
+    if (!token) return
     setComplianceLoading(true)
     try {
-      const params = new URLSearchParams({
-        total_tco2e: String(complianceInput.total_tco2e),
-        has_scope3: String(complianceInput.has_scope3),
-        has_ghg_report: String(complianceInput.has_ghg_report),
-        region: complianceInput.region,
-        event_days: String(complianceInput.event_days),
-        attendees: String(complianceInput.attendees),
-      })
-      const report = await api.checkCompliance(params)
+      const report = await api.checkCompliance(
+        {
+          total_tco2e: complianceInput.total_tco2e,
+          has_scope3: complianceInput.has_scope3,
+          has_ghg_report: complianceInput.has_ghg_report,
+          region: complianceInput.region,
+          event_days: complianceInput.event_days,
+          attendees: complianceInput.attendees,
+        },
+        token,
+      )
       setComplianceReport(report)
       pushToast(`Compliance score ${report.overall_score_pct.toFixed(0)}%`, 'success')
     } catch (error) {
@@ -620,7 +618,7 @@ function App() {
           onEdit={handleEditScenario}
           onClone={handleCloneScenario}
           onDelete={handleDeleteScenario}
-          onExport={handleExportScenario}
+          onDownloadReport={handleDownloadScenarioReport}
           onSelectScenario={(scenario) => setSelectedScenarioId(scenario.scenario_id)}
           onLoadSuggestions={handleLoadSuggestions}
         />
@@ -668,17 +666,27 @@ function App() {
           loading={complianceLoading}
           scenarios={scenarios}
           selectedScenario={selectedScenario}
+          onSelectScenario={(scenario) => setSelectedScenarioId(scenario.scenario_id)}
           onCheck={handleCheckCompliance}
+          onDownloadReport={(format) => {
+            if (!selectedScenario) return
+            void handleDownloadScenarioReport(selectedScenario, format, complianceInput)
+          }}
         />
       )
       break
     case 'data':
       workspace = (
         <DataView
+          selectedScenario={selectedScenario}
           agentStatus={agentStatus}
           agentHistory={agentHistory}
           agentsRunning={agentsRunning}
           onDownload={handleDownload}
+          onDownloadReport={(format) => {
+            if (!selectedScenario) return
+            void handleDownloadScenarioReport(selectedScenario, format)
+          }}
           onRefreshStatus={loadAgentPanels}
           onForceRefresh={handleForceRefreshAgents}
         />
