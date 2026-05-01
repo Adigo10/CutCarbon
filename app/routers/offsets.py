@@ -53,6 +53,16 @@ async def create_purchase(
     current_user: UserDB = Depends(get_current_user),
 ):
     """Record a carbon offset purchase."""
+    if purchase.scenario_id:
+        scenario = await db.scalar(
+            select(ScenarioDB).where(
+                ScenarioDB.id == purchase.scenario_id,
+                ScenarioDB.user_id == current_user.id,
+            )
+        )
+        if not scenario:
+            raise HTTPException(status_code=404, detail="Scenario not found")
+
     total_cost = purchase.quantity_tco2e * purchase.price_per_tco2e_usd
     db_obj = OffsetPurchaseDB(
         user_id=current_user.id,

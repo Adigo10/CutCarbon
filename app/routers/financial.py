@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime
@@ -69,7 +69,7 @@ async def calculate_savings(
 async def savings_for_scenario(
     scenario_id: str,
     region: str = "singapore",
-    reduction_pct: float = 30.0,
+    reduction_pct: float = Query(default=30.0, ge=0, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: UserDB = Depends(get_current_user),
 ):

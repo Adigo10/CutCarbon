@@ -7,7 +7,7 @@ from typing import AsyncGenerator
 
 from sqlalchemy import (
     Column, String, Integer, Float, Text, DateTime, Boolean, JSON, text,
-    ForeignKey, Index, inspect,
+    ForeignKey, Index, inspect, event,
 )
 from sqlalchemy.ext.asyncio import (
     AsyncSession, create_async_engine
@@ -31,6 +31,14 @@ engine = create_async_engine(
     echo=False,
     connect_args={"check_same_thread": False} if "sqlite" in settings.DATABASE_URL else {},
 )
+
+
+if "sqlite" in settings.DATABASE_URL:
+    @event.listens_for(engine.sync_engine, "connect")
+    def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
 if async_sessionmaker is not None:
     AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)

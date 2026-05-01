@@ -29,7 +29,9 @@
       "Bash(grep:*)",
       "Bash(find .:*)",
       "Bash(python3:*)",
-      "Bash(.carbon_venv/Scripts/pip install:*)"
+      "Bash(.carbon_venv/Scripts/pip install:*)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\adity\\\\Projects\\\\CutCarbon\\\\frontend\" -Recurse -ErrorAction SilentlyContinue)",
+      "Bash(Select-Object -ExpandProperty FullName)"
     ]
   }
 }

@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import delete
 from app.models.database import (
     AsyncSessionLocal, ScenarioDB, EventDB, FinancialReportDB,
-    ChatMessageDB, init_db, UserDB
+    ChatMessageDB, OffsetPurchaseDB, init_db, UserDB
 )
 from app.models.schemas import (
     EventScenarioInput, EventType, TravelMode, TravelClass,
@@ -25,7 +25,7 @@ from app.models.schemas import (
     TravelSegment, VenueEnergy, AccommodationGroup, CateringGroup,
     WasteGroup, EquipmentGroup, SwagGroup
 )
-from app.services.emissions_engine import calculate_scenario
+from app.services.emissions_engine import calculate_scenario, build_factors_snapshot
 
 
 async def clear_data(db: AsyncSession):
@@ -33,6 +33,7 @@ async def clear_data(db: AsyncSession):
     print("🧹 Clearing existing data...")
 
     # Delete in order of dependencies
+    await db.execute(delete(OffsetPurchaseDB))
     await db.execute(delete(FinancialReportDB))
     await db.execute(delete(ChatMessageDB))
     await db.execute(delete(ScenarioDB))
@@ -55,6 +56,7 @@ async def create_scenario_in_db(
         id=scenario_id,
         name=payload.name,
         event_name=payload.event_name,
+        location=payload.location,
         event_type=payload.event_type.value,
         attendees=payload.attendees,
         event_days=payload.event_days,
@@ -64,6 +66,8 @@ async def create_scenario_in_db(
         accommodation_tco2e=result.emissions.accommodation_tco2e,
         catering_tco2e=result.emissions.catering_tco2e,
         materials_waste_tco2e=result.emissions.materials_waste_tco2e,
+        equipment_tco2e=result.emissions.equipment_tco2e,
+        swag_tco2e=result.emissions.swag_tco2e,
         total_tco2e=result.emissions.total_tco2e,
         per_attendee_tco2e=result.emissions.per_attendee_tco2e,
         data_quality=result.emissions.data_quality,
@@ -71,7 +75,8 @@ async def create_scenario_in_db(
         scope2_tco2e=result.emissions.scopes.scope2_tco2e if result.emissions.scopes else 0,
         scope3_tco2e=result.emissions.scopes.scope3_tco2e if result.emissions.scopes else 0,
         assumptions=result.assumptions,
-        input_payload=payload.model_dump(),
+        input_payload=payload.model_dump(mode="json"),
+        factors_snapshot=build_factors_snapshot(payload),
         created_at=datetime.utcnow(),
         user_id=user_id,
     )
@@ -162,7 +167,7 @@ async def main():
                 TravelSegment(
                     mode=TravelMode.MRT_METRO,
                     travel_class=TravelClass.ECONOMY,
-                    attendees=500,  # Local attendees
+                    attendees=400,  # Local attendees
                     distance_km=25,
                     label="Local Singapore (MRT)"
                 ),

@@ -62,10 +62,10 @@ def _venue_energy_emissions(venue_energy, attendees: int, event_days: int) -> tu
     grid_key = venue_energy.grid_region.value
     grid_ef = EF["venue_energy"]["grids"].get(grid_key, EF["venue_energy"]["grids"]["global_average"])["factor"]
 
-    if venue_energy.kwh_consumed:
+    if venue_energy.kwh_consumed is not None:
         kwh = venue_energy.kwh_consumed
         notes["venue"] = f"Actual kWh: {kwh:.0f}"
-    elif venue_energy.venue_area_m2:
+    elif venue_energy.venue_area_m2 is not None:
         kwh = venue_energy.venue_area_m2 * event_days * 30
         notes["venue"] = f"Proxy kWh from area: {kwh:.0f}"
     else:

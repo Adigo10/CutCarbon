@@ -4,6 +4,7 @@ import io
 import pytest
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
@@ -12,7 +13,9 @@ import app.models.database as database
 from app.config import settings
 from app.main import app
 from app.models.database import UserDB
+from app.models.schemas import EventScenarioInput, OffsetProjectType, OffsetPurchaseCreate, TravelMode, TravelSegment, VenueEnergy
 from app.routers.exports import build_scenario_report_payload
+from app.services.emissions_engine import calculate_scenario
 
 
 @pytest.fixture()
@@ -224,3 +227,77 @@ def test_global_exports_still_work(client: TestClient):
     agent_xlsx = client.get("/api/exports/agent-runs.xlsx", headers=headers)
     assert agent_xlsx.status_code == 200
     assert ".xlsx" in agent_xlsx.headers["content-disposition"]
+
+
+def test_invalid_emissions_inputs_are_rejected():
+    with pytest.raises(ValidationError):
+        EventScenarioInput(
+            name="Invalid Travel",
+            attendees=100,
+            travel_segments=[
+                TravelSegment(
+                    mode=TravelMode.LONG_HAUL_FLIGHT,
+                    attendees=-50,
+                    distance_km=2000,
+                )
+            ],
+        )
+
+    with pytest.raises(ValidationError):
+        EventScenarioInput(
+            name="Invalid Renewable",
+            attendees=100,
+            venue_energy=VenueEnergy(kwh_consumed=1000, renewable_pct=150),
+        )
+
+    with pytest.raises(ValidationError):
+        EventScenarioInput(
+            name="Overallocated Travel",
+            attendees=100,
+            travel_segments=[
+                TravelSegment(
+                    mode=TravelMode.LONG_HAUL_FLIGHT,
+                    attendees=101,
+                    distance_km=2000,
+                )
+            ],
+        )
+
+    with pytest.raises(ValidationError):
+        OffsetPurchaseCreate(
+            project_type=OffsetProjectType.RENEWABLE_ENERGY,
+            quantity_tco2e=-5,
+            price_per_tco2e_usd=10,
+        )
+
+
+def test_zero_kwh_is_treated_as_actual_data():
+    scenario = EventScenarioInput(
+        name="Zero kWh",
+        attendees=10,
+        venue_energy=VenueEnergy(kwh_consumed=0, venue_area_m2=100),
+    )
+
+    result = calculate_scenario(scenario)
+
+    assert result.emissions.venue_energy_tco2e == 0
+    assert result.assumptions["venue"] == "Actual kWh: 0"
+
+
+def test_offset_purchase_requires_owned_scenario(client: TestClient):
+    headers = register_user(client, email="offset-owner@example.com")
+
+    response = client.post(
+        "/api/offsets",
+        json={
+            "scenario_id": "missing-scenario",
+            "project_type": "renewable_energy",
+            "registry": "gold_standard",
+            "quantity_tco2e": 1,
+            "price_per_tco2e_usd": 10,
+            "vintage_year": 2025,
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 404
