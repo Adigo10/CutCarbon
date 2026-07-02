@@ -12,7 +12,7 @@ from openai import (
     APITimeoutError,
     RateLimitError,
 )
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from app.config import settings
 from app.models.schemas import ChatMessage
@@ -22,6 +22,10 @@ client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 # Roles we will ever forward to the model — prevents a client injecting role="system"
 # to override the server system prompt.
 _ALLOWED_ROLES = {"user", "assistant"}
+
+# Cabin class only changes the emission factor for these modes; the engine ignores it
+# everywhere else, so normalize to economy to keep stored payloads honest.
+_FLIGHT_CLASS_MODES = {"short_haul_flight", "long_haul_flight"}
 
 # Bound + sanity-check the LLM's extracted event data before it reaches the engine.
 # extra="ignore" drops hallucinated fields; bounds reject absurd values that would
@@ -35,6 +39,12 @@ class _TravelSegmentExtract(BaseModel):
     attendees: int = Field(ge=1, le=1_000_000)
     distance_km: float = Field(ge=0, le=50_000)
     label: Optional[str] = ""
+
+    @model_validator(mode="after")
+    def _class_only_for_flights(self):
+        if self.mode not in _FLIGHT_CLASS_MODES:
+            self.travel_class = "economy"
+        return self
 
 
 class ExtractedEventData(BaseModel):
@@ -127,7 +137,11 @@ EXTRACTION_TOOLS = [
                                              "bus_coach", "shuttle_bus", "mrt_metro", "taxi_rideshare",
                                              "ferry", "e_scooter", "cycling"]
                                 },
-                                "travel_class": {"type": "string", "enum": ["economy", "business", "first"]},
+                                "travel_class": {
+                                    "type": "string",
+                                    "enum": ["economy", "business", "first"],
+                                    "description": "Cabin class — flights only; omit for trains, cars, buses and other ground/sea modes"
+                                },
                                 "attendees": {"type": "integer"},
                                 "distance_km": {"type": "number"},
                                 "label": {"type": "string"}

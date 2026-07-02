@@ -5,28 +5,13 @@ from datetime import datetime
 
 from app.models.database import get_db, ScenarioDB, FinancialReportDB, UserDB
 from app.models.schemas import ComplianceRequest, FinancialRequest, FinancialResult, ComplianceReport
-from app.services.financial_engine import generate_financial_report, get_compliance_report, TAX_DATA
-from app.services.emissions_engine import EF as _EF
+from app.services.financial_engine import (
+    build_scenario_financial_request,
+    generate_financial_report,
+    get_compliance_report,
+    TAX_DATA,
+)
 from app.routers.auth import get_current_user
-
-# Map financial region names to grid emission factor keys
-_REGION_TO_GRID = {
-    "singapore": "singapore",
-    "eu": "eu_average",
-    "european_union": "eu_average",
-    "uk": "uk",
-    "united_kingdom": "uk",
-    "australia": "australia",
-    "usa": "usa",
-    "usa_california": "usa",
-}
-
-
-def _grid_ef(region: str) -> float:
-    """Return electricity grid emission factor (kg CO2e/kWh) for a financial region."""
-    grid_key = _REGION_TO_GRID.get(region.lower(), "global_average")
-    grids = _EF["venue_energy"]["grids"]
-    return grids.get(grid_key, grids["global_average"])["factor"]
 
 router = APIRouter()
 
@@ -84,15 +69,8 @@ async def savings_for_scenario(
     if not s:
         raise HTTPException(status_code=404, detail="Scenario not found")
 
-    reduced_tco2e = s.total_tco2e * (1 - reduction_pct / 100)
-    req = FinancialRequest(
-        scenario_id=s.id,
-        baseline_tco2e=s.total_tco2e,
-        reduced_tco2e=reduced_tco2e,
-        region=region,
-        energy_kwh_saved=s.venue_energy_tco2e * 1000 / _grid_ef(region) * (reduction_pct / 100),
-        meal_switches=int(s.attendees * s.event_days * 2 * (reduction_pct / 100)),
-        attendees=s.attendees,
+    req = build_scenario_financial_request(
+        s, region, reduction_pct,
         actions_taken=["renewable_energy", "vegetarian_menu", "digital_materials"],
     )
     return generate_financial_report(req)

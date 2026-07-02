@@ -126,14 +126,12 @@ class VenueEnergy(BaseModel):
     grid_region: GridRegion = GridRegion.GLOBAL
     kwh_consumed: Optional[float] = Field(default=None, ge=0)
     venue_area_m2: Optional[float] = Field(default=None, ge=0)
-    event_days: int = Field(default=1, gt=0)
     renewable_pct: float = Field(default=0.0, ge=0, le=100)
 
 
 class AccommodationGroup(BaseModel):
     accommodation_type: AccommodationType = AccommodationType.STANDARD
     room_nights: int = Field(ge=0)
-    attendees_sharing: float = Field(default=1.5, gt=0)  # avg attendees per room
 
 
 class CateringGroup(BaseModel):

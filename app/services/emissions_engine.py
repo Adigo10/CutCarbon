@@ -3,6 +3,7 @@ Deterministic emissions calculation engine.
 Implements GHG Protocol Scope 1/2/3 methodology for events.
 """
 import json
+import logging
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
@@ -12,10 +13,22 @@ from app.models.schemas import (
     BenchmarkComparison, TravelMode, TravelClass, GridRegion, ScenarioMode
 )
 
+logger = logging.getLogger(__name__)
+
 _DATA_DIR = Path(__file__).parent.parent / "data"
 
 with open(_DATA_DIR / "emission_factors.json", encoding="utf-8") as f:
     EF = json.load(f)
+
+with open(_DATA_DIR / "tax_incentives.json", encoding="utf-8") as f:
+    _TAX_DATA = json.load(f)
+
+# Single source for the offset price used in suggestions (Gold Standard / VCS average).
+_OFFSET_PRICE_USD = (
+    _TAX_DATA.get("reduction_action_savings", {})
+    .get("carbon_offset_purchase", {})
+    .get("cost_per_tco2e_usd", 15.0)
+)
 
 
 def reload_factors() -> None:
@@ -46,20 +59,50 @@ def _travel_emissions(segments, attendees: int) -> tuple[float, dict]:
     else:
         for seg in segments:
             mode = seg.mode.value
-            ef_data = EF["travel"].get(mode, {})
-            if isinstance(ef_data, dict):
-                if seg.travel_class == TravelClass.ECONOMY:
-                    ef = ef_data.get("economy", ef_data.get("factor", 0.2))
-                elif seg.travel_class == TravelClass.BUSINESS:
-                    ef = ef_data.get("business", ef_data.get("factor", 0.2) * 2)
+            ef_data = EF["travel"].get(mode)
+            if not isinstance(ef_data, dict):
+                logger.error("No emission factor for travel mode %r; segment excluded", mode)
+                notes[f"travel_{mode}"] = f"No emission factor for '{mode}'; segment excluded from total"
+                continue
+            if "economy" in ef_data:
+                # Cabin-class factor table (flights). If the requested class has no
+                # published factor (e.g. short-haul first), fall back to the highest
+                # class available rather than inventing a multiplier.
+                requested = seg.travel_class.value
+                if requested in ef_data:
+                    ef = ef_data[requested]
                 else:
-                    ef = ef_data.get("first", ef_data.get("factor", 0.2) * 3)
+                    fallback = "business" if "business" in ef_data else "economy"
+                    ef = ef_data[fallback]
+                    notes[f"travel_{mode}_class"] = (
+                        f"No published {requested}-class factor for {mode}; used {fallback}"
+                    )
+            elif "factor" in ef_data:
+                # Single-factor mode (rail, road, ferry, private jet): cabin class
+                # does not change the per-passenger-km factor.
+                ef = ef_data["factor"]
             else:
-                ef = ef_data if isinstance(ef_data, (int, float)) else 0.1
-            seg_kg = seg.attendees * seg.distance_km * ef
-            total_kg += seg_kg
+                logger.error("Malformed emission factor for travel mode %r; segment excluded", mode)
+                notes[f"travel_{mode}"] = f"No usable emission factor for '{mode}'; segment excluded from total"
+                continue
+            total_kg += seg.attendees * seg.distance_km * ef
 
     return total_kg, notes
+
+
+def estimate_venue_kwh(venue_energy, attendees: int, event_days: int) -> float:
+    """Electricity consumption (kWh) implied by a venue-energy input.
+
+    Single source for the kWh derivation shared by _venue_energy_emissions and by
+    financial back-calculations: actual kWh when provided, else area proxy, else
+    attendee proxy.
+    """
+    if venue_energy is not None:
+        if venue_energy.kwh_consumed is not None:
+            return venue_energy.kwh_consumed
+        if venue_energy.venue_area_m2 is not None:
+            return venue_energy.venue_area_m2 * event_days * 30
+    return attendees * 2.0 * event_days * 30
 
 
 def _venue_energy_emissions(venue_energy, attendees: int, event_days: int) -> tuple[float, float, dict]:
@@ -69,21 +112,20 @@ def _venue_energy_emissions(venue_energy, attendees: int, event_days: int) -> tu
 
     if venue_energy is None:
         proxy_area = attendees * 2.0
-        total_kg = proxy_area * event_days * EF["venue_energy"]["proxy_factors"]["conference_centre_per_m2_day"]
-        notes["venue"] = f"Proxy: {proxy_area}m2 at 2.8 kg CO2e/m2/day"
+        proxy_factor = EF["venue_energy"]["proxy_factors"]["conference_centre_per_m2_day"]
+        total_kg = proxy_area * event_days * proxy_factor
+        notes["venue"] = f"Proxy: {proxy_area}m2 at {proxy_factor} kg CO2e/m2/day"
         return total_kg, scope1_kg, notes
 
     grid_key = venue_energy.grid_region.value
     grid_ef = EF["venue_energy"]["grids"].get(grid_key, EF["venue_energy"]["grids"]["global_average"])["factor"]
 
+    kwh = estimate_venue_kwh(venue_energy, attendees, event_days)
     if venue_energy.kwh_consumed is not None:
-        kwh = venue_energy.kwh_consumed
         notes["venue"] = f"Actual kWh: {kwh:.0f}"
     elif venue_energy.venue_area_m2 is not None:
-        kwh = venue_energy.venue_area_m2 * event_days * 30
         notes["venue"] = f"Proxy kWh from area: {kwh:.0f}"
     else:
-        kwh = attendees * 2.0 * event_days * 30
         notes["venue"] = f"Proxy kWh from attendees: {kwh:.0f}"
 
     effective_ef = grid_ef * (1 - venue_energy.renewable_pct / 100)
@@ -217,6 +259,10 @@ def _equipment_emissions(equipment, event_days: int) -> tuple[float, float, floa
 
     if total_kg > 0:
         notes["equipment"] = f"Stage {equipment.stage_m2}m2, lighting {equipment.lighting_days}d, sound {equipment.sound_system_days}d, LED {equipment.led_screen_m2}m2, gen {equipment.generator_hours}h"
+    if scope2_kg > 0:
+        notes["equipment_electricity"] = (
+            "Equipment electricity uses global-average grid factors, not the venue grid."
+        )
 
     return total_kg, scope1_kg, scope2_kg, scope3_kg, notes
 
@@ -470,6 +516,7 @@ def build_factors_snapshot(scenario: EventScenarioInput) -> dict:
     return {
         "travel_long_haul_economy_kg_per_pkm": EF["travel"]["long_haul_flight"]["economy"],
         "travel_short_haul_economy_kg_per_pkm": EF["travel"]["short_haul_flight"]["economy"],
+        "travel_short_haul_business_kg_per_pkm": EF["travel"]["short_haul_flight"]["business"],
         "travel_car_petrol_kg_per_pkm": EF["travel"]["car_petrol"]["factor"],
         "venue_grid_kg_per_kwh": grid_ef,
         "venue_grid_region": grid_key,
@@ -487,6 +534,7 @@ def get_reduction_suggestions(
     result: ScenarioResult,
     target_pct: float = 30.0,
     catering_type: Optional[str] = None,
+    equipment_input: Optional[dict] = None,
 ) -> list[dict]:
     """Generate ranked reduction suggestions as a realistic portfolio.
 
@@ -557,10 +605,15 @@ def get_reduction_suggestions(
         add("renewable_energy", "Switch venue to 100% renewable energy tariff",
             "energy", emissions.venue_energy_tco2e, attendees * days * 2, "easy", 2)
 
-    # Equipment — LED lighting saves ~40% of equipment electricity.
-    if remaining["equipment"] > 0:
-        add("led_lighting", "Switch to LED lighting (40% energy reduction)",
-            "equipment", emissions.equipment_tco2e * 0.40, 500 * days, "easy", 2)
+    # Equipment — the LED retrofit applies only to the lighting-electricity share,
+    # never to the generators or freight also bundled in equipment_tco2e.
+    if remaining["equipment"] > 0 and equipment_input:
+        lighting_days = equipment_input.get("lighting_days") or 0
+        lighting_ef = EF.get("equipment", {}).get("lighting_rig_per_day", {}).get("factor", 45.0)
+        lighting_tco2e = lighting_days * lighting_ef / 1000
+        if lighting_tco2e > 0:
+            add("led_lighting", "Switch to LED lighting (40% lighting-energy reduction)",
+                "equipment", lighting_tco2e * 0.40, 500 * days, "easy", 2)
 
     # Accommodation
     if remaining["accommodation"] > 0:
@@ -592,7 +645,7 @@ def get_reduction_suggestions(
             "action": "offset_residual",
             "label": "Neutralize residual emissions with Gold Standard credits (a cost, not a reduction)",
             "co2e_saved_tco2e": offset_qty,
-            "estimated_cost_usd": round(offset_qty * 20, 0),
+            "estimated_cost_usd": round(offset_qty * _OFFSET_PRICE_USD, 0),
             "category": "offsets",
             "difficulty": "easy",
             "scope": "all",

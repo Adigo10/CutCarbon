@@ -336,7 +336,8 @@ async def reduction_suggestions(
         ),
     )
     catering_type = ((s.input_payload or {}).get("catering") or {}).get("catering_type")
-    return get_reduction_suggestions(sr, target_pct, catering_type)
+    equipment_input = (s.input_payload or {}).get("equipment")
+    return get_reduction_suggestions(sr, target_pct, catering_type, equipment_input)
 
 
 @router.get("/{scenario_id}/export")

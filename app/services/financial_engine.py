@@ -16,15 +16,12 @@ _DATA_DIR = Path(__file__).parent.parent / "data"
 with open(_DATA_DIR / "tax_incentives.json", encoding="utf-8") as f:
     TAX_DATA = json.load(f)
 
-# Electricity cost per kWh by region (USD)
+# Electricity cost per kWh by region (USD) — sourced from tax_incentives.json
+# ("electricity_rates_usd", carries its own as_of date).
+_ELEC_BLOCK = TAX_DATA.get("electricity_rates_usd", {})
 ELECTRICITY_RATES_USD = {
-    "singapore": 0.22,
-    "eu": 0.28,
-    "uk": 0.34,
-    "australia": 0.25,
-    "usa": 0.16,
-    "global": 0.18,
-}
+    k: v for k, v in _ELEC_BLOCK.items() if isinstance(v, (int, float))
+} or {"global": 0.18}
 
 # Normalize the various region spellings the API accepts to the electricity-rate keys,
 # so multi-key regions (european_union / united_kingdom / usa_california) don't silently
@@ -127,7 +124,11 @@ def calculate_carbon_tax_savings(
 
     description = f"{co2e_reduced_tco2e:.2f} tCO2e x {local_price} {currency}/tCO2e"
     if is_live:
-        description += " (live price)"
+        description += " (live price"
+        fx_as_of = rate_data.get("fx_as_of")
+        if currency != "USD" and fx_as_of:
+            description += f", converted at static FX as of {fx_as_of}"
+        description += ")"
 
     savings.append(TaxSaving(
         scheme=rate_data.get("scheme", f"{region.title()} Carbon Scheme"),
@@ -137,16 +138,23 @@ def calculate_carbon_tax_savings(
         description=description,
     ))
 
-    # Singapore announced future rate — a legitimate forward projection (labeled).
-    if region_key == "singapore" and "2026_rate_sgd" in rate_data:
-        future_price = rate_data["2026_rate_sgd"]
-        savings.append(TaxSaving(
-            scheme="Singapore Carbon Tax (2026 rate)",
-            savings_usd=round(co2e_reduced_tco2e * future_price * usd_rate, 2),
-            savings_local=round(co2e_reduced_tco2e * future_price, 2),
-            currency="SGD",
-            description=f"Projected at SGD {future_price}/tCO2e from 2026",
-        ))
+    # Singapore's announced rate trajectory — a labeled forward projection. Prefer
+    # the live announced next-step rate; else the low bound of the 2030 range.
+    if region_key == "singapore":
+        future_price = live.get("singapore_next_sgd")
+        source_note = "announced next-step rate (live)"
+        if not future_price:
+            rate_range = rate_data.get("2030_rate_sgd_range") or []
+            future_price = rate_range[0] if rate_range else None
+            source_note = "low bound of the announced SGD 50-80/tCO2e range by 2030"
+        if future_price:
+            savings.append(TaxSaving(
+                scheme="Singapore Carbon Tax (future rate)",
+                savings_usd=round(co2e_reduced_tco2e * future_price * usd_rate, 2),
+                savings_local=round(co2e_reduced_tco2e * future_price, 2),
+                currency="SGD",
+                description=f"Projected at SGD {future_price}/tCO2e — {source_note}",
+            ))
 
     return savings
 
@@ -211,6 +219,53 @@ def calculate_compliance_value(actions: List[str], region: str) -> float:
     exposure* separately as a clearly-labeled risk figure instead.
     """
     return 0.0
+
+
+def build_scenario_financial_request(
+    scenario_row,
+    region: str,
+    reduction_pct: float,
+    actions_taken: List[str],
+) -> FinancialRequest:
+    """Build a FinancialRequest from a stored scenario row.
+
+    Energy kWh saved is derived from the scenario's own venue-energy input (its
+    grid and renewable share) — never from the requesting region's grid factor.
+    """
+    from app.models.schemas import EventScenarioInput
+    from app.services.emissions_engine import estimate_venue_kwh
+
+    baseline = scenario_row.total_tco2e or 0.0
+    reduced = baseline * (1 - reduction_pct / 100)
+
+    payload = scenario_row.input_payload or {}
+    venue_kwh = 0.0
+    try:
+        scenario_input = EventScenarioInput.model_validate(payload)
+        venue_kwh = estimate_venue_kwh(
+            scenario_input.venue_energy, scenario_input.attendees, scenario_input.event_days
+        )
+    except Exception:
+        # Legacy rows without a valid stored payload: back-solve from this row's own
+        # factor snapshot; report zero rather than fabricating a figure from another
+        # region's grid factor.
+        snapshot = getattr(scenario_row, "factors_snapshot", None) or {}
+        grid_ef = snapshot.get("venue_grid_kg_per_kwh") or 0.0
+        renewable_pct = (payload.get("venue_energy") or {}).get("renewable_pct") or 0.0
+        effective_ef = grid_ef * (1 - renewable_pct / 100)
+        if effective_ef > 0:
+            venue_kwh = (scenario_row.venue_energy_tco2e or 0.0) * 1000 / effective_ef
+
+    return FinancialRequest(
+        scenario_id=scenario_row.id,
+        baseline_tco2e=baseline,
+        reduced_tco2e=reduced,
+        region=region,
+        energy_kwh_saved=venue_kwh * (reduction_pct / 100),
+        meal_switches=int((scenario_row.attendees or 0) * (scenario_row.event_days or 1) * 2 * (reduction_pct / 100)),
+        attendees=scenario_row.attendees or 0,
+        actions_taken=actions_taken,
+    )
 
 
 def generate_financial_report(req: FinancialRequest) -> FinancialResult:

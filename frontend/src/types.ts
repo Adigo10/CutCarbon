@@ -44,7 +44,6 @@ export interface VenueEnergyPayload {
 export interface AccommodationPayload {
   accommodation_type: string
   room_nights: number
-  attendees_sharing?: number
 }
 
 export interface CateringPayload {

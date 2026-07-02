@@ -1,10 +1,25 @@
 {
+  "rates_as_of": "2024-12",
+  "electricity_rates_usd": {
+    "as_of": "2024-12",
+    "source": "IEA / national utility tariffs, commercial rates",
+    "singapore": 0.22,
+    "eu": 0.28,
+    "uk": 0.34,
+    "australia": 0.25,
+    "usa": 0.16,
+    "global": 0.18
+  },
   "carbon_tax_rates": {
     "singapore": {
       "current_rate_sgd": 45,
-      "2030_rate_sgd_range": [50, 80],
+      "2030_rate_sgd_range": [
+        50,
+        80
+      ],
       "currency": "SGD",
       "usd_exchange": 0.74,
+      "fx_as_of": "2024-12",
       "scope": "Facilities emitting >= 25,000 tCO2e/year; event organizers indirectly affected via supply chain",
       "scheme": "Carbon Pricing Act (CPA)",
       "source": "NEA Singapore — S$45/tCO2e from 1 Jan 2026 (rising to S$50-80 by 2030)"
@@ -14,6 +29,7 @@
       "cbam_price_eur": 65,
       "currency": "EUR",
       "usd_exchange": 1.08,
+      "fx_as_of": "2024-12",
       "scope": "EU ETS covers aviation (intra-EU), energy, heavy industry. CBAM from 2026 extends carbon costs to imports.",
       "notes": "CBAM transitional phase since Oct 2023; full implementation from 2026",
       "source": "EU ETS Registry 2024"
@@ -22,6 +38,7 @@
       "ets_price_gbp": 50,
       "currency": "GBP",
       "usd_exchange": 1.27,
+      "fx_as_of": "2024-12",
       "scope": "UK ETS covers aviation, power, industry",
       "source": "UK ETS Authority 2024"
     },
@@ -30,6 +47,7 @@
       "safeguard_baseline_aud": 32,
       "currency": "AUD",
       "usd_exchange": 0.65,
+      "fx_as_of": "2024-12",
       "scope": "Australian Carbon Credit Units (voluntary/compliance). Safeguard Mechanism covers facilities >100k tCO2e/year.",
       "source": "Clean Energy Regulator 2024"
     },
@@ -38,6 +56,7 @@
       "sec_climate_disclosure": true,
       "currency": "USD",
       "usd_exchange": 1.0,
+      "fx_as_of": "2024-12",
       "scope": "California Cap-and-Trade (large emitters). SEC climate disclosure rule from 2025.",
       "source": "CARB 2024"
     },
@@ -46,6 +65,7 @@
       "2030_rate_cad": 170,
       "currency": "CAD",
       "usd_exchange": 0.74,
+      "fx_as_of": "2024-12",
       "scope": "Federal carbon pricing backstop. Provinces may operate own systems.",
       "scheme": "Federal Carbon Pricing",
       "source": "ECCC Canada 2024"
@@ -55,6 +75,7 @@
       "gx_ets_start": 2026,
       "currency": "JPY",
       "usd_exchange": 0.0067,
+      "fx_as_of": "2024-12",
       "scope": "Tax on fossil fuels (JPY 289/tCO2e). GX-ETS full trading from 2026.",
       "scheme": "Tax for Climate Change Mitigation + GX-ETS",
       "source": "MOE Japan 2024"
@@ -63,6 +84,7 @@
       "ets_price_krw": 12000,
       "currency": "KRW",
       "usd_exchange": 0.00075,
+      "fx_as_of": "2024-12",
       "scope": "K-ETS covers ~74% of national emissions. Third compliance period (2021-2025).",
       "scheme": "Korea Emissions Trading Scheme (K-ETS)",
       "source": "Ministry of Environment Korea 2024"
@@ -71,6 +93,7 @@
       "ets_price_cny": 80,
       "currency": "CNY",
       "usd_exchange": 0.14,
+      "fx_as_of": "2024-12",
       "scope": "China National ETS covers power sector (~4.5 GtCO2). Expanding to cement, steel, aluminum.",
       "scheme": "China National ETS",
       "source": "MEE China 2024"
@@ -84,7 +107,11 @@
         "benefit": "Up to 50% co-funding for energy efficiency projects",
         "max_grant_sgd": 1000000,
         "eligibility": "Singapore-registered companies implementing energy efficiency measures",
-        "applicable_actions": ["renewable_energy", "energy_efficiency", "smart_controls"],
+        "applicable_actions": [
+          "renewable_energy",
+          "energy_efficiency",
+          "smart_controls"
+        ],
         "source": "EDB Singapore 2024"
       },
       {
@@ -93,28 +120,42 @@
         "benefit": "Up to 70% grant for sustainability projects",
         "max_grant_sgd": 300000,
         "eligibility": "SMEs in Singapore",
-        "applicable_actions": ["sustainability_reporting", "carbon_audit", "green_certification"],
+        "applicable_actions": [
+          "sustainability_reporting",
+          "carbon_audit",
+          "green_certification"
+        ],
         "source": "Enterprise Singapore 2024"
       },
       {
         "name": "BCA Green Mark Incentive Scheme",
         "type": "tax_deduction",
         "benefit": "Enhanced capital allowances for green building features",
-        "applicable_actions": ["green_venue", "energy_efficiency"],
+        "applicable_actions": [
+          "green_venue",
+          "energy_efficiency"
+        ],
         "source": "BCA Singapore 2024"
       },
       {
         "name": "Investment Allowance for Energy Efficient Equipment",
         "type": "tax_allowance",
         "benefit": "100% capital allowance in year of purchase for qualifying equipment",
-        "applicable_actions": ["renewable_energy", "energy_efficiency"],
+        "applicable_actions": [
+          "renewable_energy",
+          "energy_efficiency"
+        ],
         "source": "IRAS Singapore 2024"
       },
       {
         "name": "Singapore Green Bonds",
         "type": "financing",
         "benefit": "Government-backed green bond framework for sustainability projects",
-        "applicable_actions": ["renewable_energy", "green_venue", "sustainable_transport"],
+        "applicable_actions": [
+          "renewable_energy",
+          "green_venue",
+          "sustainable_transport"
+        ],
         "source": "MAS Singapore 2024"
       }
     ],
@@ -123,28 +164,43 @@
         "name": "EU Green Deal / Cohesion Funds",
         "type": "grant",
         "benefit": "Grants for sustainable event infrastructure",
-        "applicable_actions": ["renewable_energy", "green_venue", "sustainable_transport"],
+        "applicable_actions": [
+          "renewable_energy",
+          "green_venue",
+          "sustainable_transport"
+        ],
         "source": "EC 2024"
       },
       {
         "name": "Corporate Sustainability Reporting Directive (CSRD)",
         "type": "compliance_requirement",
         "benefit": "Penalty avoidance: EUR 10M or 5% of global turnover",
-        "applicable_actions": ["ghg_reporting", "sustainability_audit"],
+        "applicable_actions": [
+          "ghg_reporting",
+          "sustainability_audit"
+        ],
         "source": "EU CSRD 2024"
       },
       {
         "name": "EU Innovation Fund",
         "type": "grant",
         "benefit": "EUR 40B+ for innovative low-carbon technologies (2020-2030)",
-        "applicable_actions": ["renewable_energy", "carbon_capture", "green_technology"],
+        "applicable_actions": [
+          "renewable_energy",
+          "carbon_capture",
+          "green_technology"
+        ],
         "source": "EC Innovation Fund 2024"
       },
       {
         "name": "EU Taxonomy Alignment",
         "type": "financing",
         "benefit": "Access to green finance and lower borrowing costs for taxonomy-aligned activities",
-        "applicable_actions": ["renewable_energy", "energy_efficiency", "circular_economy"],
+        "applicable_actions": [
+          "renewable_energy",
+          "energy_efficiency",
+          "circular_economy"
+        ],
         "source": "EU Taxonomy Regulation 2024"
       }
     ],
@@ -153,21 +209,30 @@
         "name": "HMRC Enhanced Capital Allowances",
         "type": "tax_allowance",
         "benefit": "100% first-year allowance for energy-saving equipment",
-        "applicable_actions": ["energy_efficiency", "renewable_energy"],
+        "applicable_actions": [
+          "energy_efficiency",
+          "renewable_energy"
+        ],
         "source": "HMRC 2024"
       },
       {
         "name": "Climate Change Levy (CCL) Reduction",
         "type": "tax_reduction",
         "benefit": "80% CCL discount with Climate Change Agreement",
-        "applicable_actions": ["energy_efficiency"],
+        "applicable_actions": [
+          "energy_efficiency"
+        ],
         "source": "HMRC 2024"
       },
       {
         "name": "UK Green Finance Strategy",
         "type": "financing",
         "benefit": "Transition Plan Taskforce guidance for net-zero aligned financing",
-        "applicable_actions": ["ghg_reporting", "sustainability_audit", "net_zero_plan"],
+        "applicable_actions": [
+          "ghg_reporting",
+          "sustainability_audit",
+          "net_zero_plan"
+        ],
         "source": "HM Treasury 2024"
       }
     ],
@@ -176,21 +241,31 @@
         "name": "Australian Renewable Energy Agency (ARENA)",
         "type": "grant",
         "benefit": "Grants for renewable energy deployment and innovation",
-        "applicable_actions": ["renewable_energy"],
+        "applicable_actions": [
+          "renewable_energy"
+        ],
         "source": "ARENA 2024"
       },
       {
         "name": "Safeguard Mechanism Credits",
         "type": "credit",
         "benefit": "Earn tradeable credits for emissions below baseline",
-        "applicable_actions": ["energy_efficiency", "renewable_energy", "process_improvement"],
+        "applicable_actions": [
+          "energy_efficiency",
+          "renewable_energy",
+          "process_improvement"
+        ],
         "source": "Clean Energy Regulator 2024"
       },
       {
         "name": "Climate Active Certification",
         "type": "certification",
         "benefit": "Government-backed carbon neutral certification for events and organizations",
-        "applicable_actions": ["carbon_audit", "carbon_offset", "ghg_reporting"],
+        "applicable_actions": [
+          "carbon_audit",
+          "carbon_offset",
+          "ghg_reporting"
+        ],
         "source": "DCCEEW Australia 2024"
       }
     ],
@@ -199,28 +274,38 @@
         "name": "IRA Investment Tax Credit (ITC)",
         "type": "tax_credit",
         "benefit": "30% tax credit on solar/renewable installations",
-        "applicable_actions": ["renewable_energy"],
+        "applicable_actions": [
+          "renewable_energy"
+        ],
         "source": "IRS IRA 2024"
       },
       {
         "name": "IRA Production Tax Credit (PTC)",
         "type": "tax_credit",
         "benefit": "$0.026/kWh for renewable energy generated",
-        "applicable_actions": ["renewable_energy"],
+        "applicable_actions": [
+          "renewable_energy"
+        ],
         "source": "IRS IRA 2024"
       },
       {
         "name": "45Q Carbon Capture Tax Credit",
         "type": "tax_credit",
         "benefit": "$85/tCO2 for geological storage, $60/tCO2 for utilization",
-        "applicable_actions": ["carbon_capture"],
+        "applicable_actions": [
+          "carbon_capture"
+        ],
         "source": "IRS 2024"
       },
       {
         "name": "EPA Climate Pollution Reduction Grants",
         "type": "grant",
         "benefit": "$5B+ in grants for state/local/tribal climate action",
-        "applicable_actions": ["renewable_energy", "energy_efficiency", "sustainable_transport"],
+        "applicable_actions": [
+          "renewable_energy",
+          "energy_efficiency",
+          "sustainable_transport"
+        ],
         "source": "EPA 2024"
       }
     ],
@@ -229,14 +314,20 @@
         "name": "Federal Carbon Price Revenue Recycling",
         "type": "rebate",
         "benefit": "Climate Action Incentive payments returned to households",
-        "applicable_actions": ["energy_efficiency"],
+        "applicable_actions": [
+          "energy_efficiency"
+        ],
         "source": "ECCC Canada 2024"
       },
       {
         "name": "Strategic Innovation Fund - Net Zero Accelerator",
         "type": "grant",
         "benefit": "CAD 8B for industrial decarbonization projects",
-        "applicable_actions": ["renewable_energy", "carbon_capture", "process_improvement"],
+        "applicable_actions": [
+          "renewable_energy",
+          "carbon_capture",
+          "process_improvement"
+        ],
         "source": "ISED Canada 2024"
       }
     ],
@@ -245,7 +336,11 @@
         "name": "GX Transition Bonds",
         "type": "financing",
         "benefit": "JPY 20T+ in government-backed transition bonds (2023-2032)",
-        "applicable_actions": ["renewable_energy", "energy_efficiency", "green_technology"],
+        "applicable_actions": [
+          "renewable_energy",
+          "energy_efficiency",
+          "green_technology"
+        ],
         "source": "METI Japan 2024"
       }
     ]
@@ -337,7 +432,12 @@
     "iso_20121": {
       "name": "ISO 20121 Sustainable Events Management",
       "description": "International standard for sustainable event management systems",
-      "key_requirements": ["stakeholder identification", "supply chain management", "continuous improvement", "reporting"],
+      "key_requirements": [
+        "stakeholder identification",
+        "supply chain management",
+        "continuous improvement",
+        "reporting"
+      ],
       "certification_available": true
     },
     "iso_14064": {
@@ -359,7 +459,11 @@
     "singapore_sustainability_reporting": {
       "name": "SGX Sustainability Reporting",
       "mandatory_from": "2025",
-      "required_disclosures": ["material ESG factors", "GHG emissions (Scope 1+2)", "climate risks"],
+      "required_disclosures": [
+        "material ESG factors",
+        "GHG emissions (Scope 1+2)",
+        "climate risks"
+      ],
       "scope3_from": "2026 (large companies)"
     },
     "eu_csrd": {
@@ -367,11 +471,22 @@
       "mandatory_from": "2024 (large public-interest entities)",
       "rollout": "2025 (large companies), 2026 (listed SMEs)",
       "penalties_eur": 10000000,
-      "esrs_standards": ["E1 Climate Change", "E2 Pollution", "E3 Water", "E4 Biodiversity", "E5 Circular Economy"]
+      "esrs_standards": [
+        "E1 Climate Change",
+        "E2 Pollution",
+        "E3 Water",
+        "E4 Biodiversity",
+        "E5 Circular Economy"
+      ]
     },
     "tcfd": {
       "name": "Task Force on Climate-related Financial Disclosures (TCFD)",
-      "pillars": ["Governance", "Strategy", "Risk Management", "Metrics & Targets"],
+      "pillars": [
+        "Governance",
+        "Strategy",
+        "Risk Management",
+        "Metrics & Targets"
+      ],
       "status": "Consolidated into ISSB/IFRS S2 from 2024. Many jurisdictions adopting ISSB standards."
     },
     "sbtn": {

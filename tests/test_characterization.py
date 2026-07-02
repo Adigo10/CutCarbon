@@ -58,5 +58,5 @@ def test_seeded_scenario_suggestions_shape(seeded_result):
     offset = suggestions[-1]
     assert offset["is_neutralization"] is True
     assert offset["co2e_saved_tco2e"] == pytest.approx(7.876, abs=0.001)
-    # Priced at the hardcoded $20/t today; unified to the data-file price in Phase 1.
-    assert offset["estimated_cost_usd"] == pytest.approx(158.0, abs=0.5)
+    # Priced from tax_incentives.json carbon_offset_purchase.cost_per_tco2e_usd ($15/t).
+    assert offset["estimated_cost_usd"] == pytest.approx(118.0, abs=0.5)
