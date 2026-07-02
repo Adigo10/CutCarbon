@@ -69,7 +69,7 @@ function App() {
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
   const [chatContext, setChatContext] = useState<Record<string, unknown>>({})
-  const [sessionId, setSessionId] = useState(() => crypto.randomUUID())
+  const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID())
   const [financialCalc, setFinancialCalc] = useState(createDefaultFinancialCalc)
   const [financialResult, setFinancialResult] = useState<FinancialResult | null>(null)
   const [financialLoading, setFinancialLoading] = useState(false)

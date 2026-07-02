@@ -40,12 +40,6 @@ async def market_overview():
     return OFFSET_DATA["market_data"]
 
 
-@router.get("/guidance")
-async def retirement_guidance():
-    """Best practices for claiming and retiring carbon credits."""
-    return OFFSET_DATA["retirement_guidance"]
-
-
 @router.post("", response_model=OffsetPurchaseOut)
 async def create_purchase(
     purchase: OffsetPurchaseCreate,

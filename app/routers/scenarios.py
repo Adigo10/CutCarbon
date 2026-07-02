@@ -1,8 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
-from typing import List, Optional
+from typing import List
 from datetime import datetime
 import uuid
 
@@ -15,7 +14,6 @@ from app.services.emissions_engine import (
     get_benchmark_comparison,
 )
 from app.routers.auth import get_current_user
-from app.routers.exports import build_scenario_report_payload
 
 router = APIRouter()
 
@@ -340,48 +338,3 @@ async def reduction_suggestions(
     return get_reduction_suggestions(sr, target_pct, catering_type, equipment_input)
 
 
-@router.get("/{scenario_id}/export")
-async def export_scenario(
-    scenario_id: str,
-    region: str = "singapore",
-    has_scope3: bool = True,
-    has_ghg_report: bool = False,
-    db: AsyncSession = Depends(get_db),
-    current_user: UserDB = Depends(get_current_user),
-):
-    """Backward-compatible JSON report alias for a scenario."""
-    report = await build_scenario_report_payload(
-        scenario_id=scenario_id,
-        db=db,
-        current_user=current_user,
-        region=region,
-        has_scope3=has_scope3,
-        has_ghg_report=has_ghg_report,
-    )
-    return JSONResponse(
-        content=report.model_dump(),
-        headers={"Content-Disposition": f"attachment; filename=cutcarbon_{scenario_id}.json"},
-    )
-
-
-@router.get("/compare/all")
-async def compare_scenarios(
-    ids: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
-    current_user: UserDB = Depends(get_current_user),
-):
-    """Compare multiple scenarios. Pass ?ids=id1,id2,id3 or leave empty for all."""
-    if ids:
-        id_list = ids.split(",")
-        result = await db.execute(
-            select(ScenarioDB).where(ScenarioDB.id.in_(id_list), ScenarioDB.user_id == current_user.id)
-        )
-    else:
-        result = await db.execute(
-            select(ScenarioDB)
-            .where(ScenarioDB.user_id == current_user.id)
-            .order_by(ScenarioDB.created_at.desc())
-            .limit(10)
-        )
-    scenarios = result.scalars().all()
-    return [_db_to_result(s) for s in scenarios]

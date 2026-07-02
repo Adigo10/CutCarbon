@@ -200,27 +200,6 @@ def get_available_incentives(region: str, actions: List[str]) -> List[Dict[str, 
     return matched
 
 
-def estimate_incentive_value(incentives: List[Dict], baseline_tco2e: float, attendees: int) -> float:
-    """Incentives are listed for awareness but NOT converted to a cash-savings figure.
-
-    Quantifying grant/tax-credit value requires actual project-cost inputs the tool
-    does not collect. Rather than back-solving kWh from total emissions (which wrongly
-    treats travel/catering/waste as electricity), we surface the qualitative list in
-    ``available_incentives`` and add no fabricated dollar amount to the savings total.
-    """
-    return 0.0
-
-
-def calculate_compliance_value(actions: List[str], region: str) -> float:
-    """Penalty-avoidance is NOT fabricated into the savings total.
-
-    Real exposure depends on member-state penalties and the entity's turnover, which
-    this tool does not model. The compliance report surfaces statutory *maximum
-    exposure* separately as a clearly-labeled risk figure instead.
-    """
-    return 0.0
-
-
 def build_scenario_financial_request(
     scenario_row,
     region: str,
@@ -284,11 +263,11 @@ def generate_financial_report(req: FinancialRequest) -> FinancialResult:
     per_meal_saving = abs(veg.get("typical_cost_delta_usd", -2.5))
     catering_savings = req.meal_switches * per_meal_saving
 
-    # Available incentives are listed for awareness; they are NOT summed into the headline
-    # (no real project-cost inputs to quantify them). Same for penalty-avoidance value.
+    # Available incentives are listed for awareness only — quantifying grant/tax-credit
+    # value needs project-cost inputs the tool doesn't collect, and penalty-avoidance
+    # depends on member-state law and entity turnover. Neither is fabricated into the
+    # headline; both stay 0.0 with the qualitative list surfaced instead.
     incentives = get_available_incentives(req.region, req.actions_taken)
-    incentive_value = estimate_incentive_value(incentives, req.baseline_tco2e, req.attendees)
-    compliance_value = calculate_compliance_value(req.actions_taken, req.region)
 
     # Headline = carbon-tax/ETS liability avoided + real operating-cost savings only.
     primary_tax = tax_savings[0].savings_usd if tax_savings else 0
@@ -305,7 +284,7 @@ def generate_financial_report(req: FinancialRequest) -> FinancialResult:
         # ROI in "months" implied an annual recurring saving; an event saving is one-off,
         # so we omit the misleading metric rather than divide a one-time figure by 12.
         roi_months=None,
-        compliance_value_usd=compliance_value,
+        compliance_value_usd=0.0,
     )
 
 

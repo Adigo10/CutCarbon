@@ -54,11 +54,7 @@ app.include_router(agents.router,    prefix="/api/agents",    tags=["TinyFish Ag
 app.include_router(exports.router,   prefix="/api/exports",   tags=["Data Exports"])
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-LEGACY_STATIC_DIR = BASE_DIR / "static"
 FRONTEND_DIST_DIR = BASE_DIR / "frontend" / "dist"
-
-if LEGACY_STATIC_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(LEGACY_STATIC_DIR)), name="static")
 
 
 @app.get("/health")
@@ -66,5 +62,10 @@ async def health():
     return {"status": "ok", "service": "EventCarbon Co-Pilot", "version": "2.0.0"}
 
 
-frontend_dir = FRONTEND_DIST_DIR if (FRONTEND_DIST_DIR / "index.html").exists() else LEGACY_STATIC_DIR
-app.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")
+if (FRONTEND_DIST_DIR / "index.html").exists():
+    app.mount("/", StaticFiles(directory=str(FRONTEND_DIST_DIR), html=True), name="frontend")
+else:
+    logger.error(
+        "frontend/dist/index.html not found — the SPA will not be served. "
+        "Build it first: cd frontend && npm install && npm run build"
+    )

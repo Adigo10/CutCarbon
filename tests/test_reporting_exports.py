@@ -94,22 +94,6 @@ def test_single_scenario_report_exports_return_expected_files(client: TestClient
         assert response.content.startswith(b"%PDF")
 
 
-def test_legacy_scenario_export_alias_returns_shared_payload(client: TestClient):
-    headers = register_user(client, email="legacy@example.com")
-    scenario_id = create_seeded_scenario(client, headers)
-
-    response = client.get(
-        f"/api/scenarios/{scenario_id}/export?region=eu&has_scope3=false&has_ghg_report=false",
-        headers=headers,
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["scenario"]["scenario_id"] == scenario_id
-    assert payload["compliance_overrides"]["region"] == "eu"
-    assert payload["offset_portfolio"]["total_retired_tco2e"] == pytest.approx(2.5)
-
-
 def test_global_exports_still_work(client: TestClient):
     headers = register_user(client, email="global@example.com")
 

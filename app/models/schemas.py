@@ -263,7 +263,6 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
     extracted_data: Optional[Dict[str, Any]] = None
-    updated_scenario: Optional[EventScenarioInput] = None
     suggestions: List[str] = Field(default_factory=list)
     # Server-validated session id the turn was persisted under; clients should adopt
     # it so /history/{session_id} lookups work.

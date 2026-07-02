@@ -133,10 +133,6 @@ export const api = {
     return request<Scenario[]>('/api/scenarios', undefined, token)
   },
 
-  getScenario(id: string, token: string) {
-    return request<Scenario>(`/api/scenarios/${id}`, undefined, token)
-  },
-
   createScenario(payload: ScenarioInputPayload, token: string) {
     return request<Scenario>('/api/scenarios', {
       method: 'POST',

@@ -31,7 +31,7 @@ from typing import Optional
 from sqlalchemy import select, desc
 
 from tinyfish.client import AsyncTinyFish
-from tinyfish.agent.types import CompleteEvent, ProgressEvent, RunStatus
+from tinyfish.agent.types import RunStatus
 
 from app.config import settings
 
@@ -189,42 +189,6 @@ class TinyFishAgent:
         self.last_run = _utcnow()
         self.last_result = structured
         return structured
-
-    async def stream(self, on_progress=None, on_complete=None) -> Optional[dict]:
-        """Streaming variant — calls progress/complete callbacks as the agent works."""
-        if not settings.TINYFISH_API_KEY:
-            return None
-
-        result_holder: dict = {}
-
-        def _on_progress(evt: ProgressEvent):
-            if on_progress:
-                on_progress(evt)
-            print(f"[TinyFish:{self.name}] step → {getattr(evt, 'purpose', '')}")
-
-        def _on_complete(evt: CompleteEvent):
-            if on_complete:
-                on_complete(evt)
-            # CompleteEvent.result_json is already a dict in the current SDK.
-            if evt.result_json:
-                result_holder["data"] = evt.result_json
-
-        async with _get_client() as client:
-            try:
-                stream = client.agent.stream(
-                    goal=self.goal,
-                    url=self.url,
-                    on_progress=_on_progress,
-                    on_complete=_on_complete,
-                )
-                async with stream:
-                    pass
-            except Exception as exc:
-                print(f"[TinyFish:{self.name}] stream error: {exc}")
-                return None
-
-        data = result_holder.get("data")
-        return self.extract(data) if isinstance(data, dict) else None
 
 
 # ── Concrete agents ────────────────────────────────────────────────────────────

@@ -1,16 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime
 
 from app.models.database import get_db, ScenarioDB, FinancialReportDB, UserDB
 from app.models.schemas import ComplianceRequest, FinancialRequest, FinancialResult, ComplianceReport
-from app.services.financial_engine import (
-    build_scenario_financial_request,
-    generate_financial_report,
-    get_compliance_report,
-    TAX_DATA,
-)
+from app.services.financial_engine import generate_financial_report, get_compliance_report
 from app.routers.auth import get_current_user
 
 router = APIRouter()
@@ -50,32 +45,6 @@ async def calculate_savings(
     return result
 
 
-@router.get("/savings/scenario/{scenario_id}")
-async def savings_for_scenario(
-    scenario_id: str,
-    region: str = "singapore",
-    reduction_pct: float = Query(default=30.0, ge=0, le=100),
-    db: AsyncSession = Depends(get_db),
-    current_user: UserDB = Depends(get_current_user),
-):
-    """Auto-calculate financial savings for an existing scenario."""
-    res = await db.execute(
-        select(ScenarioDB).where(
-            ScenarioDB.id == scenario_id,
-            ScenarioDB.user_id == current_user.id,
-        )
-    )
-    s = res.scalar_one_or_none()
-    if not s:
-        raise HTTPException(status_code=404, detail="Scenario not found")
-
-    req = build_scenario_financial_request(
-        s, region, reduction_pct,
-        actions_taken=["renewable_energy", "vegetarian_menu", "digital_materials"],
-    )
-    return generate_financial_report(req)
-
-
 @router.post("/compliance", response_model=ComplianceReport)
 async def check_compliance(
     req: ComplianceRequest,
@@ -88,51 +57,3 @@ async def check_compliance(
     )
 
 
-@router.get("/compliance/scenario/{scenario_id}")
-async def compliance_for_scenario(
-    scenario_id: str,
-    region: str = "singapore",
-    has_ghg_report: bool = False,
-    db: AsyncSession = Depends(get_db),
-    current_user: UserDB = Depends(get_current_user),
-):
-    """Compliance report for an existing scenario."""
-    res = await db.execute(
-        select(ScenarioDB).where(
-            ScenarioDB.id == scenario_id,
-            ScenarioDB.user_id == current_user.id,
-        )
-    )
-    s = res.scalar_one_or_none()
-    if not s:
-        raise HTTPException(status_code=404, detail="Scenario not found")
-
-    return get_compliance_report(
-        total_tco2e=s.total_tco2e,
-        has_scope3=True,
-        has_ghg_report=has_ghg_report,
-        region=region,
-        event_days=s.event_days,
-        attendees=s.attendees,
-    )
-
-
-@router.get("/tax-rates")
-async def get_tax_rates():
-    """Return current carbon tax rates by region (loaded once at import)."""
-    return TAX_DATA["carbon_tax_rates"]
-
-
-@router.get("/incentives/{region}")
-async def get_incentives(region: str):
-    """Return available green incentives for a region (loaded once at import)."""
-    region_map = {
-        "singapore": "singapore",
-        "eu": "european_union",
-        "uk": "united_kingdom",
-        "australia": "australia",
-        "usa": "usa",
-    }
-    mapped = region_map.get(region.lower(), region.lower())
-    incentives = TAX_DATA["green_incentives"].get(mapped, [])
-    return {"region": region, "incentives": incentives}

@@ -327,10 +327,3 @@ def _generate_suggestions(
         ])
 
     return suggestions[:3]
-
-
-async def generate_scenario_from_chat(raw_text: str) -> Optional[Dict]:
-    """One-shot: extract a full scenario from a single text description."""
-    messages = [ChatMessage(role="user", content=raw_text)]
-    result = await chat(messages)
-    return result.get("extracted_data")

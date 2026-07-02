@@ -65,25 +65,13 @@ class UserDB(Base):
     is_active = Column(Boolean, default=True)
 
 
-class EventDB(Base):
-    __tablename__ = "events"
-
-    id = Column(String, primary_key=True)
-    name = Column(String, nullable=False)
-    location = Column(String)
-    organizer = Column(String)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-
 class ScenarioDB(Base):
     __tablename__ = "scenarios"
     __table_args__ = (
         Index("ix_scenarios_user_created", "user_id", "created_at"),
-        Index("ix_scenarios_event_id", "event_id"),
     )
 
     id = Column(String, primary_key=True)
-    event_id = Column(String, ForeignKey("events.id"), nullable=True)
     name = Column(String, nullable=False)
     event_name = Column(String)
     location = Column(String)
@@ -150,6 +138,13 @@ class FinancialReportDB(Base):
 
 
 class EmissionFactorDB(Base):
+    """Audit log of TinyFish-fetched factor values with provenance.
+
+    Deliberately write-only: emission_factors.json is the live source of truth for
+    calculations; this table records what each agent fetched and when, so auto-fetched
+    values (is_verified=False) can be human-reviewed later.
+    """
+
     __tablename__ = "emission_factors"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -210,7 +205,13 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def init_db():
-    """Create all tables on startup."""
+    """Create all tables on startup.
+
+    The additive ALTER TABLE migrations below are the deliberate lightweight
+    mechanism for local SQLite deployments (column additions only, idempotent).
+    A move to Postgres should introduce Alembic instead of extending this list —
+    the DDL here is SQLite-flavored.
+    """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -249,7 +250,6 @@ async def init_db():
 
         indexes = [
             "CREATE INDEX IF NOT EXISTS ix_scenarios_user_created ON scenarios (user_id, created_at)",
-            "CREATE INDEX IF NOT EXISTS ix_scenarios_event_id ON scenarios (event_id)",
             "CREATE INDEX IF NOT EXISTS ix_chat_messages_user_session_created ON chat_messages (user_id, session_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_financial_reports_user_scenario_created ON financial_reports (user_id, scenario_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_offset_purchases_user_scenario_status ON offset_purchases (user_id, scenario_id, status)",

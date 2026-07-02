@@ -370,11 +370,6 @@ def get_benchmark_comparison(
     )
 
 
-def _get_benchmark(event_type: str, per_attendee_day: float) -> Optional[BenchmarkComparison]:
-    """Backward-compatible alias for older imports."""
-    return get_benchmark_comparison(event_type, per_attendee_day)
-
-
 def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
     """Main entry point: calculate all emissions for a scenario."""
     attendees = scenario.attendees
