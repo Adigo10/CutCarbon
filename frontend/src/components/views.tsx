@@ -1476,8 +1476,8 @@ export function DataView({
   const downloadCards = [
     ['/api/exports/scenarios.xlsx', 'scenarios.xlsx', 'Scenarios (Excel)', true],
     ['/api/exports/scenarios.json', 'scenarios.json', 'Scenarios (JSON)', true],
-    ['/api/exports/emission-factors.xlsx', 'emission-factors.xlsx', 'Emission Factors (Excel)', false],
-    ['/api/exports/emission-factors.json', 'emission-factors.json', 'Emission Factors (JSON)', false],
+    ['/api/exports/emission-factors.xlsx', 'emission-factors.xlsx', 'Emission Factors (Excel)', true],
+    ['/api/exports/emission-factors.json', 'emission-factors.json', 'Emission Factors (JSON)', true],
     ['/api/exports/agent-runs.xlsx', 'agent-runs.xlsx', 'Agent Runs (Excel)', true],
   ] as const
 

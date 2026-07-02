@@ -69,7 +69,7 @@ function App() {
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
   const [chatContext, setChatContext] = useState<Record<string, unknown>>({})
-  const [sessionId] = useState(() => `session-${Math.random().toString(36).slice(2, 9)}`)
+  const [sessionId, setSessionId] = useState(() => crypto.randomUUID())
   const [financialCalc, setFinancialCalc] = useState(createDefaultFinancialCalc)
   const [financialResult, setFinancialResult] = useState<FinancialResult | null>(null)
   const [financialLoading, setFinancialLoading] = useState(false)
@@ -400,6 +400,9 @@ function App() {
         extracted_data: response.extracted_data ?? undefined,
       }
       setChatMessages((current) => [...current, assistantMessage])
+      if (response.session_id && response.session_id !== sessionId) {
+        setSessionId(response.session_id)
+      }
       setChatContext((current) => ({
         ...current,
         event_name: response.extracted_data?.event_name ?? current.event_name,

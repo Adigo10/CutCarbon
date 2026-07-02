@@ -1,20 +1,26 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from sqlalchemy import select, desc, func
 
 from app.models.database import AgentRunDB, AsyncSessionLocal, UserDB
+from app.rate_limit import limiter
 from app.services.tinyfish_agent import run_and_update, REGISTERED_AGENTS, AGENT_TTL_HOURS
-from app.routers.auth import get_current_user
+from app.routers.auth import get_current_user, require_admin
 
 router = APIRouter()
 
 
+# Agent runs scrape ~10 external sites and rewrite the emission-factor file that
+# drives EVERY user's calculations — admin-only, and rate limited even for admins.
+
 @router.post("/run")
+@limiter.limit("2/hour")
 async def trigger_agents(
+    request: Request,
     background_tasks: BackgroundTasks,
     force: bool = Query(False, description="Bypass TTL cache and re-fetch all agents"),
-    current_user: UserDB = Depends(get_current_user),
+    current_user: UserDB = Depends(require_admin),
 ):
-    """Trigger all TinyFish web agents to refresh emission factor data."""
+    """Trigger all TinyFish web agents to refresh emission factor data (admin only)."""
     background_tasks.add_task(run_and_update, force)
     return {
         "status": "agents_dispatched",
@@ -26,11 +32,13 @@ async def trigger_agents(
 
 
 @router.get("/run/sync")
+@limiter.limit("2/hour")
 async def trigger_agents_sync(
+    request: Request,
     force: bool = Query(False, description="Bypass TTL cache"),
-    current_user: UserDB = Depends(get_current_user),
+    current_user: UserDB = Depends(require_admin),
 ):
-    """Synchronously run all agents and return results (may be slow)."""
+    """Synchronously run all agents and return results (admin only; may be slow)."""
     result = await run_and_update(force=force)
     return result
 

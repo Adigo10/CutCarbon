@@ -48,6 +48,13 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
 
+    # Comma-separated emails allowed to trigger TinyFish agent runs (which mutate
+    # the global emission-factor file and scrape external sites). Empty = nobody.
+    ADMIN_EMAILS: str = ""
+
+    # Disable in tests; per-IP in-memory limits otherwise.
+    RATE_LIMIT_ENABLED: bool = True
+
     APP_HOST: str = "0.0.0.0"
     APP_PORT: int = 8000
 

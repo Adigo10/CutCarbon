@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime
@@ -6,6 +6,7 @@ import uuid
 
 from app.models.database import get_db, ChatMessageDB, ScenarioDB, UserDB
 from app.models.schemas import ChatRequest, ChatResponse
+from app.rate_limit import limiter
 from app.services import openai_service
 from app.routers.auth import get_current_user
 
@@ -23,7 +24,9 @@ def _valid_session_id(value) -> str:
 
 
 @router.post("", response_model=ChatResponse)
+@limiter.limit("20/minute")
 async def chat(
+    request: Request,
     req: ChatRequest,
     db: AsyncSession = Depends(get_db),
     current_user: UserDB = Depends(get_current_user),
@@ -82,6 +85,7 @@ async def chat(
         reply=result["reply"],
         extracted_data=result.get("extracted_data"),
         suggestions=result.get("suggestions", []),
+        session_id=session_id,
     )
 
 

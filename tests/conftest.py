@@ -1,4 +1,8 @@
 import asyncio
+import os
+
+# Must be set before app.config is imported: the shared limiter reads it at import.
+os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
 
 import pytest
 from fastapi.testclient import TestClient

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 from typing import Optional, List, Dict, Any
 from enum import Enum
 from uuid import uuid4
@@ -265,6 +265,9 @@ class ChatResponse(BaseModel):
     extracted_data: Optional[Dict[str, Any]] = None
     updated_scenario: Optional[EventScenarioInput] = None
     suggestions: List[str] = Field(default_factory=list)
+    # Server-validated session id the turn was persisted under; clients should adopt
+    # it so /history/{session_id} lookups work.
+    session_id: str = ""
 
 
 # -- Financial models ----------------------------------------------------------
@@ -426,13 +429,15 @@ class ScenarioExport(BaseModel):
 # -- Auth schemas --------------------------------------------------------------
 
 class UserCreate(BaseModel):
-    email: str
-    password: str
+    email: EmailStr
+    # 72 = bcrypt input limit; passlib silently truncates beyond it.
+    password: str = Field(min_length=8, max_length=72)
 
 
 class UserLogin(BaseModel):
+    # Deliberately plain str so pre-existing loosely-formed accounts can still log in.
     email: str
-    password: str
+    password: str = Field(max_length=72)
 
 
 class Token(BaseModel):

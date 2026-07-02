@@ -1,16 +1,37 @@
+import logging
+from contextlib import asynccontextmanager
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from pathlib import Path
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 from app.models.database import init_db
+from app.rate_limit import limiter
 from app.routers import chat, scenarios, financial, agents, auth, offsets, exports
+
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logging.basicConfig(level=logging.INFO)
+    await init_db()
+    logger.info("EventCarbon Co-Pilot v2.0 started — http://localhost:8000")
+    yield
+
 
 app = FastAPI(
     title="EventCarbon Co-Pilot",
     description="AI-powered carbon footprint calculator for events with financial savings, compliance tracking, and carbon offset management",
     version="2.0.0",
+    lifespan=lifespan,
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # The SPA authenticates with a Bearer token in localStorage (not a cookie), so we
 # do NOT need credentialed CORS. Wildcard origin + allow_credentials=True is both
@@ -47,9 +68,3 @@ async def health():
 
 frontend_dir = FRONTEND_DIST_DIR if (FRONTEND_DIST_DIR / "index.html").exists() else LEGACY_STATIC_DIR
 app.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")
-
-
-@app.on_event("startup")
-async def startup():
-    await init_db()
-    print("EventCarbon Co-Pilot v2.0 started — http://localhost:8000")

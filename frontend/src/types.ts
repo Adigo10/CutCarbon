@@ -173,6 +173,7 @@ export interface ChatResponse {
   reply: string
   extracted_data?: Record<string, unknown> | null
   suggestions: string[]
+  session_id?: string
 }
 
 export interface FinancialCalcState {
