@@ -20,8 +20,8 @@ _DATA_DIR = Path(__file__).parent.parent / "data"
 with open(_DATA_DIR / "emission_factors.json", encoding="utf-8") as f:
     EF = json.load(f)
 
-with open(_DATA_DIR / "tax_incentives.json", encoding="utf-8") as f:
-    _TAX_DATA = json.load(f)
+from app.services.data_files import TAX_DATA as _TAX_DATA  # noqa: E402
+from app.utils.time import utcnow
 
 # Single source for the offset price used in suggestions (Gold Standard / VCS average).
 _OFFSET_PRICE_USD = (
@@ -487,7 +487,7 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
         emissions=emissions,
         benchmark=benchmark,
         assumptions=assumptions,
-        created_at=datetime.utcnow().isoformat(),
+        created_at=utcnow().isoformat(),
     )
 
 
@@ -521,7 +521,7 @@ def build_factors_snapshot(scenario: EventScenarioInput) -> dict:
         "catering_type": catering_type,
         "waste_landfill_kg_per_kg": EF["materials_waste"]["general_landfill"]["factor"],
         "ef_version": EF.get("version", "unknown"),
-        "captured_at": datetime.utcnow().isoformat(),
+        "captured_at": utcnow().isoformat(),
     }
 
 

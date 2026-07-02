@@ -7,6 +7,7 @@ from app.models.database import get_db, ScenarioDB, FinancialReportDB, UserDB
 from app.models.schemas import ComplianceRequest, FinancialRequest, FinancialResult, ComplianceReport
 from app.services.financial_engine import generate_financial_report, get_compliance_report
 from app.routers.auth import get_current_user
+from app.utils.time import utcnow
 
 router = APIRouter()
 
@@ -38,7 +39,7 @@ async def calculate_savings(
         reduced_tco2e=req.reduced_tco2e,
         total_savings_usd=result.total_financial_savings_usd,
         report_json=result.model_dump(),
-        created_at=datetime.utcnow(),
+        created_at=utcnow(),
         user_id=current_user.id,
     ))
     await db.commit()

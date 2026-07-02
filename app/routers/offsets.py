@@ -1,6 +1,4 @@
 """Carbon offset portfolio management — browse projects, track purchases, retire credits."""
-import json
-from pathlib import Path
 from datetime import datetime
 from typing import List, Optional
 
@@ -13,13 +11,10 @@ from app.models.schemas import (
     OffsetPurchaseCreate, OffsetPurchaseOut, OffsetPortfolioSummary, OffsetRecommendation
 )
 from app.routers.auth import get_current_user
+from app.services.data_files import CARBON_OFFSETS as OFFSET_DATA
+from app.utils.time import utcnow
 
 router = APIRouter()
-
-_DATA_DIR = Path(__file__).parent.parent / "data"
-
-with open(_DATA_DIR / "carbon_offsets.json", encoding="utf-8") as f:
-    OFFSET_DATA = json.load(f)
 
 
 @router.get("/projects")
@@ -70,7 +65,7 @@ async def create_purchase(
         serial_number=purchase.serial_number,
         status="purchased",
         notes=purchase.notes,
-        created_at=datetime.utcnow(),
+        created_at=utcnow(),
     )
     db.add(db_obj)
     await db.commit()
@@ -112,7 +107,7 @@ async def retire_credit(
         raise HTTPException(status_code=400, detail="Already retired")
 
     p.status = "retired"
-    p.retired_at = datetime.utcnow()
+    p.retired_at = utcnow()
     await db.commit()
     return _to_out(p)
 

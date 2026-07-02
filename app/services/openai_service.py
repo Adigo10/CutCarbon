@@ -3,6 +3,7 @@ OpenAI service: chat co-pilot with function calling for structured data extracti
 Converts natural language event descriptions into EventScenarioInput objects.
 """
 import json
+import logging
 from typing import Optional, List, Dict, Any
 
 from openai import (
@@ -16,6 +17,8 @@ from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from app.config import settings
 from app.models.schemas import ChatMessage
+
+logger = logging.getLogger(__name__)
 
 client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
@@ -82,7 +85,7 @@ def _validate_extracted(args: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     try:
         cleaned = ExtractedEventData.model_validate(args)
     except ValidationError as exc:
-        print(f"[openai_service] dropped invalid extraction: {exc.error_count()} error(s)")
+        logger.warning("dropped invalid extraction: %s error(s)", exc.error_count())
         return None
     data = cleaned.model_dump(exclude_none=True)
     return data or None

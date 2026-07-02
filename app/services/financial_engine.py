@@ -3,18 +3,18 @@ Financial savings + tax compliance engine.
 Calculates carbon tax savings, energy cost reductions, green incentives,
 and compliance value from emission reduction actions.
 """
-import json
-from pathlib import Path
 from typing import List, Dict, Any
 
 from app.models.schemas import (
     FinancialRequest, FinancialResult, TaxSaving, ComplianceCheck, ComplianceReport
 )
-
-_DATA_DIR = Path(__file__).parent.parent / "data"
-
-with open(_DATA_DIR / "tax_incentives.json", encoding="utf-8") as f:
-    TAX_DATA = json.load(f)
+from app.services.data_files import TAX_DATA
+from app.services.regions import (
+    CARBON_TAX_KEYS,
+    ELECTRICITY_KEYS,
+    INCENTIVE_KEYS,
+    normalize_region,
+)
 
 # Electricity cost per kWh by region (USD) — sourced from tax_incentives.json
 # ("electricity_rates_usd", carries its own as_of date).
@@ -23,20 +23,6 @@ ELECTRICITY_RATES_USD = {
     k: v for k, v in _ELEC_BLOCK.items() if isinstance(v, (int, float))
 } or {"global": 0.18}
 
-# Normalize the various region spellings the API accepts to the electricity-rate keys,
-# so multi-key regions (european_union / united_kingdom / usa_california) don't silently
-# fall through to the cheapest "global" rate.
-_ELEC_REGION_ALIASES = {
-    "singapore": "singapore",
-    "eu": "eu",
-    "european_union": "eu",
-    "uk": "uk",
-    "united_kingdom": "uk",
-    "australia": "australia",
-    "usa": "usa",
-    "usa_california": "usa",
-    "global": "global",
-}
 
 def _live_carbon_prices() -> dict:
     """Live carbon prices fetched by the TinyFish agents (carbon_tax_live), if any."""
@@ -78,26 +64,10 @@ def calculate_carbon_tax_savings(
     with no configured carbon price rather than fabricating one.
     """
     savings: List[TaxSaving] = []
-    region_key = region.lower().replace(" ", "_")
+    region_key = normalize_region(region)
 
-    rates = TAX_DATA["carbon_tax_rates"]
-    rates_map = {
-        "singapore": rates["singapore"],
-        "european_union": rates["european_union"],
-        "eu": rates["european_union"],
-        "uk": rates["united_kingdom"],
-        "united_kingdom": rates["united_kingdom"],
-        "australia": rates["australia"],
-        "usa": rates["usa_california"],
-        "usa_california": rates["usa_california"],
-        "canada": rates.get("canada"),
-        "japan": rates.get("japan"),
-        "south_korea": rates.get("south_korea"),
-        "korea": rates.get("south_korea"),
-        "china": rates.get("china"),
-    }
-
-    rate_data = rates_map.get(region_key)
+    rate_key = CARBON_TAX_KEYS.get(region_key)
+    rate_data = TAX_DATA["carbon_tax_rates"].get(rate_key) if rate_key else None
     if not rate_data:
         # No carbon price configured for this region — do not invent one.
         return savings
@@ -161,24 +131,14 @@ def calculate_carbon_tax_savings(
 
 def calculate_energy_savings(energy_kwh_saved: float, region: str) -> float:
     """Calculate direct energy cost savings in USD."""
-    key = _ELEC_REGION_ALIASES.get(region.lower().replace(" ", "_"), "global")
+    key = ELECTRICITY_KEYS.get(normalize_region(region), "global")
     rate = ELECTRICITY_RATES_USD.get(key, ELECTRICITY_RATES_USD["global"])
     return round(energy_kwh_saved * rate, 2)
 
 
 def get_available_incentives(region: str, actions: List[str]) -> List[Dict[str, Any]]:
     """Match taken actions to available green incentives."""
-    region_key = region.lower()
-    region_map = {
-        "singapore": "singapore",
-        "eu": "european_union",
-        "european_union": "european_union",
-        "uk": "united_kingdom",
-        "united_kingdom": "united_kingdom",
-        "australia": "australia",
-        "usa": "usa",
-    }
-    mapped = region_map.get(region_key, "singapore")
+    mapped = INCENTIVE_KEYS.get(normalize_region(region), "singapore")
     incentives = TAX_DATA["green_incentives"].get(mapped, [])
     expanded_actions = set(actions)
     action_aliases = {
@@ -352,7 +312,8 @@ def get_compliance_report(
     ))
 
     # Region-specific reporting regimes.
-    if region.lower() == "singapore":
+    region = normalize_region(region)
+    if region == "singapore":
         mandatory.append("SGX Sustainability Reporting (Scope 1+2)")
         sgx_score = 70 if has_ghg_report else 20
         checks.append(ComplianceCheck(
@@ -363,7 +324,7 @@ def get_compliance_report(
             recommendations=["Prepare annual sustainability report", "Align with IFRS S2 / ISSB"],
         ))
 
-    if region.lower() in ("eu", "european_union"):
+    if region == "european_union":
         mandatory.append("EU CSRD")
         csrd_score = 50 if has_ghg_report else 10
         checks.append(ComplianceCheck(

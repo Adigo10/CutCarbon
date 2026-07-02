@@ -5,6 +5,7 @@ from app.models.database import AgentRunDB, AsyncSessionLocal, UserDB
 from app.rate_limit import limiter
 from app.services.tinyfish_agent import run_and_update, REGISTERED_AGENTS, AGENT_TTL_HOURS
 from app.routers.auth import get_current_user, require_admin
+from app.utils.time import utcnow
 
 router = APIRouter()
 
@@ -47,7 +48,7 @@ async def trigger_agents_sync(
 async def agent_status(current_user: UserDB = Depends(get_current_user)):
     """Return last run info for each registered agent, including DB history."""
     from datetime import datetime, timedelta
-    cutoff = datetime.utcnow() - timedelta(hours=AGENT_TTL_HOURS)
+    cutoff = utcnow() - timedelta(hours=AGENT_TTL_HOURS)
 
     async with AsyncSessionLocal() as session:
         # Get the most recent run per agent name

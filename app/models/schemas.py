@@ -227,6 +227,32 @@ class BenchmarkComparison(BaseModel):
     gap_to_best_practice_pct: float
 
 
+class ScenarioDetail(BaseModel):
+    """Full scenario wire format returned by the scenario endpoints."""
+
+    scenario_id: str
+    name: str
+    event_name: Optional[str] = ""
+    location: Optional[str] = ""
+    event_type: str = "conference"
+    attendees: int
+    event_days: int
+    mode: str = "basic"
+    emissions: "EmissionBreakdown"
+    benchmark: Optional[BenchmarkComparison] = None
+    assumptions: Dict[str, Any] = Field(default_factory=dict)
+    input_payload: Dict[str, Any] = Field(default_factory=dict)
+    factors_snapshot: Dict[str, Any] = Field(default_factory=dict)
+    created_at: str = ""
+
+
+class RecalculateAllResponse(BaseModel):
+    updated_count: int
+    failed_count: int
+    failures: List[Dict[str, Any]]
+    scenarios: List[ScenarioDetail]
+
+
 class ScenarioResult(BaseModel):
     scenario_id: str = Field(default_factory=lambda: str(uuid4()))
     name: str

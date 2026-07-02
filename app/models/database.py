@@ -20,6 +20,7 @@ except ImportError:  # SQLAlchemy 1.4 fallback
 from sqlalchemy.orm import declarative_base
 
 from app.config import settings
+from app.utils.time import utcnow
 
 try:
     from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -61,7 +62,7 @@ class UserDB(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     email = Column(String, unique=True, nullable=False, index=True)
     hashed_password = Column(String, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     is_active = Column(Boolean, default=True)
 
 
@@ -100,8 +101,8 @@ class ScenarioDB(Base):
     assumptions = Column(JSON, default=dict)
     input_payload = Column(JSON, default=dict)
     factors_snapshot = Column(JSON, default=dict)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
 
 
@@ -116,7 +117,7 @@ class ChatMessageDB(Base):
     role = Column(String)
     content = Column(Text)
     extracted_data = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=utcnow, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
 
 
@@ -133,7 +134,7 @@ class FinancialReportDB(Base):
     reduced_tco2e = Column(Float)
     total_savings_usd = Column(Float)
     report_json = Column(JSON)
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=utcnow, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
 
 
@@ -155,7 +156,7 @@ class EmissionFactorDB(Base):
     unit = Column(String)
     source_url = Column(String, nullable=True)
     methodology_tag = Column(String, nullable=True)
-    last_updated = Column(DateTime, default=datetime.utcnow)
+    last_updated = Column(DateTime, default=utcnow)
     is_verified = Column(Boolean, default=False)
 
 
@@ -179,7 +180,7 @@ class OffsetPurchaseDB(Base):
     status = Column(String, default="purchased", index=True)  # purchased | retired | cancelled
     retired_at = Column(DateTime, nullable=True)
     notes = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=utcnow, index=True)
 
 
 class AgentRunDB(Base):
@@ -194,7 +195,7 @@ class AgentRunDB(Base):
     num_steps = Column(Integer, nullable=True)
     result_json = Column(JSON, nullable=True)
     error = Column(Text, nullable=True)
-    fetched_at = Column(DateTime, default=datetime.utcnow, index=True)
+    fetched_at = Column(DateTime, default=utcnow, index=True)
 
 
 # -- Session dependency --------------------------------------------------------

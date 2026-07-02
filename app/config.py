@@ -1,8 +1,10 @@
+import logging
 import os
 import secrets
-import sys
 
 from pydantic import BaseModel, model_validator
+
+logger = logging.getLogger(__name__)
 
 try:
     from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -77,12 +79,13 @@ class Settings(BaseSettings):
         )
         if weak:
             self.JWT_SECRET = secrets.token_urlsafe(64)
-            print(
-                "[config] WARNING: JWT_SECRET was unset, the built-in placeholder, "
-                "or shorter than 32 chars. Generated an ephemeral random secret for "
-                "this process (tokens will not survive a restart). Set a strong "
-                "JWT_SECRET in .env for production.",
-                file=sys.stderr,
+            # Runs at import time, before logging is configured — logging's
+            # lastResort handler still emits WARNING+ to stderr.
+            logger.warning(
+                "JWT_SECRET was unset, the built-in placeholder, or shorter than "
+                "32 chars. Generated an ephemeral random secret for this process "
+                "(tokens will not survive a restart). Set a strong JWT_SECRET in "
+                ".env for production."
             )
         return self
 

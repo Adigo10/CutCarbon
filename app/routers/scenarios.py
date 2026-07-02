@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from typing import List
@@ -6,117 +6,43 @@ from datetime import datetime
 import uuid
 
 from app.models.database import get_db, ScenarioDB, UserDB
-from app.models.schemas import EventScenarioInput, ScenarioResult
-from app.services.emissions_engine import (
-    calculate_scenario,
-    get_reduction_suggestions,
-    build_factors_snapshot,
-    get_benchmark_comparison,
+from app.models.schemas import (
+    EventScenarioInput,
+    RecalculateAllResponse,
+    ScenarioDetail,
+    ScenarioResult,
+)
+from app.services.emissions_engine import calculate_scenario, get_reduction_suggestions
+from app.services.scenario_serializer import (
+    copy_scenario_columns,
+    db_row_to_result,
+    result_to_column_values,
+    serialize_scenario,
 )
 from app.routers.auth import get_current_user
+from app.utils.time import utcnow
 
 router = APIRouter()
 
 
-def _db_to_result(s: ScenarioDB) -> dict:
-    event_type = getattr(s, "event_type", "conference") or "conference"
-    per_attendee_day = round(s.per_attendee_tco2e / max(s.event_days or 1, 1), 4) if s.per_attendee_tco2e else 0
-    benchmark = get_benchmark_comparison(event_type, per_attendee_day, s.per_attendee_tco2e)
-    return {
-        "scenario_id": s.id,
-        "name": s.name,
-        "event_name": s.event_name,
-        "location": getattr(s, "location", None) or ((s.input_payload or {}).get("location")),
-        "event_type": event_type,
-        "attendees": s.attendees,
-        "event_days": s.event_days,
-        "emissions": {
-            "travel_tco2e": s.travel_tco2e,
-            "venue_energy_tco2e": s.venue_energy_tco2e,
-            "accommodation_tco2e": s.accommodation_tco2e,
-            "catering_tco2e": s.catering_tco2e,
-            "materials_waste_tco2e": s.materials_waste_tco2e,
-            "equipment_tco2e": getattr(s, "equipment_tco2e", 0) or 0,
-            "swag_tco2e": getattr(s, "swag_tco2e", 0) or 0,
-            "total_tco2e": s.total_tco2e,
-            "per_attendee_tco2e": s.per_attendee_tco2e,
-            "per_attendee_day_tco2e": round(s.per_attendee_tco2e / max(s.event_days or 1, 1), 4) if s.per_attendee_tco2e else 0,
-            "data_quality": s.data_quality,
-            "scopes": {
-                "scope1_tco2e": getattr(s, "scope1_tco2e", 0) or 0,
-                "scope2_tco2e": getattr(s, "scope2_tco2e", 0) or 0,
-                "scope3_tco2e": getattr(s, "scope3_tco2e", 0) or 0,
-            },
-        },
-        "assumptions": s.assumptions or {},
-        "input_payload": s.input_payload or {},
-        "factors_snapshot": getattr(s, "factors_snapshot", None) or {},
-        "benchmark": benchmark.model_dump() if benchmark else None,
-        "created_at": s.created_at.isoformat() if s.created_at else "",
-    }
-
-
 def _save_result(scenario_id: str, result: ScenarioResult, payload: EventScenarioInput, user_id: int) -> ScenarioDB:
-    """Build a ScenarioDB object from calculation result."""
+    """Build a ScenarioDB object from a calculation result."""
     return ScenarioDB(
         id=scenario_id,
-        name=result.name,
-        event_name=result.event_name,
-        location=result.location or payload.location,
-        event_type=result.event_type,
-        attendees=result.attendees,
-        event_days=result.event_days,
-        mode=payload.mode.value,
-        travel_tco2e=result.emissions.travel_tco2e,
-        venue_energy_tco2e=result.emissions.venue_energy_tco2e,
-        accommodation_tco2e=result.emissions.accommodation_tco2e,
-        catering_tco2e=result.emissions.catering_tco2e,
-        materials_waste_tco2e=result.emissions.materials_waste_tco2e,
-        equipment_tco2e=result.emissions.equipment_tco2e,
-        swag_tco2e=result.emissions.swag_tco2e,
-        total_tco2e=result.emissions.total_tco2e,
-        per_attendee_tco2e=result.emissions.per_attendee_tco2e,
-        data_quality=result.emissions.data_quality,
-        scope1_tco2e=result.emissions.scopes.scope1_tco2e if result.emissions.scopes else 0,
-        scope2_tco2e=result.emissions.scopes.scope2_tco2e if result.emissions.scopes else 0,
-        scope3_tco2e=result.emissions.scopes.scope3_tco2e if result.emissions.scopes else 0,
-        assumptions=result.assumptions,
-        input_payload=payload.model_dump(),
-        factors_snapshot=build_factors_snapshot(payload),
-        created_at=datetime.utcnow(),
         user_id=user_id,
+        created_at=utcnow(),
+        **result_to_column_values(result, payload),
     )
 
 
 def _apply_result_to_existing(existing: ScenarioDB, result: ScenarioResult, payload: EventScenarioInput) -> None:
     """Apply a ScenarioResult onto an existing ScenarioDB row."""
-    existing.name = result.name
-    existing.event_name = result.event_name
-    existing.location = result.location or payload.location
-    existing.event_type = result.event_type
-    existing.attendees = result.attendees
-    existing.event_days = result.event_days
-    existing.mode = payload.mode.value
-    existing.travel_tco2e = result.emissions.travel_tco2e
-    existing.venue_energy_tco2e = result.emissions.venue_energy_tco2e
-    existing.accommodation_tco2e = result.emissions.accommodation_tco2e
-    existing.catering_tco2e = result.emissions.catering_tco2e
-    existing.materials_waste_tco2e = result.emissions.materials_waste_tco2e
-    existing.equipment_tco2e = result.emissions.equipment_tco2e
-    existing.swag_tco2e = result.emissions.swag_tco2e
-    existing.total_tco2e = result.emissions.total_tco2e
-    existing.per_attendee_tco2e = result.emissions.per_attendee_tco2e
-    existing.data_quality = result.emissions.data_quality
-    existing.scope1_tco2e = result.emissions.scopes.scope1_tco2e if result.emissions.scopes else 0
-    existing.scope2_tco2e = result.emissions.scopes.scope2_tco2e if result.emissions.scopes else 0
-    existing.scope3_tco2e = result.emissions.scopes.scope3_tco2e if result.emissions.scopes else 0
-    existing.assumptions = result.assumptions
-    existing.input_payload = payload.model_dump()
-    existing.factors_snapshot = build_factors_snapshot(payload)
-    existing.updated_at = datetime.utcnow()
+    for field, value in result_to_column_values(result, payload).items():
+        setattr(existing, field, value)
+    existing.updated_at = utcnow()
 
 
-@router.post("/recalculate/all", response_model=dict)
+@router.post("/recalculate/all", response_model=RecalculateAllResponse)
 async def recalculate_all_scenarios(
     db: AsyncSession = Depends(get_db),
     current_user: UserDB = Depends(get_current_user),
@@ -142,7 +68,7 @@ async def recalculate_all_scenarios(
             result = calculate_scenario(payload)
             async with db.begin_nested():
                 _apply_result_to_existing(existing, result, payload)
-            all_rows.append(_db_to_result(existing))
+            all_rows.append(serialize_scenario(existing))
         except Exception as exc:
             failures.append({
                 "scenario_id": existing.id,
@@ -151,7 +77,7 @@ async def recalculate_all_scenarios(
             })
             # Reload the un-mutated row so the response reflects its true (unchanged) state.
             await db.refresh(existing)
-            all_rows.append(_db_to_result(existing))
+            all_rows.append(serialize_scenario(existing))
 
     await db.commit()
 
@@ -163,7 +89,7 @@ async def recalculate_all_scenarios(
     }
 
 
-@router.post("", response_model=dict)
+@router.post("", response_model=ScenarioDetail)
 async def create_scenario(
     payload: EventScenarioInput,
     db: AsyncSession = Depends(get_db),
@@ -175,10 +101,10 @@ async def create_scenario(
     db_obj = _save_result(scenario_id, result, payload, current_user.id)
     db.add(db_obj)
     await db.commit()
-    return {**_db_to_result(db_obj), "scenario_id": scenario_id, "benchmark": result.benchmark.model_dump() if result.benchmark else None}
+    return serialize_scenario(db_obj)
 
 
-@router.put("/{scenario_id}", response_model=dict)
+@router.put("/{scenario_id}", response_model=ScenarioDetail)
 async def update_scenario(
     scenario_id: str,
     payload: EventScenarioInput,
@@ -198,10 +124,10 @@ async def update_scenario(
     _apply_result_to_existing(existing, result, payload)
 
     await db.commit()
-    return {**_db_to_result(existing), "benchmark": result.benchmark.model_dump() if result.benchmark else None}
+    return serialize_scenario(existing)
 
 
-@router.get("", response_model=List[dict])
+@router.get("", response_model=List[ScenarioDetail])
 async def list_scenarios(
     db: AsyncSession = Depends(get_db),
     current_user: UserDB = Depends(get_current_user),
@@ -212,10 +138,10 @@ async def list_scenarios(
         .where(ScenarioDB.user_id == current_user.id)
         .order_by(ScenarioDB.created_at.desc())
     )
-    return [_db_to_result(s) for s in result.scalars().all()]
+    return [serialize_scenario(s) for s in result.scalars().all()]
 
 
-@router.get("/{scenario_id}", response_model=dict)
+@router.get("/{scenario_id}", response_model=ScenarioDetail)
 async def get_scenario(
     scenario_id: str,
     db: AsyncSession = Depends(get_db),
@@ -227,7 +153,7 @@ async def get_scenario(
     s = result.scalar_one_or_none()
     if not s:
         raise HTTPException(status_code=404, detail="Scenario not found")
-    return _db_to_result(s)
+    return serialize_scenario(s)
 
 
 @router.delete("/{scenario_id}")
@@ -243,10 +169,10 @@ async def delete_scenario(
     return {"deleted": scenario_id}
 
 
-@router.post("/{scenario_id}/clone")
+@router.post("/{scenario_id}/clone", response_model=ScenarioDetail)
 async def clone_scenario(
     scenario_id: str,
-    name: str,
+    name: str = Query(min_length=1, max_length=200),
     db: AsyncSession = Depends(get_db),
     current_user: UserDB = Depends(get_current_user),
 ):
@@ -258,44 +184,25 @@ async def clone_scenario(
     if not orig:
         raise HTTPException(status_code=404, detail="Scenario not found")
 
-    new_id = str(uuid.uuid4())
     clone = ScenarioDB(
-        id=new_id,
-        name=name,
-        event_name=orig.event_name,
-        location=getattr(orig, "location", None),
-        event_type=getattr(orig, "event_type", "conference") or "conference",
-        attendees=orig.attendees,
-        event_days=orig.event_days,
-        mode=orig.mode,
-        travel_tco2e=orig.travel_tco2e,
-        venue_energy_tco2e=orig.venue_energy_tco2e,
-        accommodation_tco2e=orig.accommodation_tco2e,
-        catering_tco2e=orig.catering_tco2e,
-        materials_waste_tco2e=orig.materials_waste_tco2e,
-        equipment_tco2e=getattr(orig, "equipment_tco2e", 0) or 0,
-        swag_tco2e=getattr(orig, "swag_tco2e", 0) or 0,
-        total_tco2e=orig.total_tco2e,
-        per_attendee_tco2e=orig.per_attendee_tco2e,
-        data_quality=orig.data_quality,
-        scope1_tco2e=getattr(orig, "scope1_tco2e", 0) or 0,
-        scope2_tco2e=getattr(orig, "scope2_tco2e", 0) or 0,
-        scope3_tco2e=getattr(orig, "scope3_tco2e", 0) or 0,
-        assumptions={**(orig.assumptions or {}), "cloned_from": scenario_id},
-        input_payload=orig.input_payload,
-        factors_snapshot=orig.factors_snapshot or {},
-        created_at=datetime.utcnow(),
+        id=str(uuid.uuid4()),
         user_id=current_user.id,
+        created_at=utcnow(),
+        **{
+            **copy_scenario_columns(orig),
+            "name": name,
+            "assumptions": {**(orig.assumptions or {}), "cloned_from": scenario_id},
+        },
     )
     db.add(clone)
     await db.commit()
-    return _db_to_result(clone)
+    return serialize_scenario(clone)
 
 
 @router.get("/{scenario_id}/suggestions")
 async def reduction_suggestions(
     scenario_id: str,
-    target_pct: float = 30.0,
+    target_pct: float = Query(30.0, ge=0, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: UserDB = Depends(get_current_user),
 ):
@@ -307,32 +214,7 @@ async def reduction_suggestions(
     if not s:
         raise HTTPException(status_code=404, detail="Scenario not found")
 
-    from app.models.schemas import ScenarioResult, EmissionBreakdown, ScopeBreakdown
-    sr = ScenarioResult(
-        scenario_id=s.id,
-        name=s.name,
-        event_name=s.event_name,
-        event_type=getattr(s, "event_type", "conference") or "conference",
-        attendees=s.attendees,
-        event_days=s.event_days,
-        emissions=EmissionBreakdown(
-            travel_tco2e=s.travel_tco2e,
-            venue_energy_tco2e=s.venue_energy_tco2e,
-            accommodation_tco2e=s.accommodation_tco2e,
-            catering_tco2e=s.catering_tco2e,
-            materials_waste_tco2e=s.materials_waste_tco2e,
-            equipment_tco2e=getattr(s, "equipment_tco2e", 0) or 0,
-            swag_tco2e=getattr(s, "swag_tco2e", 0) or 0,
-            total_tco2e=s.total_tco2e,
-            per_attendee_tco2e=s.per_attendee_tco2e,
-            data_quality=s.data_quality,
-            scopes=ScopeBreakdown(
-                scope1_tco2e=getattr(s, "scope1_tco2e", 0) or 0,
-                scope2_tco2e=getattr(s, "scope2_tco2e", 0) or 0,
-                scope3_tco2e=getattr(s, "scope3_tco2e", 0) or 0,
-            ),
-        ),
-    )
+    sr = db_row_to_result(s)
     catering_type = ((s.input_payload or {}).get("catering") or {}).get("catering_type")
     equipment_input = (s.input_payload or {}).get("equipment")
     return get_reduction_suggestions(sr, target_pct, catering_type, equipment_input)

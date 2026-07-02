@@ -21,6 +21,7 @@ asyncio lock, then reload_factors() refreshes the in-memory EF so the very next
 calculation uses the new values WITHOUT a process restart.
 """
 import asyncio
+import logging
 import json
 import os
 import tempfile
@@ -37,6 +38,8 @@ from app.config import settings
 
 # How long a successful agent result stays valid before the agent re-runs.
 AGENT_TTL_HOURS = 12
+
+logger = logging.getLogger(__name__)
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
 
@@ -154,26 +157,26 @@ class TinyFishAgent:
     async def run(self) -> Optional[dict]:
         """Execute via TinyFish API, validate, attach provenance. None on failure."""
         if not settings.TINYFISH_API_KEY:
-            print(f"[TinyFish:{self.name}] TINYFISH_API_KEY not set — skipping.")
+            logger.warning("[TinyFish:%s] TINYFISH_API_KEY not set — skipping.", self.name)
             return None
 
         async with _get_client() as client:
             try:
                 response = await client.agent.run(goal=self.goal, url=self.url)
             except Exception as exc:
-                print(f"[TinyFish:{self.name}] API error: {exc}")
+                logger.error("[TinyFish:%s] API error: %s", self.name, exc)
                 return None
 
         if response.status != RunStatus.COMPLETED or response.result is None:
             detail = getattr(response.error, "message", None) or f"status={response.status}"
-            print(f"[TinyFish:{self.name}] no usable result: {detail}")
+            logger.warning("[TinyFish:%s] no usable result: %s", self.name, detail)
             return None
 
         raw = response.result if isinstance(response.result, dict) else {}
         structured = self.extract(raw)
 
         if not _has_numeric(structured):
-            print(f"[TinyFish:{self.name}] result had no valid numeric value — treating as no-data.")
+            logger.warning("[TinyFish:%s] result had no valid numeric value — treating as no-data.", self.name)
             return None
 
         structured["_provenance"] = {
@@ -485,7 +488,7 @@ async def _run_agent_with_cache(agent: TinyFishAgent, force: bool) -> dict:
     if not force:
         cached = await _get_cached_run(agent.name)
         if cached is not None:
-            print(f"[TinyFish:{agent.name}] Cache hit — skipping API call (TTL {AGENT_TTL_HOURS}h).")
+            logger.info("[TinyFish:%s] Cache hit — skipping API call (TTL %sh).", agent.name, AGENT_TTL_HOURS)
             return {**cached, "_cache_hit": True}
 
     result = await agent.run()
@@ -672,7 +675,7 @@ async def merge_fetched_factors(results: dict) -> dict:
             from app.services.emissions_engine import reload_factors
             reload_factors()
         except Exception as exc:  # pragma: no cover - reload best-effort
-            print(f"[TinyFish] reload_factors failed: {exc}")
+            logger.error("[TinyFish] reload_factors failed: %s", exc)
 
     return {"updated_fields": updated, "total": len(updated)}
 

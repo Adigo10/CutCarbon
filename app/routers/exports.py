@@ -1,6 +1,7 @@
 """
 Data export router — download raw or processed data as Excel (.xlsx), JSON, CSV, or PDF.
 """
+import asyncio
 import csv
 import io
 import json
@@ -21,8 +22,9 @@ from app.models.schemas import (
     ScenarioReportPayload,
 )
 from app.routers.auth import get_current_user
-from app.services.emissions_engine import get_benchmark_comparison
 from app.services.financial_engine import get_compliance_report
+from app.services.scenario_serializer import serialize_scenario
+from app.utils.time import utcnow
 
 router = APIRouter()
 
@@ -77,10 +79,13 @@ _CATEGORY_LABELS = [
 ]
 
 
-def _wb_response(wb, filename: str) -> StreamingResponse:
-    # Single chokepoint for every .xlsx export: neutralize formula injection in any
-    # string cell before serializing. openpyxl auto-types a leading "=" as a formula,
-    # so we rewrite dangerous string cells to literal text here.
+def _wb_bytes(wb) -> bytes:
+    """Sanitize + serialize a workbook (CPU-bound — call via asyncio.to_thread).
+
+    Single chokepoint for every .xlsx export: neutralize formula injection in any
+    string cell before serializing. openpyxl auto-types a leading "=" as a formula,
+    so we rewrite dangerous string cells to literal text here.
+    """
     for ws in wb.worksheets:
         for row in ws.iter_rows():
             for cell in row:
@@ -88,9 +93,12 @@ def _wb_response(wb, filename: str) -> StreamingResponse:
                     cell.value = "'" + cell.value
     buf = io.BytesIO()
     wb.save(buf)
-    buf.seek(0)
+    return buf.getvalue()
+
+
+def _xlsx_response(content: bytes, filename: str) -> StreamingResponse:
     return StreamingResponse(
-        buf,
+        iter([content]),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
@@ -107,55 +115,12 @@ def _style_header(ws, row=1):
         cell.alignment = Alignment(horizontal="center")
 
 
-def _iso(dt: Optional[datetime]) -> str:
-    return dt.isoformat() if dt else ""
-
-
 def _labelize(value: str) -> str:
     return value.replace("_", " ").replace("/", " / ").title()
 
 
 def _scenario_location(s: ScenarioDB) -> str:
     return getattr(s, "location", None) or (s.input_payload or {}).get("location", "")
-
-
-def _serialize_scenario_row(s: ScenarioDB) -> dict[str, Any]:
-    event_type = getattr(s, "event_type", "conference") or "conference"
-    per_attendee_day = round(s.per_attendee_tco2e / max(s.event_days or 1, 1), 4) if s.per_attendee_tco2e else 0
-    benchmark = get_benchmark_comparison(event_type, per_attendee_day, s.per_attendee_tco2e)
-    return {
-        "scenario_id": s.id,
-        "name": s.name,
-        "event_name": s.event_name,
-        "location": _scenario_location(s),
-        "event_type": event_type,
-        "attendees": s.attendees,
-        "event_days": s.event_days,
-        "mode": s.mode,
-        "emissions": {
-            "travel_tco2e": s.travel_tco2e,
-            "venue_energy_tco2e": s.venue_energy_tco2e,
-            "accommodation_tco2e": s.accommodation_tco2e,
-            "catering_tco2e": s.catering_tco2e,
-            "materials_waste_tco2e": s.materials_waste_tco2e,
-            "equipment_tco2e": getattr(s, "equipment_tco2e", 0) or 0,
-            "swag_tco2e": getattr(s, "swag_tco2e", 0) or 0,
-            "total_tco2e": s.total_tco2e,
-            "per_attendee_tco2e": s.per_attendee_tco2e,
-            "per_attendee_day_tco2e": per_attendee_day,
-            "data_quality": s.data_quality,
-            "scopes": {
-                "scope1_tco2e": getattr(s, "scope1_tco2e", 0) or 0,
-                "scope2_tco2e": getattr(s, "scope2_tco2e", 0) or 0,
-                "scope3_tco2e": getattr(s, "scope3_tco2e", 0) or 0,
-            },
-        },
-        "assumptions": s.assumptions or {},
-        "input_payload": s.input_payload or {},
-        "factors_snapshot": getattr(s, "factors_snapshot", None) or {},
-        "benchmark": benchmark.model_dump() if benchmark else None,
-        "created_at": _iso(s.created_at),
-    }
 
 
 async def _get_scenario_or_404(
@@ -243,7 +208,7 @@ async def build_scenario_report_payload(
     has_ghg_report: bool = False,
 ) -> ScenarioReportPayload:
     scenario = await _get_scenario_or_404(scenario_id, db, current_user)
-    scenario_data = _serialize_scenario_row(scenario)
+    scenario_data = serialize_scenario(scenario)
     categories = _build_category_rows(scenario_data)
     emissions = scenario_data["emissions"]
     offset_summary = await _build_offset_summary_for_scenario(
@@ -263,7 +228,7 @@ async def build_scenario_report_payload(
 
     return ScenarioReportPayload(
         report_title=f"Carbon Footprint Report - {scenario.event_name or scenario.name}",
-        exported_at=datetime.utcnow().isoformat(),
+        exported_at=utcnow().isoformat(),
         methodology=_REPORT_METHODODOLOGY,
         disclaimer=_REPORT_DISCLAIMER,
         scenario=scenario_data,
@@ -283,7 +248,7 @@ async def build_scenario_report_payload(
 
 
 def _scenario_report_filename(prefix: str, scenario_id: str, extension: str) -> str:
-    stamp = datetime.utcnow().strftime("%Y%m%d")
+    stamp = utcnow().strftime("%Y%m%d")
     return f"{prefix}_{scenario_id}_{stamp}.{extension}"
 
 
@@ -630,19 +595,8 @@ def _scenario_report_pdf(report: ScenarioReportPayload) -> bytes:
     return buf.getvalue()
 
 
-@router.get("/scenarios.xlsx", summary="Download all scenarios as Excel")
-async def export_scenarios_xlsx(
-    db: AsyncSession = Depends(get_db),
-    current_user: UserDB = Depends(get_current_user),
-):
+def _build_scenarios_workbook(rows):
     from openpyxl import Workbook
-
-    q = (
-        select(ScenarioDB)
-        .where(ScenarioDB.user_id == current_user.id)
-        .order_by(desc(ScenarioDB.created_at))
-    )
-    rows = (await db.execute(q)).scalars().all()
 
     wb = Workbook()
 
@@ -689,8 +643,24 @@ async def export_scenarios_xlsx(
     ws2.column_dimensions["B"].width = 30
     ws2.column_dimensions["C"].width = 80
 
-    filename = f"cutcarbon_scenarios_{datetime.utcnow().strftime('%Y%m%d')}.xlsx"
-    return _wb_response(wb, filename)
+    return wb
+
+
+@router.get("/scenarios.xlsx", summary="Download all scenarios as Excel")
+async def export_scenarios_xlsx(
+    db: AsyncSession = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user),
+):
+    q = (
+        select(ScenarioDB)
+        .where(ScenarioDB.user_id == current_user.id)
+        .order_by(desc(ScenarioDB.created_at))
+    )
+    rows = (await db.execute(q)).scalars().all()
+
+    content = await asyncio.to_thread(lambda: _wb_bytes(_build_scenarios_workbook(rows)))
+    filename = f"cutcarbon_scenarios_{utcnow().strftime('%Y%m%d')}.xlsx"
+    return _xlsx_response(content, filename)
 
 
 @router.get("/scenarios/{scenario_id}.json", response_model=ScenarioReportPayload, summary="Download single scenario report package as JSON")
@@ -733,8 +703,9 @@ async def export_scenario_csv(
         has_scope3=has_scope3,
         has_ghg_report=has_ghg_report,
     )
+    content = await asyncio.to_thread(_scenario_report_csv_bytes, report)
     return _csv_response(
-        _scenario_report_csv_bytes(report),
+        content,
         _scenario_report_filename("cutcarbon_report", scenario_id, "csv"),
     )
 
@@ -756,8 +727,8 @@ async def export_scenario_xlsx(
         has_scope3=has_scope3,
         has_ghg_report=has_ghg_report,
     )
-    wb = _scenario_report_xlsx(report)
-    return _wb_response(wb, _scenario_report_filename("cutcarbon_report", scenario_id, "xlsx"))
+    content = await asyncio.to_thread(lambda: _wb_bytes(_scenario_report_xlsx(report)))
+    return _xlsx_response(content, _scenario_report_filename("cutcarbon_report", scenario_id, "xlsx"))
 
 
 @router.get("/scenarios/{scenario_id}.pdf", summary="Download single scenario report package as PDF")
@@ -777,16 +748,14 @@ async def export_scenario_pdf(
         has_scope3=has_scope3,
         has_ghg_report=has_ghg_report,
     )
+    content = await asyncio.to_thread(_scenario_report_pdf, report)
     return _pdf_response(
-        _scenario_report_pdf(report),
+        content,
         _scenario_report_filename("cutcarbon_report", scenario_id, "pdf"),
     )
 
 
-@router.get("/emission-factors.xlsx", summary="Download emission factor catalog as Excel")
-async def export_emission_factors_xlsx(
-    current_user: UserDB = Depends(get_current_user),
-):
+def _build_factor_workbook():
     from openpyxl import Workbook
 
     ef_path = _DATA_DIR / "emission_factors.json"
@@ -825,23 +794,20 @@ async def export_emission_factors_xlsx(
         max_len = max((len(str(cell.value or "")) for cell in col), default=0)
         ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 45)
 
-    filename = f"cutcarbon_emission_factors_{datetime.utcnow().strftime('%Y%m%d')}.xlsx"
-    return _wb_response(wb, filename)
+    return wb
 
 
-@router.get("/agent-runs.xlsx", summary="Download TinyFish agent run history as Excel")
-async def export_agent_runs_xlsx(
-    db: AsyncSession = Depends(get_db),
-    limit: int = 500,
+@router.get("/emission-factors.xlsx", summary="Download emission factor catalog as Excel")
+async def export_emission_factors_xlsx(
     current_user: UserDB = Depends(get_current_user),
 ):
-    from openpyxl import Workbook
+    content = await asyncio.to_thread(lambda: _wb_bytes(_build_factor_workbook()))
+    filename = f"cutcarbon_emission_factors_{utcnow().strftime('%Y%m%d')}.xlsx"
+    return _xlsx_response(content, filename)
 
-    rows = (
-        await db.execute(
-            select(AgentRunDB).order_by(desc(AgentRunDB.fetched_at)).limit(limit)
-        )
-    ).scalars().all()
+
+def _build_agent_runs_workbook(rows):
+    from openpyxl import Workbook
 
     wb = Workbook()
     ws = wb.active
@@ -865,20 +831,40 @@ async def export_agent_runs_xlsx(
 
         ws.column_dimensions[get_column_letter(i)].width = width
 
-    filename = f"cutcarbon_agent_runs_{datetime.utcnow().strftime('%Y%m%d')}.xlsx"
-    return _wb_response(wb, filename)
+    return wb
+
+
+@router.get("/agent-runs.xlsx", summary="Download TinyFish agent run history as Excel")
+async def export_agent_runs_xlsx(
+    db: AsyncSession = Depends(get_db),
+    limit: int = 500,
+    current_user: UserDB = Depends(get_current_user),
+):
+    rows = (
+        await db.execute(
+            select(AgentRunDB).order_by(desc(AgentRunDB.fetched_at)).limit(limit)
+        )
+    ).scalars().all()
+
+    content = await asyncio.to_thread(lambda: _wb_bytes(_build_agent_runs_workbook(rows)))
+    filename = f"cutcarbon_agent_runs_{utcnow().strftime('%Y%m%d')}.xlsx"
+    return _xlsx_response(content, filename)
+
+
+def _load_factor_json() -> dict:
+    ef_path = _DATA_DIR / "emission_factors.json"
+    with open(ef_path, encoding="utf-8") as f:
+        return json.load(f)
 
 
 @router.get("/emission-factors.json", summary="Download emission_factors.json (raw)")
 async def export_emission_factors_json(
     current_user: UserDB = Depends(get_current_user),
 ):
-    ef_path = _DATA_DIR / "emission_factors.json"
-    with open(ef_path, encoding="utf-8") as f:
-        data = json.load(f)
+    data = await asyncio.to_thread(_load_factor_json)
     return JSONResponse(
         content=data,
-        headers={"Content-Disposition": f'attachment; filename="emission_factors_{datetime.utcnow().strftime("%Y%m%d")}.json"'},
+        headers={"Content-Disposition": f'attachment; filename="emission_factors_{utcnow().strftime("%Y%m%d")}.json"'},
     )
 
 
@@ -894,8 +880,8 @@ async def export_scenarios_json(
     )
     rows = (await db.execute(q)).scalars().all()
 
-    data = [_serialize_scenario_row(s) for s in rows]
+    data = [serialize_scenario(s) for s in rows]
     return JSONResponse(
         content=data,
-        headers={"Content-Disposition": f'attachment; filename="cutcarbon_scenarios_{datetime.utcnow().strftime("%Y%m%d")}.json"'},
+        headers={"Content-Disposition": f'attachment; filename="cutcarbon_scenarios_{utcnow().strftime("%Y%m%d")}.json"'},
     )

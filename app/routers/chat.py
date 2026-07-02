@@ -9,6 +9,7 @@ from app.models.schemas import ChatRequest, ChatResponse
 from app.rate_limit import limiter
 from app.services import openai_service
 from app.routers.auth import get_current_user
+from app.utils.time import utcnow
 
 router = APIRouter()
 
@@ -60,7 +61,7 @@ async def chat(
         session_id=session_id,
         role="user",
         content=last_user.content,
-        created_at=datetime.utcnow(),
+        created_at=utcnow(),
         user_id=current_user.id,
     ))
     await db.commit()
@@ -76,7 +77,7 @@ async def chat(
         role="assistant",
         content=result["reply"],
         extracted_data=result.get("extracted_data"),
-        created_at=datetime.utcnow(),
+        created_at=utcnow(),
         user_id=current_user.id,
     ))
     await db.commit()
