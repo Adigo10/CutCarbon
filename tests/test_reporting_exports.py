@@ -55,6 +55,23 @@ def test_shared_report_payload_includes_offsets_and_compliance_overrides(client:
     assert "EU CSRD" in report.compliance.mandatory_frameworks
     assert report.categories
 
+    # NZCE mapping: all 9 methodology categories present, totals conserved.
+    assert len(report.nzce_categories) == 9
+    nzce_total = sum(row.value for row in report.nzce_categories)
+    assert nzce_total == pytest.approx(report.scenario["emissions"]["total_tco2e"], abs=0.01)
+    labels = [row.label for row in report.nzce_categories]
+    assert "Digital Content & Communication" in labels
+    assert "Local Transportation" in labels
+    assert report.nzce_note
+
+    # NZCE also appears as a compliance framework check.
+    assert any("Net Zero Carbon Events" in c.framework for c in report.compliance.checks)
+
+    # Per-category data-quality disclosure persisted via assumptions.
+    quality = report.assumptions["category_data_quality"]
+    assert quality["travel"] == "actual"
+    assert quality["waste"] == "proxy"
+
 
 @pytest.mark.parametrize("fmt", ["json", "csv", "xlsx", "pdf"])
 def test_single_scenario_report_exports_require_auth(client: TestClient, fmt: str):
@@ -81,15 +98,18 @@ def test_single_scenario_report_exports_return_expected_files(client: TestClient
         assert payload["compliance_overrides"]["region"] == "eu"
         assert payload["compliance_overrides"]["has_scope3"] is False
         assert "EU CSRD" in payload["compliance"]["mandatory_frameworks"]
+        assert len(payload["nzce_categories"]) == 9
     elif fmt == "csv":
         content = response.content.decode("utf-8")
         assert "section,key,label,value,unit" in content
         assert "metadata,region,Compliance Region,eu," in content
         assert "compliance,overall_score_pct,Overall Score" in content
+        assert "nzce,nzce_energy,Energy" in content
     elif fmt == "xlsx":
         workbook = load_workbook(io.BytesIO(response.content))
         assert "Report Summary" in workbook.sheetnames
         assert "Compliance" in workbook.sheetnames
+        assert "NZCE Mapping" in workbook.sheetnames
     else:
         assert response.content.startswith(b"%PDF")
 

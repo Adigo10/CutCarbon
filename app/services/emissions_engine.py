@@ -267,6 +267,51 @@ def _equipment_emissions(equipment, event_days: int) -> tuple[float, float, floa
     return total_kg, scope1_kg, scope2_kg, scope3_kg, notes
 
 
+def _digital_emissions(digital, attendees: int, event_days: int, event_type: str) -> tuple[float, dict]:
+    """Digital/virtual emissions: streaming, livestream production, event app, email.
+
+    All Scope 3. Proxy fires only for virtual/hybrid events with no digital input
+    (100% / 30% of attendees streaming 6h per day respectively).
+    """
+    notes = {}
+    dig = EF.get("digital", {})
+    stream_ef = dig.get("virtual_attendee_per_hour", {}).get("factor", 0.036)
+
+    if digital is None:
+        if event_type == "virtual_event":
+            virtual_attendees = attendees
+        elif event_type == "hybrid_event":
+            virtual_attendees = round(attendees * 0.3)
+        else:
+            return 0.0, notes
+        total_kg = virtual_attendees * 6.0 * event_days * stream_ef
+        notes["digital"] = f"Proxy: {virtual_attendees} virtual attendees streaming 6h/day"
+        return total_kg, notes
+
+    total_kg = digital.virtual_attendees * digital.streaming_hours_per_day * event_days * stream_ef
+
+    if digital.livestream_production_hours > 0:
+        # Factor is per hour per 1000 viewers (encoding + CDN delivery).
+        production_ef = dig.get("livestream_per_hour", {}).get("factor", 4.5)
+        total_kg += digital.livestream_production_hours * production_ef * max(digital.virtual_attendees, 1) / 1000
+
+    if digital.event_app_users > 0:
+        total_kg += digital.event_app_users * event_days * dig.get("event_app_per_user", {}).get("factor", 0.008)
+
+    if digital.emails_sent > 0:
+        total_kg += digital.emails_sent / 1000 * dig.get("email_campaign_per_1000", {}).get("factor", 0.6)
+
+    if total_kg > 0:
+        parts = [f"{digital.virtual_attendees} virtual attendees x {digital.streaming_hours_per_day:g}h/day"]
+        if digital.event_app_users:
+            parts.append(f"{digital.event_app_users} app users")
+        if digital.emails_sent:
+            parts.append(f"{digital.emails_sent} emails")
+        notes["digital"] = ", ".join(parts)
+
+    return total_kg, notes
+
+
 def _swag_emissions(swag, attendees: int) -> tuple[float, dict]:
     """Returns swag/merchandise kg CO2e and notes."""
     notes = {}
@@ -381,25 +426,45 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
     scope2_total = 0.0
     scope3_total = 0.0
 
+    # Fully virtual events get NO physical proxies — without this gate the travel
+    # proxy alone (70% long-haul flights) would dwarf a virtual event's real
+    # footprint. Explicitly provided inputs (e.g. a studio venue) are still honored.
+    is_virtual = scenario.event_type.value == "virtual_event"
+
     # Travel (Scope 3)
-    travel_kg, t_notes = _travel_emissions(scenario.travel_segments, attendees)
+    if is_virtual and not scenario.travel_segments:
+        travel_kg, t_notes = 0.0, {"travel": "Virtual event: no physical travel assumed"}
+    else:
+        travel_kg, t_notes = _travel_emissions(scenario.travel_segments, attendees)
     scope3_total += travel_kg
 
     # Venue energy (Scope 2, with potential Scope 1 from generators)
-    energy_kg, venue_s1_kg, e_notes = _venue_energy_emissions(scenario.venue_energy, attendees, days)
+    if is_virtual and scenario.venue_energy is None:
+        energy_kg, venue_s1_kg, e_notes = 0.0, 0.0, {"venue": "Virtual event: no physical venue assumed"}
+    else:
+        energy_kg, venue_s1_kg, e_notes = _venue_energy_emissions(scenario.venue_energy, attendees, days)
     scope2_total += energy_kg
     scope1_total += venue_s1_kg
 
     # Accommodation (Scope 3)
-    accom_kg, a_notes = _accommodation_emissions(scenario.accommodation, attendees, days)
+    if is_virtual and scenario.accommodation is None:
+        accom_kg, a_notes = 0.0, {}
+    else:
+        accom_kg, a_notes = _accommodation_emissions(scenario.accommodation, attendees, days)
     scope3_total += accom_kg
 
     # Catering (Scope 3)
-    catering_kg, c_notes = _catering_emissions(scenario.catering, attendees, days)
+    if is_virtual and scenario.catering is None:
+        catering_kg, c_notes = 0.0, {}
+    else:
+        catering_kg, c_notes = _catering_emissions(scenario.catering, attendees, days)
     scope3_total += catering_kg
 
     # Waste (Scope 3)
-    waste_kg, w_notes = _waste_emissions(scenario.waste, attendees)
+    if is_virtual and scenario.waste is None:
+        waste_kg, w_notes = 0.0, {}
+    else:
+        waste_kg, w_notes = _waste_emissions(scenario.waste, attendees)
     scope3_total += waste_kg
 
     # Equipment (Scope 1 generators + Scope 2 electricity + Scope 3 stage/freight)
@@ -412,6 +477,10 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
     swag_kg, sw_notes = _swag_emissions(scenario.swag, attendees)
     scope3_total += swag_kg
 
+    # Digital / virtual (Scope 3)
+    digital_kg, d_notes = _digital_emissions(scenario.digital, attendees, days, scenario.event_type.value)
+    scope3_total += digital_kg
+
     assumptions.update(t_notes)
     assumptions.update(e_notes)
     assumptions.update(a_notes)
@@ -419,8 +488,9 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
     assumptions.update(w_notes)
     assumptions.update(eq_notes)
     assumptions.update(sw_notes)
+    assumptions.update(d_notes)
 
-    total_kg = travel_kg + energy_kg + accom_kg + catering_kg + waste_kg + equip_kg + swag_kg
+    total_kg = travel_kg + energy_kg + accom_kg + catering_kg + waste_kg + equip_kg + swag_kg + digital_kg
     total_tco2e = total_kg / 1000
     per_attendee = total_tco2e / attendees if attendees > 0 else 0
     per_attendee_day = per_attendee / days if days > 0 else per_attendee
@@ -436,8 +506,36 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
         "catering": scenario.catering is not None,
         "waste": scenario.waste is not None,
     }
-    has_actual_data = any(core_provided.values()) or scenario.equipment is not None or scenario.swag is not None
+    has_actual_data = (
+        any(core_provided.values())
+        or scenario.equipment is not None
+        or scenario.swag is not None
+        or scenario.digital is not None
+    )
     all_core_provided = all(core_provided.values())
+
+    # Per-category primary-vs-proxy disclosure (NZCE/TRACE expect this). Persisted in
+    # assumptions so it flows into every export's Assumptions section automatically.
+    def _quality(provided: bool, gated: bool = False, optional: bool = False) -> str:
+        if provided:
+            return "actual"
+        if gated:
+            return "not applicable (virtual event)"
+        return "not provided" if optional else "proxy"
+
+    assumptions["category_data_quality"] = {
+        "travel": _quality(core_provided["travel"], gated=is_virtual),
+        "venue_energy": _quality(core_provided["venue_energy"], gated=is_virtual),
+        "accommodation": _quality(core_provided["accommodation"], gated=is_virtual),
+        "catering": _quality(core_provided["catering"], gated=is_virtual),
+        "waste": _quality(core_provided["waste"], gated=is_virtual),
+        "equipment": _quality(scenario.equipment is not None, optional=True),
+        "swag": _quality(scenario.swag is not None, optional=True),
+        "digital": (
+            "actual" if scenario.digital is not None
+            else ("proxy" if scenario.event_type.value in ("virtual_event", "hybrid_event") else "not provided")
+        ),
+    }
 
     if all_core_provided and scenario.mode == ScenarioMode.ADVANCED:
         quality = "verified"
@@ -467,6 +565,7 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
         materials_waste_tco2e=round(waste_kg / 1000, 4),
         equipment_tco2e=round(equip_kg / 1000, 4),
         swag_tco2e=round(swag_kg / 1000, 4),
+        digital_tco2e=round(digital_kg / 1000, 4),
         total_tco2e=round(total_tco2e, 4),
         per_attendee_tco2e=round(per_attendee, 4),
         per_attendee_day_tco2e=round(per_attendee_day, 4),
@@ -553,6 +652,7 @@ def get_reduction_suggestions(
         "accommodation": max(0.0, emissions.accommodation_tco2e),
         "waste": max(0.0, emissions.materials_waste_tco2e),
         "swag": max(0.0, emissions.swag_tco2e),
+        "digital": max(0.0, emissions.digital_tco2e),
     }
 
     reductions: list[dict] = []

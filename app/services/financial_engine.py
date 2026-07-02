@@ -293,6 +293,28 @@ def get_compliance_report(
         ],
     ))
 
+    # Net Zero Carbon Events — the event industry's own measurement methodology
+    # (9 emission categories, Scope 1/2/3 per GHG Protocol, biennial reporting).
+    # Voluntary signatory-based, so NOT added to mandatory_frameworks.
+    nzce_score = 60.0 if (has_ghg_report and has_scope3) else (40.0 if has_ghg_report else 25.0)
+    checks.append(ComplianceCheck(
+        framework="Net Zero Carbon Events (NZCE) Measurement Methodology",
+        status="partial",
+        score_pct=nzce_score,
+        gaps=[
+            "Categories measured here: Travel, Local Transport, Energy, Accommodation, "
+            "Food & Beverage, Waste, Digital Content, and parts of Production & Materials; "
+            "Freight & Logistics only as an equipment freight line",
+            "Biennial public reporting commitment to NZCE not evidenced",
+            "No baseline year or reduction trajectory towards net zero by 2050 provided",
+        ],
+        recommendations=[
+            "Use the NZCE category mapping section included in the exported reports",
+            "Become an NZCE signatory and report progress at least every two years",
+            "Set a baseline year and interim reduction targets per the NZCE roadmap",
+        ],
+    ))
+
     # Event carbon intensity vs published EVENT benchmarks (informational — SBTi is a
     # CORPORATE framework, not an event one). Compare per attendee per day correctly.
     per_att_day = total_tco2e / max(attendees, 1) / max(event_days, 1)

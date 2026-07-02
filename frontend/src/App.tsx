@@ -64,6 +64,7 @@ function App() {
   const [scenarioDraft, setScenarioDraft] = useState<ScenarioDraft>(createDefaultScenarioDraft)
   const [editingScenario, setEditingScenario] = useState<Scenario | null>(null)
   const [scenarioLoading, setScenarioLoading] = useState(false)
+  const [comparisonIds, setComparisonIds] = useState<string[]>([])
   const [suggestions, setSuggestions] = useState<ReductionSuggestion[]>([])
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [chatInput, setChatInput] = useState('')
@@ -108,6 +109,7 @@ function App() {
     setCurrentUser(null)
     setScenarios([])
     setSelectedScenarioId(null)
+    setComparisonIds([])
     setSuggestions([])
     setFinancialResult(null)
     setOffsetPurchases([])
@@ -316,6 +318,10 @@ function App() {
       tote_bags: payload?.swag?.tote_bags ?? 0,
       lanyards: payload?.swag?.lanyards ?? 0,
       badges: payload?.swag?.badges ?? 0,
+      virtual_attendees: payload?.digital?.virtual_attendees ?? 0,
+      streaming_hours_per_day: payload?.digital?.streaming_hours_per_day ?? 6,
+      event_app_users: payload?.digital?.event_app_users ?? 0,
+      emails_sent: payload?.digital?.emails_sent ?? 0,
     })
     handleOpenTab('scenarios')
   }
@@ -323,6 +329,16 @@ function App() {
   function handleCancelEdit() {
     setEditingScenario(null)
     setScenarioDraft(createDefaultScenarioDraft())
+  }
+
+  function handleToggleCompare(id: string) {
+    if (!comparisonIds.includes(id) && comparisonIds.length >= 4) {
+      pushToast('Comparison is limited to 4 scenarios', 'warning')
+      return
+    }
+    setComparisonIds((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
+    )
   }
 
   async function handleCloneScenario(scenario: Scenario) {
@@ -345,6 +361,7 @@ function App() {
     try {
       await api.deleteScenario(id, token)
       setScenarios((current) => current.filter((scenario) => scenario.scenario_id !== id))
+      setComparisonIds((current) => current.filter((comparisonId) => comparisonId !== id))
       setSuggestions([])
       pushToast('Scenario deleted', 'neutral')
     } catch (error) {
@@ -398,6 +415,7 @@ function App() {
         role: 'assistant',
         content: response.reply,
         extracted_data: response.extracted_data ?? undefined,
+        financial_analysis: response.financial_analysis ?? undefined,
       }
       setChatMessages((current) => [...current, assistantMessage])
       if (response.session_id && response.session_id !== sessionId) {
@@ -617,6 +635,7 @@ function App() {
           scenarios={scenarios}
           selectedScenario={selectedScenario}
           suggestions={suggestions}
+          comparisonIds={comparisonIds}
           onSubmit={handleScenarioSubmit}
           onCancelEdit={handleCancelEdit}
           onEdit={handleEditScenario}
@@ -625,6 +644,7 @@ function App() {
           onDownloadReport={handleDownloadScenarioReport}
           onSelectScenario={(scenario) => setSelectedScenarioId(scenario.scenario_id)}
           onLoadSuggestions={handleLoadSuggestions}
+          onToggleCompare={handleToggleCompare}
         />
       )
       break

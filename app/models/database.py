@@ -89,6 +89,7 @@ class ScenarioDB(Base):
     materials_waste_tco2e = Column(Float, default=0.0)
     equipment_tco2e = Column(Float, default=0.0)
     swag_tco2e = Column(Float, default=0.0)
+    digital_tco2e = Column(Float, default=0.0)
     total_tco2e = Column(Float, default=0.0)
     per_attendee_tco2e = Column(Float, default=0.0)
     data_quality = Column(String, default="estimated")
@@ -230,6 +231,7 @@ async def init_db():
                 ("scope3_tco2e", "ALTER TABLE scenarios ADD COLUMN scope3_tco2e FLOAT DEFAULT 0.0"),
                 ("equipment_tco2e", "ALTER TABLE scenarios ADD COLUMN equipment_tco2e FLOAT DEFAULT 0.0"),
                 ("swag_tco2e", "ALTER TABLE scenarios ADD COLUMN swag_tco2e FLOAT DEFAULT 0.0"),
+                ("digital_tco2e", "ALTER TABLE scenarios ADD COLUMN digital_tco2e FLOAT DEFAULT 0.0"),
                 ("event_type", "ALTER TABLE scenarios ADD COLUMN event_type TEXT DEFAULT 'conference'"),
                 ("updated_at", "ALTER TABLE scenarios ADD COLUMN updated_at DATETIME"),
                 ("factors_snapshot", "ALTER TABLE scenarios ADD COLUMN factors_snapshot JSON DEFAULT '{}'"),

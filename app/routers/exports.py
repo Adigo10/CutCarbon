@@ -76,6 +76,7 @@ _CATEGORY_LABELS = [
     ("materials_waste_tco2e", "Materials & Waste"),
     ("equipment_tco2e", "Equipment"),
     ("swag_tco2e", "Swag"),
+    ("digital_tco2e", "Digital & Virtual"),
 ]
 
 
@@ -160,6 +161,85 @@ def _build_category_rows(scenario_data: dict[str, Any]) -> list[ScenarioReportMe
     return rows
 
 
+# Modes counted as NZCE "Local Transportation" (venue-area movement) rather than
+# "Travel to/from the Destination".
+_NZCE_LOCAL_MODES = {"mrt_metro", "taxi_rideshare", "shuttle_bus", "bus_coach", "e_scooter", "cycling"}
+
+_NZCE_BASE_NOTE = (
+    "Indicative mapping to the Net Zero Carbon Events (NZCE) Measurement Methodology "
+    "v1 categories, derived from this report's category totals."
+)
+
+
+def _build_nzce_rows(scenario_data: dict[str, Any]) -> tuple[list[ScenarioReportMetric], str]:
+    """Map stored category totals onto the 9 NZCE categories.
+
+    Travel is split into to/from-destination vs local transportation by re-running
+    the per-segment factor math on the stored input payload; equipment is split into
+    freight vs production/materials via its freight_tonne_km line.
+    """
+    from app.services.emissions_engine import EF
+
+    emissions = scenario_data["emissions"]
+    payload = scenario_data.get("input_payload") or {}
+    total = float(emissions.get("total_tco2e") or 0)
+    note = _NZCE_BASE_NOTE
+
+    travel_total = float(emissions.get("travel_tco2e") or 0)
+    local_travel = 0.0
+    segments = payload.get("travel_segments") or []
+    if segments and travel_total > 0:
+        local_kg = 0.0
+        all_kg = 0.0
+        for seg in segments:
+            ef_data = EF["travel"].get(seg.get("mode")) or {}
+            if "economy" in ef_data:
+                cls = seg.get("travel_class") or "economy"
+                ef = ef_data.get(cls) or ef_data.get("business") or ef_data.get("economy") or 0
+            else:
+                ef = ef_data.get("factor", 0)
+            kg = (seg.get("attendees") or 0) * (seg.get("distance_km") or 0) * ef
+            all_kg += kg
+            if seg.get("mode") in _NZCE_LOCAL_MODES:
+                local_kg += kg
+        if all_kg > 0:
+            local_travel = round(travel_total * (local_kg / all_kg), 4)
+    elif travel_total > 0:
+        note += " Proxy travel is mapped entirely to Travel to/from the Destination."
+    dest_travel = round(travel_total - local_travel, 4)
+
+    equipment_total = float(emissions.get("equipment_tco2e") or 0)
+    freight = 0.0
+    freight_tkm = ((payload.get("equipment") or {}).get("freight_tonne_km")) or 0
+    if freight_tkm and equipment_total > 0:
+        freight_ef = EF.get("equipment", {}).get("freight_truck_per_km", {}).get("factor", 0.107)
+        freight = round(min(equipment_total, freight_tkm * freight_ef / 1000), 4)
+    production = round(float(emissions.get("swag_tco2e") or 0) + max(0.0, equipment_total - freight), 4)
+
+    rows_spec = [
+        ("nzce_production_materials", "Production & Materials", production),
+        ("nzce_freight_logistics", "Freight & Logistics", freight),
+        ("nzce_food_beverage", "Food & Beverage", emissions.get("catering_tco2e")),
+        ("nzce_travel_destination", "Travel to/from the Destination", dest_travel),
+        ("nzce_local_transportation", "Local Transportation", local_travel),
+        ("nzce_accommodation", "Accommodation", emissions.get("accommodation_tco2e")),
+        ("nzce_energy", "Energy", emissions.get("venue_energy_tco2e")),
+        ("nzce_waste", "Waste", emissions.get("materials_waste_tco2e")),
+        ("nzce_digital", "Digital Content & Communication", emissions.get("digital_tco2e")),
+    ]
+    rows = [
+        ScenarioReportMetric(
+            key=key,
+            label=label,
+            value=round(float(value or 0), 4),
+            unit="tCO2e",
+            pct_total=round(float(value or 0) / total * 100, 1) if total > 0 else None,
+        )
+        for key, label, value in rows_spec
+    ]
+    return rows, note
+
+
 async def _build_offset_summary_for_scenario(
     scenario_id: str,
     user_id: int,
@@ -210,6 +290,7 @@ async def build_scenario_report_payload(
     scenario = await _get_scenario_or_404(scenario_id, db, current_user)
     scenario_data = serialize_scenario(scenario)
     categories = _build_category_rows(scenario_data)
+    nzce_categories, nzce_note = _build_nzce_rows(scenario_data)
     emissions = scenario_data["emissions"]
     offset_summary = await _build_offset_summary_for_scenario(
         scenario_id=scenario.id,
@@ -244,6 +325,8 @@ async def build_scenario_report_payload(
             has_scope3=has_scope3,
             has_ghg_report=has_ghg_report,
         ),
+        nzce_categories=nzce_categories,
+        nzce_note=nzce_note,
     )
 
 
@@ -300,6 +383,11 @@ def _scenario_report_csv_bytes(report: ScenarioReportPayload) -> bytes:
                 ("categories_pct", f"{category.key}_pct_total", f"{category.label} % of total", category.pct_total, "pct")
             )
 
+    for row in report.nzce_categories:
+        writer.writerow(("nzce", row.key, row.label, row.value, row.unit))
+    if report.nzce_note:
+        writer.writerow(("nzce", "note", "NZCE Mapping Note", report.nzce_note, ""))
+
     for key, value in report.scope_breakdown.model_dump().items():
         writer.writerow(("scopes", key, _labelize(key), value, "tCO2e"))
 
@@ -332,7 +420,11 @@ def _scenario_report_csv_bytes(report: ScenarioReportPayload) -> bytes:
             writer.writerow(("compliance_recommendation", f"{prefix}.recommendation_{rec_idx}", f"{check.framework} recommendation", rec, ""))
 
     for key, value in report.assumptions.items():
-        writer.writerow(("assumptions", key, _labelize(key), value, ""))
+        if isinstance(value, dict):
+            for subkey, subvalue in value.items():
+                writer.writerow(("assumptions", f"{key}.{subkey}", _labelize(f"{key} {subkey}"), subvalue, ""))
+        else:
+            writer.writerow(("assumptions", key, _labelize(key), value, ""))
 
     for key, value in report.factor_snapshot.items():
         unit = ""
@@ -400,6 +492,15 @@ def _scenario_report_xlsx(report: ScenarioReportPayload):
         chart.height = 8
         summary_ws.add_chart(chart, "E4")
 
+    nzce_ws = wb.create_sheet("NZCE Mapping")
+    nzce_ws.append(["NZCE Category", "tCO2e", "% of Total"])
+    _style_header(nzce_ws)
+    for row in report.nzce_categories:
+        nzce_ws.append([row.label, row.value, row.pct_total if row.pct_total is not None else ""])
+    if report.nzce_note:
+        nzce_ws.append([])
+        nzce_ws.append(["Note", report.nzce_note])
+
     compliance_ws = wb.create_sheet("Compliance")
     compliance_ws.append(["Framework", "Status", "Score %", "Gaps", "Recommendations"])
     _style_header(compliance_ws)
@@ -433,7 +534,11 @@ def _scenario_report_xlsx(report: ScenarioReportPayload):
     _style_header(assumptions_ws)
     if report.assumptions:
         for key, value in report.assumptions.items():
-            assumptions_ws.append([key, value])
+            if isinstance(value, dict):
+                for subkey, subvalue in value.items():
+                    assumptions_ws.append([f"{key}.{subkey}", str(subvalue)])
+            else:
+                assumptions_ws.append([key, value])
     else:
         assumptions_ws.append(["notes", "No assumptions recorded"])
 
@@ -494,10 +599,13 @@ def _scenario_report_pdf(report: ScenarioReportPayload) -> bytes:
     for key, value in report.factor_snapshot.items():
         factor_rows.append([_labelize(key), str(value)])
 
-    assumption_paragraphs = [
-        Paragraph(f"<b>{_pdf_text(_labelize(key))}:</b> {_pdf_text(value)}", styles["BodySmall"])
-        for key, value in report.assumptions.items()
-    ]
+    assumption_paragraphs = []
+    for key, value in report.assumptions.items():
+        if isinstance(value, dict):
+            value = ", ".join(f"{k}: {v}" for k, v in value.items())
+        assumption_paragraphs.append(
+            Paragraph(f"<b>{_pdf_text(_labelize(key))}:</b> {_pdf_text(value)}", styles["BodySmall"])
+        )
 
     story = [
         Paragraph(report.report_title, styles["ReportTitle"]),
@@ -548,6 +656,25 @@ def _scenario_report_pdf(report: ScenarioReportPayload) -> bytes:
         ),
         Spacer(1, 0.35 * cm),
     ]
+
+    if report.nzce_categories:
+        story.extend(
+            [
+                Paragraph("NZCE Category Mapping", styles["SectionHeading"]),
+                Spacer(1, 0.2 * cm),
+                _table(
+                    [["NZCE Category", "tCO2e", "% of Total"]]
+                    + [
+                        [row.label, f"{row.value:.4f}", f"{row.pct_total:.1f}%" if row.pct_total is not None else "—"]
+                        for row in report.nzce_categories
+                    ],
+                    [8 * cm, 3 * cm, 3 * cm],
+                ),
+                Spacer(1, 0.15 * cm),
+                Paragraph(_pdf_text(report.nzce_note), styles["BodySmall"]),
+                Spacer(1, 0.35 * cm),
+            ]
+        )
 
     if benchmark:
         story.extend(
@@ -606,6 +733,7 @@ def _build_scenarios_workbook(rows):
         "ID", "Name", "Location", "Event Type", "Attendees", "Days", "Mode",
         "Travel tCO2e", "Venue Energy tCO2e", "Accommodation tCO2e",
         "Catering tCO2e", "Materials & Waste tCO2e",
+        "Equipment tCO2e", "Swag tCO2e", "Digital tCO2e",
         "Total tCO2e", "Per Attendee tCO2e",
         "Scope 1", "Scope 2", "Scope 3",
         "Data Quality", "Created At",
@@ -621,6 +749,9 @@ def _build_scenarios_workbook(rows):
             round(s.accommodation_tco2e or 0, 4),
             round(s.catering_tco2e or 0, 4),
             round(s.materials_waste_tco2e or 0, 4),
+            round(getattr(s, "equipment_tco2e", 0) or 0, 4),
+            round(getattr(s, "swag_tco2e", 0) or 0, 4),
+            round(getattr(s, "digital_tco2e", 0) or 0, 4),
             round(s.total_tco2e or 0, 4),
             round(s.per_attendee_tco2e or 0, 4),
             round(s.scope1_tco2e or 0, 4),

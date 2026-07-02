@@ -8,6 +8,7 @@ from app.models.database import get_db, ChatMessageDB, ScenarioDB, UserDB
 from app.models.schemas import ChatRequest, ChatResponse
 from app.rate_limit import limiter
 from app.services import openai_service
+from app.services.financial_engine import build_scenario_financial_request, generate_financial_report
 from app.routers.auth import get_current_user
 from app.utils.time import utcnow
 
@@ -38,6 +39,7 @@ async def chat(
 
     # Build event context from DB if scenario_id provided
     event_context = req.event_context or {}
+    scenario = None
     if req.scenario_id:
         result = await db.execute(
             select(ScenarioDB).where(ScenarioDB.id == req.scenario_id, ScenarioDB.user_id == current_user.id)
@@ -50,6 +52,27 @@ async def chat(
                 "location": getattr(scenario, "location", None) or (scenario.input_payload or {}).get("location"),
                 "current_tco2e": scenario.total_tco2e,
             })
+
+    # When a scenario is selected, the LLM's request_financial_analysis tool call is
+    # answered with real engine output rather than a stub the model would embellish.
+    financial_provider = None
+    if scenario is not None:
+        scenario_row = scenario
+
+        def financial_provider(args):
+            args = args or {}
+            try:
+                reduction_pct = float(args.get("reduction_pct") or 30.0)
+            except (TypeError, ValueError):
+                reduction_pct = 30.0
+            reduction_pct = min(max(reduction_pct, 0.0), 100.0)
+            fin_req = build_scenario_financial_request(
+                scenario_row,
+                region=args.get("region") or "singapore",
+                reduction_pct=reduction_pct,
+                actions_taken=args.get("actions") or ["renewable_energy", "vegetarian_menu", "digital_materials"],
+            )
+            return generate_financial_report(fin_req).model_dump()
 
     # Validate the client-supplied session id (don't let the client write into
     # arbitrary buckets); fall back to a server-generated id.
@@ -68,7 +91,7 @@ async def chat(
 
     # Call OpenAI (degraded 503 on upstream failure rather than a raw 500).
     try:
-        result = await openai_service.chat(req.messages, event_context)
+        result = await openai_service.chat(req.messages, event_context, financial_provider)
     except openai_service.ChatServiceError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
@@ -87,6 +110,7 @@ async def chat(
         extracted_data=result.get("extracted_data"),
         suggestions=result.get("suggestions", []),
         session_id=session_id,
+        financial_analysis=result.get("financial_analysis"),
     )
 
 

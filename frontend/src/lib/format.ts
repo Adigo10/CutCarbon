@@ -67,6 +67,7 @@ function reductionFactorForCategory(key: string): number {
     materials_waste_tco2e: 0.4,
     equipment_tco2e: 0.25,
     swag_tco2e: 0.5,
+    digital_tco2e: 0.3,
   }[key] ?? 0
 }
 
@@ -249,6 +250,22 @@ export function buildScenarioPayload(draft: ScenarioDraft, scenarioCount: number
     }
   }
 
+  if (
+    draft.virtual_attendees > 0 ||
+    draft.event_app_users > 0 ||
+    draft.emails_sent > 0 ||
+    draft.event_type === 'virtual_event' ||
+    draft.event_type === 'hybrid_event'
+  ) {
+    payload.digital = {
+      virtual_attendees: draft.virtual_attendees,
+      streaming_hours_per_day: draft.streaming_hours_per_day,
+      livestream_production_hours: 0,
+      event_app_users: draft.event_app_users,
+      emails_sent: draft.emails_sent,
+    }
+  }
+
   if (draft.tshirts > 0 || draft.tote_bags > 0 || draft.lanyards > 0 || draft.badges > 0) {
     payload.swag = {
       tshirts: draft.tshirts,
@@ -279,6 +296,12 @@ export function applyExtractedData(
     nextDraft.accommodation_type = extractedData.accommodation_type
   }
   if (typeof extractedData.renewable_pct === 'number') nextDraft.renewable_pct = extractedData.renewable_pct
+  if (typeof extractedData.virtual_attendees === 'number') nextDraft.virtual_attendees = extractedData.virtual_attendees
+  if (typeof extractedData.streaming_hours_per_day === 'number') {
+    nextDraft.streaming_hours_per_day = extractedData.streaming_hours_per_day
+  }
+  if (typeof extractedData.event_app_users === 'number') nextDraft.event_app_users = extractedData.event_app_users
+  if (typeof extractedData.emails_sent === 'number') nextDraft.emails_sent = extractedData.emails_sent
   if (Array.isArray(extractedData.travel_segments)) {
     const travelSegments: TravelSegment[] = []
 

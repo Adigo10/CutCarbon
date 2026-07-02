@@ -69,6 +69,10 @@ class ExtractedEventData(BaseModel):
     recycled_kg: Optional[float] = Field(default=None, ge=0)
     has_printed_materials: Optional[bool] = None
     exhibition_booths_m2: Optional[float] = Field(default=None, ge=0)
+    virtual_attendees: Optional[int] = Field(default=None, ge=0, le=1_000_000)
+    streaming_hours_per_day: Optional[float] = Field(default=None, ge=0, le=24)
+    event_app_users: Optional[int] = Field(default=None, ge=0, le=1_000_000)
+    emails_sent: Optional[int] = Field(default=None, ge=0, le=100_000_000)
 
 
 class ChatServiceError(Exception):
@@ -99,7 +103,7 @@ Your capabilities:
 3. Explain emissions methodology in plain language
 4. Suggest practical, ranked reduction actions with cost implications
 5. Calculate financial savings from carbon tax, incentives, and cost reductions
-6. Assess compliance with GHG Protocol, ISO 20121, SBTi, and regional regulations
+6. Assess alignment with GHG Protocol, ISO 20121, Net Zero Carbon Events (NZCE), and regional regimes (SGX, EU CSRD)
 
 When users describe their event, extract:
 - Attendee count, event duration, location
@@ -177,6 +181,10 @@ EXTRACTION_TOOLS = [
                     "recycled_kg": {"type": "number"},
                     "has_printed_materials": {"type": "boolean"},
                     "exhibition_booths_m2": {"type": "number"},
+                    "virtual_attendees": {"type": "integer", "description": "Number of remote/virtual attendees (for virtual or hybrid events)"},
+                    "streaming_hours_per_day": {"type": "number", "description": "Hours of video streaming per virtual attendee per day"},
+                    "event_app_users": {"type": "integer", "description": "Active event-app users"},
+                    "emails_sent": {"type": "integer", "description": "Total campaign emails sent for the event"},
                 },
                 "required": []
             }
@@ -186,11 +194,12 @@ EXTRACTION_TOOLS = [
         "type": "function",
         "function": {
             "name": "request_financial_analysis",
-            "description": "Trigger financial savings and compliance analysis for a scenario",
+            "description": "Run the real financial analysis (carbon tax savings, energy/catering cost savings, incentives) for the user's currently selected scenario. Use the returned numbers verbatim — do not invent figures.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "region": {"type": "string"},
+                    "region": {"type": "string", "description": "Carbon-pricing region, e.g. singapore, eu, uk, australia, usa"},
+                    "reduction_pct": {"type": "number", "description": "Assumed emission reduction percentage (default 30)"},
                     "actions": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -222,9 +231,14 @@ def _build_context_message(event_context: Optional[Dict]) -> str:
 async def chat(
     messages: List[ChatMessage],
     event_context: Optional[Dict] = None,
+    financial_provider=None,
 ) -> Dict[str, Any]:
-    """
-    Send messages to OpenAI and return reply + any extracted structured data.
+    """Send messages to OpenAI; return reply + any extracted structured data.
+
+    ``financial_provider`` is an optional callable(args: dict) -> Optional[dict]
+    supplied by the router. When the model calls request_financial_analysis, its
+    real output is fed back as the tool result so the follow-up reply states
+    engine-computed numbers instead of hallucinating them.
     """
     context_str = _build_context_message(event_context)
 
@@ -254,7 +268,7 @@ async def chat(
 
     choice = response.choices[0]
     extracted_data = None
-    financial_trigger = None
+    financial_analysis = None
 
     # Handle tool calls
     if choice.finish_reason == "tool_calls" and choice.message.tool_calls:
@@ -266,12 +280,19 @@ async def chat(
                 args = {}
             if tc.function.name == "update_event_scenario":
                 extracted_data = _validate_extracted(args)
+                tool_content = {"status": "ok", "received": args}
             elif tc.function.name == "request_financial_analysis":
-                financial_trigger = args
+                if financial_provider is not None:
+                    financial_analysis = financial_provider(args)
+                tool_content = financial_analysis or {
+                    "error": "No scenario selected — ask the user to select or create a scenario first."
+                }
+            else:
+                tool_content = {"status": "ok"}
             tool_results.append({
                 "tool_call_id": tc.id,
                 "role": "tool",
-                "content": json.dumps({"status": "ok", "received": args}),
+                "content": json.dumps(tool_content),
             })
 
         # Get final reply after tool use
@@ -298,7 +319,7 @@ async def chat(
     return {
         "reply": reply,
         "extracted_data": extracted_data,
-        "financial_trigger": financial_trigger,
+        "financial_analysis": financial_analysis,
         "suggestions": suggestions,
     }
 

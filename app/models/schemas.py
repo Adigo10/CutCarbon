@@ -171,6 +171,16 @@ class SwagGroup(BaseModel):
     water_bottles: int = Field(default=0, ge=0)
 
 
+class DigitalGroup(BaseModel):
+    """Digital content & communication (NZCE category 9): streaming, app, email."""
+
+    virtual_attendees: int = Field(default=0, ge=0, le=1_000_000)
+    streaming_hours_per_day: float = Field(default=6.0, ge=0, le=24)
+    livestream_production_hours: float = Field(default=0.0, ge=0, le=10_000)
+    event_app_users: int = Field(default=0, ge=0, le=1_000_000)
+    emails_sent: int = Field(default=0, ge=0, le=100_000_000)
+
+
 class EventScenarioInput(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     event_name: str = "My Event"
@@ -186,6 +196,7 @@ class EventScenarioInput(BaseModel):
     waste: Optional[WasteGroup] = None
     equipment: Optional[EquipmentGroup] = None
     swag: Optional[SwagGroup] = None
+    digital: Optional[DigitalGroup] = None
 
     @model_validator(mode="after")
     def validate_travel_attendees(self):
@@ -211,6 +222,7 @@ class EmissionBreakdown(BaseModel):
     materials_waste_tco2e: float = 0.0
     equipment_tco2e: float = 0.0
     swag_tco2e: float = 0.0
+    digital_tco2e: float = 0.0
     total_tco2e: float = 0.0
     per_attendee_tco2e: float = 0.0
     per_attendee_day_tco2e: float = 0.0
@@ -293,6 +305,9 @@ class ChatResponse(BaseModel):
     # Server-validated session id the turn was persisted under; clients should adopt
     # it so /history/{session_id} lookups work.
     session_id: str = ""
+    # Real financial-engine output when the model called request_financial_analysis
+    # (shape: FinancialResult). None otherwise.
+    financial_analysis: Optional[Dict[str, Any]] = None
 
 
 # -- Financial models ----------------------------------------------------------
@@ -437,6 +452,10 @@ class ScenarioReportPayload(BaseModel):
     compliance_overrides: ScenarioComplianceOverrides = Field(
         default_factory=ScenarioComplianceOverrides
     )
+    # Indicative mapping of this report's categories to the 9 Net Zero Carbon
+    # Events (NZCE) Measurement Methodology categories.
+    nzce_categories: List[ScenarioReportMetric] = Field(default_factory=list)
+    nzce_note: str = ""
 
 
 # -- Export models -------------------------------------------------------------

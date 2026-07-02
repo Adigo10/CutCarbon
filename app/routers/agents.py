@@ -1,7 +1,8 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from sqlalchemy import select, desc, func
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.database import AgentRunDB, AsyncSessionLocal, UserDB
+from app.models.database import AgentRunDB, UserDB, get_db
 from app.rate_limit import limiter
 from app.services.tinyfish_agent import run_and_update, REGISTERED_AGENTS, AGENT_TTL_HOURS
 from app.routers.auth import get_current_user, require_admin
@@ -45,24 +46,26 @@ async def trigger_agents_sync(
 
 
 @router.get("/status")
-async def agent_status(current_user: UserDB = Depends(get_current_user)):
+async def agent_status(
+    db: AsyncSession = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user),
+):
     """Return last run info for each registered agent, including DB history."""
-    from datetime import datetime, timedelta
+    from datetime import timedelta
     cutoff = utcnow() - timedelta(hours=AGENT_TTL_HOURS)
 
-    async with AsyncSessionLocal() as session:
-        # Get the most recent run per agent name
-        subq = (
-            select(AgentRunDB.agent_name, func.max(AgentRunDB.fetched_at).label("latest"))
-            .group_by(AgentRunDB.agent_name)
-            .subquery()
+    # Get the most recent run per agent name
+    subq = (
+        select(AgentRunDB.agent_name, func.max(AgentRunDB.fetched_at).label("latest"))
+        .group_by(AgentRunDB.agent_name)
+        .subquery()
+    )
+    rows = (
+        await db.execute(
+            select(AgentRunDB)
+            .join(subq, (AgentRunDB.agent_name == subq.c.agent_name) & (AgentRunDB.fetched_at == subq.c.latest))
         )
-        rows = (
-            await session.execute(
-                select(AgentRunDB)
-                .join(subq, (AgentRunDB.agent_name == subq.c.agent_name) & (AgentRunDB.fetched_at == subq.c.latest))
-            )
-        ).scalars().all()
+    ).scalars().all()
     last_runs = {r.agent_name: r for r in rows}
 
     return [
@@ -88,14 +91,14 @@ async def agent_status(current_user: UserDB = Depends(get_current_user)):
 async def agent_history(
     agent_name: str = Query(None, description="Filter by agent name"),
     limit: int = Query(50, le=200),
+    db: AsyncSession = Depends(get_db),
     current_user: UserDB = Depends(get_current_user),
 ):
     """Return paginated agent run history from the database."""
-    async with AsyncSessionLocal() as session:
-        q = select(AgentRunDB).order_by(desc(AgentRunDB.fetched_at)).limit(limit)
-        if agent_name:
-            q = q.where(AgentRunDB.agent_name == agent_name)
-        rows = (await session.execute(q)).scalars().all()
+    q = select(AgentRunDB).order_by(desc(AgentRunDB.fetched_at)).limit(limit)
+    if agent_name:
+        q = q.where(AgentRunDB.agent_name == agent_name)
+    rows = (await db.execute(q)).scalars().all()
 
     return [
         {

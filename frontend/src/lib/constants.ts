@@ -72,6 +72,7 @@ export const EMISSION_CATEGORIES = [
   { key: 'materials_waste_tco2e', label: 'Waste', color: '#6c7480' },
   { key: 'equipment_tco2e', label: 'Equipment', color: '#3d68a8' },
   { key: 'swag_tco2e', label: 'Swag', color: '#7a5b91' },
+  { key: 'digital_tco2e', label: 'Digital & Virtual', color: '#2c7f7a' },
 ]
 
 export const EVENT_TYPES = [
@@ -201,6 +202,10 @@ export function createDefaultScenarioDraft(): ScenarioDraft {
     tote_bags: 0,
     lanyards: 0,
     badges: 0,
+    virtual_attendees: 0,
+    streaming_hours_per_day: 6,
+    event_app_users: 0,
+    emails_sent: 0,
   }
 }
 
