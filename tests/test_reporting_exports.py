@@ -6,117 +6,14 @@ from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 from pydantic import ValidationError
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
 
 import app.models.database as database
-from app.config import settings
-from app.main import app
 from app.models.database import UserDB
 from app.models.schemas import EventScenarioInput, OffsetProjectType, OffsetPurchaseCreate, TravelMode, TravelSegment, VenueEnergy
 from app.routers.exports import build_scenario_report_payload
 from app.services.emissions_engine import calculate_scenario
 
-
-@pytest.fixture()
-def client(tmp_path):
-    db_path = (tmp_path / "test_reporting.db").resolve()
-    db_url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
-
-    old_database_url = settings.DATABASE_URL
-    old_engine = database.engine
-    old_session = database.AsyncSessionLocal
-
-    test_engine = create_async_engine(
-        db_url,
-        connect_args={"check_same_thread": False},
-    )
-    test_session = sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
-
-    settings.DATABASE_URL = db_url
-    database.engine = test_engine
-    database.AsyncSessionLocal = test_session
-
-    with TestClient(app) as test_client:
-        yield test_client
-
-    settings.DATABASE_URL = old_database_url
-    database.engine = old_engine
-    database.AsyncSessionLocal = old_session
-    asyncio.run(test_engine.dispose())
-
-
-def register_user(client: TestClient, email: str = "reporter@example.com") -> dict[str, str]:
-    response = client.post(
-        "/api/auth/register",
-        json={"email": email, "password": "super-secret"},
-    )
-    assert response.status_code == 201
-    token = response.json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}
-
-
-def create_seeded_scenario(client: TestClient, headers: dict[str, str]) -> str:
-    scenario_payload = {
-        "name": "APAC Summit Baseline",
-        "event_name": "APAC Summit 2026",
-        "location": "Singapore",
-        "event_type": "conference",
-        "attendees": 120,
-        "event_days": 2,
-        "mode": "basic",
-        "travel_segments": [
-            {
-                "mode": "long_haul_flight",
-                "travel_class": "economy",
-                "attendees": 40,
-                "distance_km": 6200,
-                "label": "Long-haul delegates",
-            }
-        ],
-        "venue_energy": {
-            "grid_region": "singapore",
-            "kwh_consumed": 2500,
-            "renewable_pct": 10,
-            "event_days": 2,
-        },
-        "accommodation": {
-            "accommodation_type": "standard_hotel",
-            "room_nights": 90,
-            "attendees_sharing": 1.5,
-        },
-        "catering": {
-            "catering_type": "vegetarian_meal",
-            "meals": 240,
-            "include_beverages": True,
-            "include_alcohol": False,
-            "coffee_tea_cups": 120,
-        },
-    }
-    response = client.post("/api/scenarios", json=scenario_payload, headers=headers)
-    assert response.status_code == 200
-    scenario_id = response.json()["scenario_id"]
-
-    purchase_response = client.post(
-        "/api/offsets",
-        json={
-            "scenario_id": scenario_id,
-            "project_type": "renewable_energy",
-            "registry": "gold_standard",
-            "quantity_tco2e": 2.5,
-            "price_per_tco2e_usd": 11.0,
-            "vintage_year": 2025,
-            "notes": "Seeded test purchase",
-        },
-        headers=headers,
-    )
-    assert purchase_response.status_code == 200
-    purchase_id = purchase_response.json()["id"]
-
-    retire_response = client.post(f"/api/offsets/{purchase_id}/retire", headers=headers)
-    assert retire_response.status_code == 200
-
-    return scenario_id
+from helpers import create_seeded_scenario, register_user
 
 
 def load_user(email: str) -> UserDB:
@@ -216,11 +113,15 @@ def test_legacy_scenario_export_alias_returns_shared_payload(client: TestClient)
 def test_global_exports_still_work(client: TestClient):
     headers = register_user(client, email="global@example.com")
 
-    factor_json = client.get("/api/exports/emission-factors.json")
+    # Factor-catalog exports now REQUIRE auth (previously an unauthenticated gap).
+    assert client.get("/api/exports/emission-factors.json").status_code == 401
+    assert client.get("/api/exports/emission-factors.xlsx").status_code == 401
+
+    factor_json = client.get("/api/exports/emission-factors.json", headers=headers)
     assert factor_json.status_code == 200
     assert "travel" in factor_json.json()
 
-    factor_xlsx = client.get("/api/exports/emission-factors.xlsx")
+    factor_xlsx = client.get("/api/exports/emission-factors.xlsx", headers=headers)
     assert factor_xlsx.status_code == 200
     assert ".xlsx" in factor_xlsx.headers["content-disposition"]
 
@@ -301,3 +202,113 @@ def test_offset_purchase_requires_owned_scenario(client: TestClient):
     )
 
     assert response.status_code == 404
+
+
+# --- Security & de-gimmick regressions -------------------------------------------------
+
+def test_forged_token_with_placeholder_secret_is_rejected(client: TestClient):
+    """A token signed with the committed placeholder secret must NOT authenticate."""
+    from datetime import datetime, timedelta, timezone
+
+    from jose import jwt
+
+    from app.config import PLACEHOLDER_JWT_SECRET
+
+    register_user(client, email="victim@example.com")  # ensures user id 1 exists
+    forged = jwt.encode(
+        {"sub": "1", "exp": datetime.now(timezone.utc) + timedelta(hours=1)},
+        PLACEHOLDER_JWT_SECRET,
+        algorithm="HS256",
+    )
+    resp = client.get("/api/scenarios", headers={"Authorization": f"Bearer {forged}"})
+    assert resp.status_code == 401
+
+
+def test_csv_export_neutralizes_formula_injection(client: TestClient):
+    headers = register_user(client, email="csvinj@example.com")
+    created = client.post(
+        "/api/scenarios",
+        json={"name": "=1+1", "attendees": 50, "event_days": 1, "location": "Singapore"},
+        headers=headers,
+    )
+    assert created.status_code == 200
+    scenario_id = created.json()["scenario_id"]
+
+    csv_resp = client.get(f"/api/exports/scenarios/{scenario_id}.csv", headers=headers)
+    assert csv_resp.status_code == 200
+    body = csv_resp.text
+    # The dangerous name is stored as literal text (prefixed with a quote), never a bare formula.
+    assert "'=1+1" in body
+
+
+def test_financial_total_excludes_fabricated_streams():
+    from app.models.schemas import FinancialRequest
+    from app.services.financial_engine import generate_financial_report
+
+    req = FinancialRequest(
+        baseline_tco2e=100, reduced_tco2e=70, region="singapore",
+        energy_kwh_saved=1000, meal_switches=200, attendees=300,
+        actions_taken=["ghg_reporting", "renewable_energy"],
+    )
+    res = generate_financial_report(req)
+
+    schemes = [t.scheme for t in res.carbon_tax_savings]
+    assert not any("Voluntary Carbon Market" in s for s in schemes)  # VCM cost not sold as a saving
+    assert res.compliance_value_usd == 0.0                            # no $50k/$5k magic
+    assert res.roi_months is None                                     # no one-time/12 ROI
+    primary = res.carbon_tax_savings[0].savings_usd if res.carbon_tax_savings else 0
+    expected = round(primary + res.energy_cost_savings_usd + res.catering_cost_savings_usd, 2)
+    assert abs(res.total_financial_savings_usd - expected) < 0.01
+
+
+def test_financial_uses_live_carbon_price_when_present():
+    from app.services import emissions_engine as eng
+    from app.services.financial_engine import calculate_carbon_tax_savings
+
+    live = eng.EF.setdefault("carbon_tax_live", {})
+    live["singapore_current_sgd"] = 99
+    try:
+        savings = calculate_carbon_tax_savings(10, "singapore")
+        assert savings[0].savings_local == 990  # 10 t x 99 SGD
+        assert "live price" in savings[0].description
+    finally:
+        live.pop("singapore_current_sgd", None)
+
+
+def test_reduction_suggestions_are_clamped_and_offsets_separated():
+    from app.models.schemas import CateringGroup
+    from app.services.emissions_engine import calculate_scenario, get_reduction_suggestions
+
+    scenario = EventScenarioInput(
+        name="Vegan dinner", attendees=500, event_days=2,
+        catering=CateringGroup(catering_type="vegan_meal", meals=2000),
+    )
+    result = calculate_scenario(scenario)
+    suggestions = get_reduction_suggestions(result, 30.0, catering_type="vegan_meal")
+
+    actions = [s["action"] for s in suggestions]
+    assert "vegetarian_menu" not in actions  # already plant-based -> gated off
+
+    reductions = [s for s in suggestions if not s.get("is_neutralization")]
+    assert sum(s["co2e_saved_tco2e"] for s in reductions) <= result.emissions.total_tco2e + 1e-6
+    # Offsets are a separate neutralization entry, listed last (never ranked as a reduction).
+    offsets = [s for s in suggestions if s.get("is_neutralization")]
+    assert offsets and suggestions[-1].get("is_neutralization")
+
+
+def test_tinyfish_extract_validates_and_converts():
+    from app.services.tinyfish_agent import (
+        EUGridFactorAgent,
+        FlightEmissionFactorAgent,
+        SingaporeGridFactorAgent,
+    )
+
+    assert SingaporeGridFactorAgent().extract({"factor": 0.402, "unit": "kg_co2e_per_kwh"})["factor_value"] == 0.402
+    assert EUGridFactorAgent().extract({"factor": 213, "unit": "g_co2e_per_kwh"})["factor_value"] == 0.213
+    # A year mis-parsed as the factor is out of bounds -> rejected (keeps prior good value).
+    assert SingaporeGridFactorAgent().extract({"factor": 2024})["factor_value"] is None
+    # Business cheaper than economy is implausible -> dropped.
+    flight = FlightEmissionFactorAgent().extract(
+        {"short_haul_economy": 0.15, "long_haul_economy": 0.19, "long_haul_business": 0.10}
+    )
+    assert flight["long_haul_business"] is None

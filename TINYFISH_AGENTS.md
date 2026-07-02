@@ -98,7 +98,7 @@ The conversion guard prevents raw lb/MWh values (~400) from being stored directl
 
 ## Carbon Pricing Agents (3)
 
-These agents fetch live carbon prices and tax rates. Data is written to the `carbon_tax_live` key in `emission_factors.json` and used by `financial_engine.py` for tax liability and savings calculations.
+These agents fetch live carbon prices and tax rates. Data is written to the `carbon_tax_live` key in `emission_factors.json`. `financial_engine.calculate_carbon_tax_savings()` prefers these live prices (Singapore / EU ETS / UK ETS) over the static `tax_incentives.json` values, falling back to the static value when no live price has been fetched. After a merge, `emissions_engine.reload_factors()` refreshes the in-memory factor table so the new values apply to the next calculation without a process restart.
 
 ### `sg_carbon_tax` — Singapore (NEA)
 
@@ -140,17 +140,18 @@ Fetches both the current rate and any announced future rate step-up, enabling fo
 
 ## Travel & Catering Agents (2)
 
-### `icao_flight_factors` — Aviation (ICAO)
+### `icao_flight_factors` — Aviation (UK DEFRA/DESNZ)
 
 | Field | Value |
 |---|---|
-| **Source** | International Civil Aviation Organization — Carbon Offset calculator |
-| **URL** | `https://www.icao.int/environmental-protection/CarbonOffset/Pages/default.aspx` |
+| **Source** | UK DEFRA/DESNZ — GHG Conversion Factors (air-travel table). NOTE: despite the agent id, the source is DEFRA, **not** ICAO — ICAO's ICEC is a route-specific fuel-burn method and does not publish a generic per-passenger-km cabin-class table. |
+| **URL** | `https://www.gov.uk/government/publications/greenhouse-gas-reporting-conversion-factors-2024` |
 | **Output fields** | `short_haul_economy`, `long_haul_economy`, `long_haul_business` (all in kg CO₂e/passenger-km), `unit` (`kg_co2e_per_passenger_km`) |
+| **Validation** | bounds 0.05–1.5 kg CO₂e/pkm; `long_haul_business` dropped if below `long_haul_economy` |
 | **Data destination** | `emission_factors.json["travel"]["short_haul_flight"]["economy"]`, `["long_haul_flight"]["economy"]`, `["long_haul_flight"]["business"]` |
 | **DB category** | `travel` / subcategory `short_haul_flight` or `long_haul_flight` / region `global` |
 
-Note: The Radiative Forcing Index (RFI) multiplier (1.9×) is applied separately in `emissions_engine.py`; this agent only fetches the base kg CO₂/pax-km factors.
+Note: DEFRA's published factors already include radiative forcing; the stored values are CO₂e-with-RF.
 
 ---
 
@@ -190,7 +191,7 @@ Grid factor agents use a `_GRID_FACTOR_BOUNDS` dict with per-region min/max valu
 
 `merge_fetched_factors()` in `tinyfish_agent.py` iterates over agent results. Each field is only written to `emission_factors.json` if the agent returned a non-`None` validated value. This conservative merge prevents a failed or corrupted parse from overwriting a previously good value.
 
-After writing the JSON, affected rows are upserted to `EmissionFactorDB` with `is_verified = True` and the current `last_fetched` / `last_updated` timestamps.
+After writing the JSON (atomically — tempfile + `os.replace`, under an `asyncio` lock), affected rows are upserted to `EmissionFactorDB` with `is_verified = False` (auto-fetched values are NOT cross-checked against a primary source, so they are not marked verified) and the current `last_updated` timestamp; the originating TinyFish `run_id` is recorded in `methodology_tag`.
 
 ### Provenance
 

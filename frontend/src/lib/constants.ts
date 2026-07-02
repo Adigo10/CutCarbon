@@ -65,13 +65,13 @@ export const QUICK_ACTIONS = [
 ]
 
 export const EMISSION_CATEGORIES = [
-  { key: 'travel_tco2e', label: 'Travel', color: '#1f6f6d' },
-  { key: 'venue_energy_tco2e', label: 'Venue Energy', color: '#2f855a' },
-  { key: 'accommodation_tco2e', label: 'Accommodation', color: '#8b6f47' },
-  { key: 'catering_tco2e', label: 'Catering', color: '#9a4f4f' },
-  { key: 'materials_waste_tco2e', label: 'Waste', color: '#5f6b84' },
-  { key: 'equipment_tco2e', label: 'Equipment', color: '#3b6e8f' },
-  { key: 'swag_tco2e', label: 'Swag', color: '#6e5c73' },
+  { key: 'travel_tco2e', label: 'Travel', color: '#146f48' },
+  { key: 'venue_energy_tco2e', label: 'Venue Energy', color: '#247b92' },
+  { key: 'accommodation_tco2e', label: 'Accommodation', color: '#b57817' },
+  { key: 'catering_tco2e', label: 'Catering', color: '#b44b54' },
+  { key: 'materials_waste_tco2e', label: 'Waste', color: '#6c7480' },
+  { key: 'equipment_tco2e', label: 'Equipment', color: '#3d68a8' },
+  { key: 'swag_tco2e', label: 'Swag', color: '#7a5b91' },
 ]
 
 export const EVENT_TYPES = [
@@ -211,6 +211,7 @@ export function createDefaultFinancialCalc(): FinancialCalcState {
     reduction_pct: 30,
     energy_kwh: 0,
     meal_switches: 0,
+    attendees: 0,
     actions: [],
     linked_scenario_id: null,
     linked_scenario_name: null,

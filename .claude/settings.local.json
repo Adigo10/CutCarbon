@@ -31,7 +31,8 @@
       "Bash(python3:*)",
       "Bash(.carbon_venv/Scripts/pip install:*)",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\adity\\\\Projects\\\\CutCarbon\\\\frontend\" -Recurse -ErrorAction SilentlyContinue)",
-      "Bash(Select-Object -ExpandProperty FullName)"
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "PowerShell(cd \"C:\\\\Users\\\\adity\\\\Projects\\\\CutCarbon\"; Start-Process powershell -ArgumentList '-NoProfile -Command cd C:\\\\Users\\\\adity\\\\Projects\\\\CutCarbon; uvicorn app.main:app --port 8000' -WindowStyle Minimized; Start-Sleep 4; try { $r = Invoke-WebRequest http://localhost:8000/health -TimeoutSec 5; \"Server OK: $\\($r.StatusCode\\)\" } catch { \"Server not yet responding: $_\" })"
     ]
   }
 }

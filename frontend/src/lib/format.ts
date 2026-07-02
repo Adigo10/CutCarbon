@@ -55,6 +55,9 @@ export function shortScenarioName(name: string, maxLength = 18): string {
   return name.length > maxLength ? `${name.slice(0, maxLength)}…` : name
 }
 
+// ILLUSTRATIVE default per-category abatement fractions for the dashboard preview only.
+// These are rough placeholders, NOT the modeled plan — the authoritative, category-clamped
+// reductions come from the backend GET /api/scenarios/{id}/suggestions endpoint.
 function reductionFactorForCategory(key: string): number {
   return {
     travel_tco2e: 0.22,
@@ -320,9 +323,21 @@ export function financialPresetFromScenario(scenario: Scenario): Partial<Financi
     baseline: scenario.emissions.total_tco2e,
     energy_kwh,
     meal_switches: Math.round(attendees * days * 2 * switchPct),
+    attendees,
     linked_scenario_id: scenario.scenario_id,
     linked_scenario_name: scenario.name,
   }
+}
+
+// Mermaid node labels are wrapped in quotes; characters like " [ ] { } < > \ | and
+// newlines break the diagram syntax (and are an injection vector). Neutralize them
+// in any user/LLM-derived label text before interpolation.
+function sanitizeMermaidLabel(text: string): string {
+  return String(text)
+    .replace(/[\\"[\]{}<>|]/g, ' ')
+    .replace(/[\r\n]+/g, ' ')
+    .trim()
+    .slice(0, 80)
 }
 
 export function buildFlowDiagram(scenario: Scenario | null): string {
@@ -335,7 +350,7 @@ export function buildFlowDiagram(scenario: Scenario | null): string {
 
   const scopes = scenario.emissions.scopes
   let diagram = 'flowchart TD\n'
-  diagram += `  EVT["${scenario.name}\\n${scenario.attendees} attendees · ${scenario.event_days} days"]\n`
+  diagram += `  EVT["${sanitizeMermaidLabel(scenario.name)}\\n${scenario.attendees} attendees · ${scenario.event_days} days"]\n`
 
   emissionRows.forEach((row) => {
     diagram += `  ${row.key.toUpperCase()}["${row.label}\\n${row.value.toFixed(3)} tCO2e"]\n`
@@ -369,15 +384,15 @@ export function buildFlowDiagram(scenario: Scenario | null): string {
     diagram += '  S3 --> TOT\n'
   }
 
-  diagram += '  style EVT fill:#12372a,stroke:#0b281d,color:#ffffff\n'
-  diagram += '  style TOT fill:#1d7a5a,stroke:#145640,color:#ffffff\n'
+  diagram += '  style EVT fill:#162419,stroke:#4ade8033,color:#e8f5eb\n'
+  diagram += '  style TOT fill:#1a4d2e,stroke:#4ade80,color:#4ade80\n'
   if (scopes) {
-    diagram += '  style S1 fill:#fee2e2,stroke:#ef4444,color:#7f1d1d\n'
-    diagram += '  style S2 fill:#fef3c7,stroke:#f59e0b,color:#78350f\n'
-    diagram += '  style S3 fill:#ccfbf1,stroke:#14b8a6,color:#134e4a\n'
+    diagram += '  style S1 fill:#2d1515,stroke:#f87171,color:#f87171\n'
+    diagram += '  style S2 fill:#2d2010,stroke:#fbbf24,color:#fbbf24\n'
+    diagram += '  style S3 fill:#0f2520,stroke:#34d399,color:#34d399\n'
   }
   emissionRows.forEach((row) => {
-    diagram += `  style ${row.key.toUpperCase()} fill:${row.color}33,stroke:${row.color},color:#08281f\n`
+    diagram += `  style ${row.key.toUpperCase()} fill:${row.color}18,stroke:${row.color}66,color:#e8f5eb\n`
   })
   return diagram
 }

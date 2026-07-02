@@ -12,10 +12,14 @@ app = FastAPI(
     version="2.0.0",
 )
 
+# The SPA authenticates with a Bearer token in localStorage (not a cookie), so we
+# do NOT need credentialed CORS. Wildcard origin + allow_credentials=True is both
+# spec-invalid and unsafe, so credentials are disabled here. To use cookies later,
+# replace "*" with an explicit env-driven origin allowlist and re-enable credentials.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

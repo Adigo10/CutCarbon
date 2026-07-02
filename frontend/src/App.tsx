@@ -23,6 +23,7 @@ import {
   applyExtractedData,
   buildScenarioPayload,
   financialPresetFromScenario,
+  formatTons,
 } from './lib/format'
 import type {
   AgentRun,
@@ -431,7 +432,7 @@ function App() {
           region: financialCalc.region,
           energy_kwh_saved: financialCalc.energy_kwh,
           meal_switches: financialCalc.meal_switches,
-          attendees: complianceInput.attendees,
+          attendees: financialCalc.attendees,
           actions_taken: financialCalc.actions,
         },
         token,
@@ -716,49 +717,58 @@ function App() {
   return (
     <>
       <div className="app-shell">
-        <aside className="workspace-rail">
-          <div className="rail-brand">
-            <img className="app-logo" src="/favicon.svg" alt="CutCarbon logo" />
+        <header className="workspace-topbar">
+          <div className="topbar-brand">
+            <img className="app-logo" src="/favicon.svg" alt="" />
             <div>
               <strong>CutCarbon</strong>
+              <span>Carbon operations suite</span>
             </div>
           </div>
-          <nav className="rail-nav">
+
+          <nav className="workspace-tabs" aria-label="Primary navigation">
             {NAV_ITEMS.map((item) => (
               <button
                 key={item.id}
-                className={item.id === activeTab ? 'rail-link is-active' : 'rail-link'}
+                className={item.id === activeTab ? 'workspace-tab is-active' : 'workspace-tab'}
                 onClick={() => handleOpenTab(item.id)}
                 type="button"
               >
-                <span className="rail-link-mark" style={{ background: item.accent }} />
+                <span className="workspace-tab-mark" style={{ background: item.accent }} />
                 <span>{item.label}</span>
               </button>
             ))}
           </nav>
-          <div className="rail-foot">
-            <span>{currentUser.email}</span>
-            <Button tone="ghost" onClick={handleLogout}>
-              Sign out
+
+          <div className="topbar-actions">
+            <Button tone="soft" busy={agentsRunning} onClick={handleRefreshAgents}>
+              Refresh factors
             </Button>
+            <Button tone="primary" onClick={() => handleOpenTab('chat')}>
+              Ask co-pilot
+            </Button>
+            <div className="account-menu">
+              <span>{currentUser.email}</span>
+              <Button tone="ghost" onClick={handleLogout}>
+                Sign out
+              </Button>
+            </div>
           </div>
-        </aside>
+        </header>
 
         <main className="workspace-main">
-          <header className="workspace-header">
+          <section className="workspace-command">
             <div>
-              <h2>{currentNav.label}</h2>
+              <span className="eyebrow">Workspace</span>
+              <h1>{currentNav.label}</h1>
               <p>{currentNav.description}</p>
             </div>
-            <div className="workspace-header-actions">
-              <Button tone="soft" busy={agentsRunning} onClick={handleRefreshAgents}>
-                Refresh factors
-              </Button>
-              <Button tone="primary" onClick={() => handleOpenTab('chat')}>
-                Ask co-pilot
-              </Button>
+            <div className="workspace-context">
+              <span>Active scenario</span>
+              <strong>{selectedScenario ? selectedScenario.name : 'No scenario selected'}</strong>
+              <small>{selectedScenario ? formatTons(selectedScenario.emissions.total_tco2e, 3) : 'Create a scenario to start analytics'}</small>
             </div>
-          </header>
+          </section>
 
           {workspace}
         </main>

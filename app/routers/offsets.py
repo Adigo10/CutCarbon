@@ -18,7 +18,7 @@ router = APIRouter()
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
 
-with open(_DATA_DIR / "carbon_offsets.json") as f:
+with open(_DATA_DIR / "carbon_offsets.json", encoding="utf-8") as f:
     OFFSET_DATA = json.load(f)
 
 
@@ -209,7 +209,6 @@ async def recommend_offsets(
     residual = scenario.total_tco2e
     projects = OFFSET_DATA["project_types"]
 
-    recommendations = []
     # Recommended portfolio: 50% avoidance, 30% nature-based, 20% removal
     portfolio_mix = [
         ("renewable_energy", 0.30),
@@ -220,26 +219,35 @@ async def recommend_offsets(
         ("direct_air_capture", 0.10),
     ]
 
+    # First pass: unconstrained quantities/costs sized to fully cover the residual.
+    raw = []
+    total_cost_unconstrained = 0.0
     for proj_key, pct in portfolio_mix:
         proj = projects.get(proj_key)
         if not proj:
             continue
-        qty = round(residual * pct, 3)
+        qty = residual * pct
         price = proj["avg_price_usd"]
-        cost = round(qty * price, 2)
+        raw.append((proj_key, proj, qty, price))
+        total_cost_unconstrained += qty * price
 
-        if budget_usd and cost > budget_usd * pct * 1.5:
-            # Adjust quantity to fit budget
-            qty = round(budget_usd * pct / price, 3)
-            cost = round(qty * price, 2)
+    # Scale the whole portfolio down to fit the budget (if any), preserving the mix —
+    # so total spend converges to min(budget, full-coverage cost) instead of the old
+    # incoherent per-line 1.5x trigger that never summed to the stated budget.
+    scale = 1.0
+    if budget_usd and total_cost_unconstrained > budget_usd and total_cost_unconstrained > 0:
+        scale = budget_usd / total_cost_unconstrained
 
+    recommendations = []
+    for proj_key, proj, qty, price in raw:
+        scaled_qty = round(qty * scale, 3)
         recommendations.append(OffsetRecommendation(
             project_type=proj_key,
             label=proj["label"],
             description=proj["description"],
             avg_price_usd=price,
-            recommended_qty_tco2e=qty,
-            estimated_cost_usd=cost,
+            recommended_qty_tco2e=scaled_qty,
+            estimated_cost_usd=round(scaled_qty * price, 2),
             permanence=proj["permanence"],
             co_benefits=proj["co_benefits"],
             sdgs=proj["sdgs"],

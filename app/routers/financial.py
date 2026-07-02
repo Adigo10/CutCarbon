@@ -5,7 +5,7 @@ from datetime import datetime
 
 from app.models.database import get_db, ScenarioDB, FinancialReportDB, UserDB
 from app.models.schemas import ComplianceRequest, FinancialRequest, FinancialResult, ComplianceReport
-from app.services.financial_engine import generate_financial_report, get_compliance_report
+from app.services.financial_engine import generate_financial_report, get_compliance_report, TAX_DATA
 from app.services.emissions_engine import EF as _EF
 from app.routers.auth import get_current_user
 
@@ -141,23 +141,13 @@ async def compliance_for_scenario(
 
 @router.get("/tax-rates")
 async def get_tax_rates():
-    """Return current carbon tax rates by region."""
-    import json
-    from pathlib import Path
-    data_path = Path(__file__).parent.parent / "data" / "tax_incentives.json"
-    with open(data_path) as f:
-        data = json.load(f)
-    return data["carbon_tax_rates"]
+    """Return current carbon tax rates by region (loaded once at import)."""
+    return TAX_DATA["carbon_tax_rates"]
 
 
 @router.get("/incentives/{region}")
 async def get_incentives(region: str):
-    """Return available green incentives for a region."""
-    import json
-    from pathlib import Path
-    data_path = Path(__file__).parent.parent / "data" / "tax_incentives.json"
-    with open(data_path) as f:
-        data = json.load(f)
+    """Return available green incentives for a region (loaded once at import)."""
     region_map = {
         "singapore": "singapore",
         "eu": "european_union",
@@ -166,5 +156,5 @@ async def get_incentives(region: str):
         "usa": "usa",
     }
     mapped = region_map.get(region.lower(), region.lower())
-    incentives = data["green_incentives"].get(mapped, [])
+    incentives = TAX_DATA["green_incentives"].get(mapped, [])
     return {"region": region, "incentives": incentives}

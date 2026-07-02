@@ -23,7 +23,7 @@ router = APIRouter()
 def _db_to_result(s: ScenarioDB) -> dict:
     event_type = getattr(s, "event_type", "conference") or "conference"
     per_attendee_day = round(s.per_attendee_tco2e / max(s.event_days or 1, 1), 4) if s.per_attendee_tco2e else 0
-    benchmark = get_benchmark_comparison(event_type, per_attendee_day)
+    benchmark = get_benchmark_comparison(event_type, per_attendee_day, s.per_attendee_tco2e)
     return {
         "scenario_id": s.id,
         "name": s.name,
@@ -42,7 +42,7 @@ def _db_to_result(s: ScenarioDB) -> dict:
             "swag_tco2e": getattr(s, "swag_tco2e", 0) or 0,
             "total_tco2e": s.total_tco2e,
             "per_attendee_tco2e": s.per_attendee_tco2e,
-            "per_attendee_day_tco2e": round(s.per_attendee_tco2e / max(s.event_days, 1), 4) if s.per_attendee_tco2e else 0,
+            "per_attendee_day_tco2e": round(s.per_attendee_tco2e / max(s.event_days or 1, 1), 4) if s.per_attendee_tco2e else 0,
             "data_quality": s.data_quality,
             "scopes": {
                 "scope1_tco2e": getattr(s, "scope1_tco2e", 0) or 0,
@@ -137,9 +137,13 @@ async def recalculate_all_scenarios(
     for existing in scenarios:
         payload_dict = existing.input_payload or {}
         try:
+            # Validate + calculate fully before touching the row, and isolate the
+            # mutation in a savepoint so a failure rolls back this row only — never
+            # commits a half-updated scenario alongside the successes.
             payload = EventScenarioInput.model_validate(payload_dict)
             result = calculate_scenario(payload)
-            _apply_result_to_existing(existing, result, payload)
+            async with db.begin_nested():
+                _apply_result_to_existing(existing, result, payload)
             all_rows.append(_db_to_result(existing))
         except Exception as exc:
             failures.append({
@@ -147,7 +151,8 @@ async def recalculate_all_scenarios(
                 "name": existing.name,
                 "error": str(exc),
             })
-            # Keep scenario in response even when recalculation fails.
+            # Reload the un-mutated row so the response reflects its true (unchanged) state.
+            await db.refresh(existing)
             all_rows.append(_db_to_result(existing))
 
     await db.commit()
@@ -330,7 +335,8 @@ async def reduction_suggestions(
             ),
         ),
     )
-    return get_reduction_suggestions(sr, target_pct)
+    catering_type = ((s.input_payload or {}).get("catering") or {}).get("catering_type")
+    return get_reduction_suggestions(sr, target_pct, catering_type)
 
 
 @router.get("/{scenario_id}/export")

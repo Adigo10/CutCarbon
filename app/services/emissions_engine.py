@@ -14,8 +14,22 @@ from app.models.schemas import (
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
 
-with open(_DATA_DIR / "emission_factors.json") as f:
+with open(_DATA_DIR / "emission_factors.json", encoding="utf-8") as f:
     EF = json.load(f)
+
+
+def reload_factors() -> None:
+    """Re-read emission_factors.json into the shared EF dict IN PLACE.
+
+    The in-place update (clear + update) is deliberate: other modules import this
+    same dict object (e.g. ``from app.services.emissions_engine import EF``), so
+    rebinding the name would not propagate. Mutating in place means a TinyFish
+    refresh is reflected by the very next calculation without a process restart.
+    """
+    with open(_DATA_DIR / "emission_factors.json", encoding="utf-8") as f:
+        fresh = json.load(f)
+    EF.clear()
+    EF.update(fresh)
 
 
 def _travel_emissions(segments, attendees: int) -> tuple[float, dict]:
@@ -161,15 +175,16 @@ def _waste_emissions(waste, attendees: int) -> tuple[float, dict]:
     return total_kg, notes
 
 
-def _equipment_emissions(equipment, event_days: int) -> tuple[float, float, float, dict]:
-    """Returns total kg, scope1 kg (generators), scope2 kg (electricity-based), notes."""
+def _equipment_emissions(equipment, event_days: int) -> tuple[float, float, float, float, dict]:
+    """Returns total kg, scope1 kg (generators), scope2 kg (electricity), scope3 kg (stage+freight), notes."""
     notes = {}
     if equipment is None:
-        return 0.0, 0.0, 0.0, notes
+        return 0.0, 0.0, 0.0, 0.0, notes
 
     eq = EF.get("equipment", {})
     scope1_kg = 0.0
     scope2_kg = 0.0
+    scope3_kg = 0.0
 
     # Stage
     stage_kg = equipment.stage_m2 * event_days * eq.get("stage_per_m2_per_day", {}).get("factor", 0.5)
@@ -194,15 +209,16 @@ def _equipment_emissions(equipment, event_days: int) -> tuple[float, float, floa
     gen_kg = equipment.generator_hours * eq.get("generator_diesel_per_hour", {}).get("factor", 8.5)
     scope1_kg += gen_kg
 
-    # Freight (Scope 3)
+    # Freight (Scope 3 — upstream transport) and stage build (Scope 3 — purchased materials)
     freight_kg = equipment.freight_tonne_km * eq.get("freight_truck_per_km", {}).get("factor", 0.107)
+    scope3_kg = stage_kg + freight_kg
 
-    total_kg = stage_kg + lighting_kg + sound_kg + led_kg + proj_kg + gen_kg + freight_kg
+    total_kg = scope1_kg + scope2_kg + scope3_kg
 
     if total_kg > 0:
         notes["equipment"] = f"Stage {equipment.stage_m2}m2, lighting {equipment.lighting_days}d, sound {equipment.sound_system_days}d, LED {equipment.led_screen_m2}m2, gen {equipment.generator_hours}h"
 
-    return total_kg, scope1_kg, scope2_kg, notes
+    return total_kg, scope1_kg, scope2_kg, scope3_kg, notes
 
 
 def _swag_emissions(swag, attendees: int) -> tuple[float, dict]:
@@ -245,8 +261,22 @@ def _swag_emissions(swag, attendees: int) -> tuple[float, dict]:
     return total_kg, notes
 
 
-def get_benchmark_comparison(event_type: str, per_attendee_day: float) -> Optional[BenchmarkComparison]:
-    """Compare against industry benchmarks."""
+# Benchmark bands keyed per *whole-event* attendee (not per attendee-day). For these
+# event types the comparison must use the per-attendee value, otherwise a multi-day
+# event is divided by days and looks artificially better than the band.
+_PER_ATTENDEE_BENCHMARK_TYPES = {"gala_dinner", "sporting_event", "wedding"}
+
+
+def get_benchmark_comparison(
+    event_type: str,
+    per_attendee_day: float,
+    per_attendee: Optional[float] = None,
+) -> Optional[BenchmarkComparison]:
+    """Compare against industry benchmarks.
+
+    Most bands are per attendee-day; gala/sporting/wedding bands are per whole-event
+    attendee, so we compare those against ``per_attendee`` when it is provided.
+    """
     benchmarks = EF.get("benchmarks", {})
     type_map = {
         "conference": "conference_per_attendee_day",
@@ -262,6 +292,12 @@ def get_benchmark_comparison(event_type: str, per_attendee_day: float) -> Option
     bm_key = type_map.get(event_type)
     if not bm_key or bm_key not in benchmarks:
         return None
+
+    # Pick the comparison basis that matches the band's unit.
+    compare_value = per_attendee_day
+    if event_type in _PER_ATTENDEE_BENCHMARK_TYPES and per_attendee is not None:
+        compare_value = per_attendee
+    per_attendee_day = compare_value
 
     bm = benchmarks[bm_key]
     typical = bm["typical"]
@@ -325,11 +361,11 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
     waste_kg, w_notes = _waste_emissions(scenario.waste, attendees)
     scope3_total += waste_kg
 
-    # Equipment (Scope 1 generators + Scope 2 electricity + Scope 3 freight)
-    equip_kg, equip_s1, equip_s2, eq_notes = _equipment_emissions(scenario.equipment, days)
+    # Equipment (Scope 1 generators + Scope 2 electricity + Scope 3 stage/freight)
+    equip_kg, equip_s1, equip_s2, equip_s3, eq_notes = _equipment_emissions(scenario.equipment, days)
     scope1_total += equip_s1
     scope2_total += equip_s2
-    scope3_total += max(0, equip_kg - equip_s1 - equip_s2)  # freight portion (clamped)
+    scope3_total += equip_s3
 
     # Swag (Scope 3)
     swag_kg, sw_notes = _swag_emissions(scenario.swag, attendees)
@@ -348,17 +384,33 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
     per_attendee = total_tco2e / attendees if attendees > 0 else 0
     per_attendee_day = per_attendee / days if days > 0 else per_attendee
 
-    # Data quality flag
-    has_actual_data = any([
-        scenario.travel_segments,
-        scenario.venue_energy and (scenario.venue_energy.kwh_consumed or scenario.venue_energy.venue_area_m2),
-        scenario.accommodation,
-        scenario.catering,
-        scenario.waste,
-        scenario.equipment,
-        scenario.swag,
-    ])
-    quality = "partial" if has_actual_data else "estimated"
+    # Data quality flag. A populated venue_energy (even grid + renewable only) counts
+    # as real input. "verified" is reachable only when the scenario is in ADVANCED mode
+    # AND all core categories carry measured inputs — i.e. complete primary data, not
+    # proxy estimates. (This is a completeness tier, not a third-party assurance claim.)
+    core_provided = {
+        "travel": bool(scenario.travel_segments),
+        "venue_energy": scenario.venue_energy is not None,
+        "accommodation": scenario.accommodation is not None,
+        "catering": scenario.catering is not None,
+        "waste": scenario.waste is not None,
+    }
+    has_actual_data = any(core_provided.values()) or scenario.equipment is not None or scenario.swag is not None
+    all_core_provided = all(core_provided.values())
+
+    if all_core_provided and scenario.mode == ScenarioMode.ADVANCED:
+        quality = "verified"
+    elif has_actual_data:
+        quality = "partial"
+    else:
+        quality = "estimated"
+
+    if scenario.mode == ScenarioMode.ADVANCED and not all_core_provided:
+        missing = [k for k, v in core_provided.items() if not v]
+        assumptions["data_quality"] = (
+            "Advanced mode: some categories still use proxy estimates "
+            f"({', '.join(missing)})."
+        )
 
     scopes = ScopeBreakdown(
         scope1_tco2e=round(scope1_total / 1000, 4),
@@ -382,7 +434,7 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
     )
 
     # Benchmark
-    benchmark = get_benchmark_comparison(scenario.event_type.value, per_attendee_day)
+    benchmark = get_benchmark_comparison(scenario.event_type.value, per_attendee_day, per_attendee)
 
     return ScenarioResult(
         name=scenario.name,
@@ -431,145 +483,120 @@ def build_factors_snapshot(scenario: EventScenarioInput) -> dict:
     }
 
 
-def get_reduction_suggestions(result: ScenarioResult, target_pct: float = 30.0) -> list[dict]:
-    """Generate ranked reduction suggestions to hit target % reduction."""
+def get_reduction_suggestions(
+    result: ScenarioResult,
+    target_pct: float = 30.0,
+    catering_type: Optional[str] = None,
+) -> list[dict]:
+    """Generate ranked reduction suggestions as a realistic portfolio.
+
+    Each lever's saving is drawn from the remaining (un-claimed) emissions in its
+    category and clamped to what is left, so the suggested reductions can never sum
+    to more than the category — or the event — total. Carbon offsets are returned as
+    a separate neutralization entry (``is_neutralization=True``) appended after the
+    ranked reductions and applied to the *residual* after reductions, so buying
+    credits never ranks among (or inflates) the actual reductions.
+    """
     emissions = result.emissions
-    suggestions = []
+    attendees = result.attendees
+    days = result.event_days
 
-    # Travel is usually biggest lever
-    if emissions.travel_tco2e > 0:
-        suggestions.append({
-            "action": "enable_hybrid",
-            "label": "Enable hybrid/virtual attendance (30% remote)",
-            "co2e_saved_tco2e": round(emissions.travel_tco2e * 0.3, 3),
-            "estimated_cost_usd": result.attendees * 0.3 * 30,
-            "category": "travel",
-            "difficulty": "medium",
-            "scope": 3,
-        })
-        suggestions.append({
-            "action": "shift_to_rail",
-            "label": "Shift short-haul flights to rail (where <4h journey)",
-            "co2e_saved_tco2e": round(emissions.travel_tco2e * 0.15, 3),
-            "estimated_cost_usd": -result.attendees * 0.2 * 15,
-            "category": "travel",
-            "difficulty": "hard",
-            "scope": 3,
-        })
-        suggestions.append({
-            "action": "shuttle_bus",
-            "label": "Provide shuttle buses from airports/stations to venue",
-            "co2e_saved_tco2e": round(emissions.travel_tco2e * 0.05, 3),
-            "estimated_cost_usd": result.attendees * 5,
-            "category": "travel",
-            "difficulty": "easy",
-            "scope": 3,
-        })
+    # Remaining reducible budget per category (tCO2e).
+    remaining = {
+        "travel": max(0.0, emissions.travel_tco2e),
+        "catering": max(0.0, emissions.catering_tco2e),
+        "energy": max(0.0, emissions.venue_energy_tco2e),
+        "equipment": max(0.0, emissions.equipment_tco2e),
+        "accommodation": max(0.0, emissions.accommodation_tco2e),
+        "waste": max(0.0, emissions.materials_waste_tco2e),
+        "swag": max(0.0, emissions.swag_tco2e),
+    }
 
-    # Catering switch
-    if emissions.catering_tco2e > 0:
-        meals = result.attendees * result.event_days * 2
-        co2e_saved = meals * 2.1 / 1000
-        suggestions.append({
-            "action": "vegetarian_menu",
-            "label": "Switch to fully vegetarian menu",
-            "co2e_saved_tco2e": round(co2e_saved, 3),
-            "estimated_cost_usd": -meals * 2.5,
-            "category": "catering",
-            "difficulty": "easy",
-            "scope": 3,
-        })
-        suggestions.append({
-            "action": "local_seasonal",
-            "label": "Source local and seasonal ingredients",
-            "co2e_saved_tco2e": round(emissions.catering_tco2e * 0.15, 3),
-            "estimated_cost_usd": meals * 1.5,
-            "category": "catering",
-            "difficulty": "medium",
-            "scope": 3,
+    reductions: list[dict] = []
+
+    def add(action, label, category, raw_saved, cost, difficulty, scope):
+        cap = remaining.get(category)
+        saved = raw_saved
+        if cap is not None:
+            saved = min(raw_saved, cap)
+            remaining[category] = max(0.0, cap - saved)
+        if saved <= 0:
+            return
+        reductions.append({
+            "action": action,
+            "label": label,
+            "co2e_saved_tco2e": round(saved, 3),
+            "estimated_cost_usd": round(cost, 0),
+            "category": category,
+            "difficulty": difficulty,
+            "scope": scope,
         })
 
-    # Renewable energy
-    if emissions.venue_energy_tco2e > 0:
-        suggestions.append({
-            "action": "renewable_energy",
-            "label": "Switch venue to 100% renewable energy tariff",
-            "co2e_saved_tco2e": round(emissions.venue_energy_tco2e, 3),
-            "estimated_cost_usd": result.attendees * result.event_days * 2,
-            "category": "energy",
-            "difficulty": "easy",
-            "scope": 2,
-        })
+    # Travel — levers share the (clamped) travel budget, so they can't sum past 100%.
+    if remaining["travel"] > 0:
+        add("enable_hybrid", "Enable hybrid/virtual attendance (30% remote)",
+            "travel", emissions.travel_tco2e * 0.30, attendees * 0.3 * 30, "medium", 3)
+        add("shift_to_rail", "Shift short-haul flights to rail (where <4h journey)",
+            "travel", emissions.travel_tco2e * 0.15, -attendees * 0.2 * 15, "hard", 3)
+        add("shuttle_bus", "Provide shuttle buses from airports/stations to venue",
+            "travel", emissions.travel_tco2e * 0.05, attendees * 5, "easy", 3)
 
-    # Equipment
-    if emissions.equipment_tco2e > 0:
-        suggestions.append({
-            "action": "led_lighting",
-            "label": "Switch to LED lighting (40% energy reduction)",
-            "co2e_saved_tco2e": round(emissions.equipment_tco2e * 0.4, 3),
-            "estimated_cost_usd": 500 * result.event_days,
-            "category": "equipment",
-            "difficulty": "easy",
-            "scope": 2,
-        })
+    # Catering — vegetarian and local/seasonal are mutually exclusive (take the bigger
+    # lever). Skip the vegetarian switch entirely when the menu is already plant-based.
+    if remaining["catering"] > 0:
+        already_low = (catering_type or "") in {"vegetarian_meal", "vegan_meal", "local_organic"}
+        if already_low:
+            add("local_seasonal", "Source local and seasonal ingredients",
+                "catering", emissions.catering_tco2e * 0.15, attendees * days * 2 * 1.5, "medium", 3)
+        else:
+            add("vegetarian_menu", "Switch to a fully vegetarian menu",
+                "catering", emissions.catering_tco2e * 0.55, -attendees * days * 2 * 2.5, "easy", 3)
+
+    # Renewable energy tariff zeroes purchased-electricity (market-based) emissions.
+    if remaining["energy"] > 0:
+        add("renewable_energy", "Switch venue to 100% renewable energy tariff",
+            "energy", emissions.venue_energy_tco2e, attendees * days * 2, "easy", 2)
+
+    # Equipment — LED lighting saves ~40% of equipment electricity.
+    if remaining["equipment"] > 0:
+        add("led_lighting", "Switch to LED lighting (40% energy reduction)",
+            "equipment", emissions.equipment_tco2e * 0.40, 500 * days, "easy", 2)
 
     # Accommodation
-    if emissions.accommodation_tco2e > 0:
-        suggestions.append({
-            "action": "eco_accommodation",
-            "label": "Choose green-certified hotels (eco-lodge / green mark)",
-            "co2e_saved_tco2e": round(emissions.accommodation_tco2e * 0.40, 3),
-            "estimated_cost_usd": 0,
-            "category": "accommodation",
-            "difficulty": "medium",
-            "scope": 3,
-        })
+    if remaining["accommodation"] > 0:
+        add("eco_accommodation", "Choose green-certified hotels (eco-lodge / green mark)",
+            "accommodation", emissions.accommodation_tco2e * 0.40, 0, "medium", 3)
 
-    # Digital materials
-    suggestions.append({
-        "action": "digital_materials",
-        "label": "Replace printed materials with digital (app/QR)",
-        "co2e_saved_tco2e": round(result.attendees * 0.00025, 3),
-        "estimated_cost_usd": -result.attendees * 2.0,
-        "category": "waste",
-        "difficulty": "easy",
-        "scope": 3,
-    })
+    # Waste — digital materials + zero-waste both draw from the waste budget.
+    if remaining["waste"] > 0:
+        add("digital_materials", "Replace printed materials with digital (app/QR)",
+            "waste", attendees * 0.00025, -attendees * 2.0, "easy", 3)
+        add("zero_waste", "Zero-waste catering (compost + eliminate single-use)",
+            "waste", attendees * 0.0008 * days, attendees * 1.5, "medium", 3)
 
-    # Sustainable swag
-    if emissions.swag_tco2e > 0:
-        suggestions.append({
-            "action": "sustainable_swag",
-            "label": "Switch to recycled materials or digital-only swag",
-            "co2e_saved_tco2e": round(emissions.swag_tco2e * 0.6, 3),
-            "estimated_cost_usd": -result.attendees * 3,
-            "category": "swag",
+    # Swag
+    if remaining["swag"] > 0:
+        add("sustainable_swag", "Switch to recycled materials or digital-only swag",
+            "swag", emissions.swag_tco2e * 0.60, -attendees * 3, "easy", 3)
+
+    # Rank reductions by impact.
+    reductions.sort(key=lambda x: x["co2e_saved_tco2e"], reverse=True)
+
+    # Neutralization (offsets) — applied to the residual AFTER reductions and kept out
+    # of the reduction ranking. Buying credits is a cost, not an emission reduction.
+    total_reduced = sum(s["co2e_saved_tco2e"] for s in reductions)
+    residual = max(0.0, emissions.total_tco2e - total_reduced)
+    offset_qty = round(residual * (target_pct / 100), 3)
+    if offset_qty > 0:
+        reductions.append({
+            "action": "offset_residual",
+            "label": "Neutralize residual emissions with Gold Standard credits (a cost, not a reduction)",
+            "co2e_saved_tco2e": offset_qty,
+            "estimated_cost_usd": round(offset_qty * 20, 0),
+            "category": "offsets",
             "difficulty": "easy",
-            "scope": 3,
+            "scope": "all",
+            "is_neutralization": True,
         })
 
-    # Zero waste
-    suggestions.append({
-        "action": "zero_waste",
-        "label": "Zero-waste catering (compost + eliminate single-use)",
-        "co2e_saved_tco2e": round(result.attendees * 0.0008 * result.event_days, 3),
-        "estimated_cost_usd": result.attendees * 1.5,
-        "category": "waste",
-        "difficulty": "medium",
-        "scope": 3,
-    })
-
-    # Carbon offsets (always last)
-    suggestions.append({
-        "action": "offset_residual",
-        "label": "Offset residual emissions with Gold Standard credits",
-        "co2e_saved_tco2e": round(emissions.total_tco2e * (target_pct / 100), 3),
-        "estimated_cost_usd": round(emissions.total_tco2e * (target_pct / 100) * 15, 0),
-        "category": "offsets",
-        "difficulty": "easy",
-        "scope": "all",
-    })
-
-    # Sort by CO2e saved descending
-    suggestions.sort(key=lambda x: x["co2e_saved_tco2e"], reverse=True)
-    return suggestions
+    return reductions

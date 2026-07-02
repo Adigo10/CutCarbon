@@ -161,6 +161,7 @@ export interface ReductionSuggestion {
   category: string
   difficulty: string
   scope: number | string
+  is_neutralization?: boolean
 }
 
 export interface ChatMessage {
@@ -181,6 +182,7 @@ export interface FinancialCalcState {
   reduction_pct: number
   energy_kwh: number
   meal_switches: number
+  attendees: number
   actions: string[]
   linked_scenario_id: string | null
   linked_scenario_name: string | null

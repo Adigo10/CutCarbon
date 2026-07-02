@@ -27,6 +27,40 @@ from app.services.financial_engine import get_compliance_report
 router = APIRouter()
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
+
+# CSV/Excel formula-injection mitigation. A string cell beginning with any of these
+# is interpreted as a formula (or DDE payload) by Excel/LibreOffice/Sheets when the
+# file is opened — dangerous because these reports are built for third-party auditors.
+# Prefixing a single quote forces the cell to be treated as literal text.
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _safe_cell(value):
+    """Neutralize spreadsheet formula injection for a single cell value."""
+    if isinstance(value, str) and value[:1] in _FORMULA_PREFIXES:
+        return "'" + value
+    return value
+
+
+class _SafeCsvWriter:
+    """csv.writer wrapper that sanitizes every cell against formula injection."""
+
+    def __init__(self, buf):
+        self._w = csv.writer(buf)
+
+    def writerow(self, row):
+        self._w.writerow([_safe_cell(c) for c in row])
+
+    def writerows(self, rows):
+        for row in rows:
+            self.writerow(row)
+
+
+def _pdf_text(value) -> str:
+    """Escape user-derived text before it is parsed as reportlab Paragraph markup."""
+    from xml.sax.saxutils import escape
+
+    return escape(str(value))
 _REPORT_METHODODOLOGY = "GHG Protocol Corporate Standard, ISO 14064-1"
 _REPORT_DISCLAIMER = (
     "Calculations are based on industry-standard emission factors and scenario assumptions. "
@@ -44,6 +78,14 @@ _CATEGORY_LABELS = [
 
 
 def _wb_response(wb, filename: str) -> StreamingResponse:
+    # Single chokepoint for every .xlsx export: neutralize formula injection in any
+    # string cell before serializing. openpyxl auto-types a leading "=" as a formula,
+    # so we rewrite dangerous string cells to literal text here.
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, str) and cell.value[:1] in _FORMULA_PREFIXES:
+                    cell.value = "'" + cell.value
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
@@ -80,7 +122,7 @@ def _scenario_location(s: ScenarioDB) -> str:
 def _serialize_scenario_row(s: ScenarioDB) -> dict[str, Any]:
     event_type = getattr(s, "event_type", "conference") or "conference"
     per_attendee_day = round(s.per_attendee_tco2e / max(s.event_days or 1, 1), 4) if s.per_attendee_tco2e else 0
-    benchmark = get_benchmark_comparison(event_type, per_attendee_day)
+    benchmark = get_benchmark_comparison(event_type, per_attendee_day, s.per_attendee_tco2e)
     return {
         "scenario_id": s.id,
         "name": s.name,
@@ -263,7 +305,7 @@ def _pdf_response(content: bytes, filename: str) -> StreamingResponse:
 
 def _scenario_report_csv_bytes(report: ScenarioReportPayload) -> bytes:
     buf = io.StringIO(newline="")
-    writer = csv.writer(buf)
+    writer = _SafeCsvWriter(buf)
     writer.writerow(["section", "key", "label", "value", "unit"])
 
     scenario = report.scenario
@@ -488,7 +530,7 @@ def _scenario_report_pdf(report: ScenarioReportPayload) -> bytes:
         factor_rows.append([_labelize(key), str(value)])
 
     assumption_paragraphs = [
-        Paragraph(f"<b>{_labelize(key)}:</b> {value}", styles["BodySmall"])
+        Paragraph(f"<b>{_pdf_text(_labelize(key))}:</b> {_pdf_text(value)}", styles["BodySmall"])
         for key, value in report.assumptions.items()
     ]
 
@@ -498,7 +540,7 @@ def _scenario_report_pdf(report: ScenarioReportPayload) -> bytes:
         Paragraph(f"Generated {report.exported_at}", styles["BodyText"]),
         Spacer(1, 0.2 * cm),
         Paragraph(
-            f"{scenario['name']} in {scenario['location']} covers {scenario['attendees']} attendees across "
+            f"{_pdf_text(scenario['name'])} in {_pdf_text(scenario['location'])} covers {scenario['attendees']} attendees across "
             f"{scenario['event_days']} day(s). Total modeled emissions are {emissions['total_tco2e']:.3f} tCO2e.",
             styles["BodyText"],
         ),
@@ -742,11 +784,13 @@ async def export_scenario_pdf(
 
 
 @router.get("/emission-factors.xlsx", summary="Download emission factor catalog as Excel")
-async def export_emission_factors_xlsx():
+async def export_emission_factors_xlsx(
+    current_user: UserDB = Depends(get_current_user),
+):
     from openpyxl import Workbook
 
     ef_path = _DATA_DIR / "emission_factors.json"
-    with open(ef_path) as f:
+    with open(ef_path, encoding="utf-8") as f:
         ef = json.load(f)
 
     wb = Workbook()
@@ -826,9 +870,11 @@ async def export_agent_runs_xlsx(
 
 
 @router.get("/emission-factors.json", summary="Download emission_factors.json (raw)")
-async def export_emission_factors_json():
+async def export_emission_factors_json(
+    current_user: UserDB = Depends(get_current_user),
+):
     ef_path = _DATA_DIR / "emission_factors.json"
-    with open(ef_path) as f:
+    with open(ef_path, encoding="utf-8") as f:
         data = json.load(f)
     return JSONResponse(
         content=data,

@@ -12,6 +12,16 @@ from app.routers.auth import get_current_user
 router = APIRouter()
 
 
+def _valid_session_id(value) -> str:
+    """Return value if it's a valid UUID string, else a fresh server-generated id."""
+    if isinstance(value, str):
+        try:
+            return str(uuid.UUID(value))
+        except (ValueError, AttributeError, TypeError):
+            pass
+    return str(uuid.uuid4())
+
+
 @router.post("", response_model=ChatResponse)
 async def chat(
     req: ChatRequest,
@@ -37,19 +47,27 @@ async def chat(
                 "current_tco2e": scenario.total_tco2e,
             })
 
-    # Call OpenAI
-    result = await openai_service.chat(req.messages, event_context)
+    # Validate the client-supplied session id (don't let the client write into
+    # arbitrary buckets); fall back to a server-generated id.
+    session_id = _valid_session_id((req.event_context or {}).get("session_id"))
 
-    # Persist messages to DB
-    session_id = req.event_context.get("session_id", str(uuid.uuid4())) if req.event_context else str(uuid.uuid4())
+    # Persist the user's message FIRST so a downstream LLM failure can't lose the turn.
     last_user = req.messages[-1]
     db.add(ChatMessageDB(
         session_id=session_id,
-        role=last_user.role,
+        role="user",
         content=last_user.content,
         created_at=datetime.utcnow(),
         user_id=current_user.id,
     ))
+    await db.commit()
+
+    # Call OpenAI (degraded 503 on upstream failure rather than a raw 500).
+    try:
+        result = await openai_service.chat(req.messages, event_context)
+    except openai_service.ChatServiceError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
     db.add(ChatMessageDB(
         session_id=session_id,
         role="assistant",

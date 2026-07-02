@@ -1,14 +1,13 @@
 {
   "carbon_tax_rates": {
     "singapore": {
-      "current_rate_sgd": 25,
-      "2026_rate_sgd": 45,
-      "2030_rate_sgd": 65,
+      "current_rate_sgd": 45,
+      "2030_rate_sgd_range": [50, 80],
       "currency": "SGD",
       "usd_exchange": 0.74,
       "scope": "Facilities emitting >= 25,000 tCO2e/year; event organizers indirectly affected via supply chain",
       "scheme": "Carbon Pricing Act (CPA)",
-      "source": "NEA Singapore 2024"
+      "source": "NEA Singapore — S$45/tCO2e from 1 Jan 2026 (rising to S$50-80 by 2030)"
     },
     "european_union": {
       "ets_price_eur": 65,

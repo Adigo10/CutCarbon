@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List, Dict, Any
 from enum import Enum
 from uuid import uuid4
@@ -117,8 +117,8 @@ class OffsetStatus(str, Enum):
 class TravelSegment(BaseModel):
     mode: TravelMode
     travel_class: TravelClass = TravelClass.ECONOMY
-    attendees: int = Field(gt=0)
-    distance_km: float = Field(ge=0)
+    attendees: int = Field(gt=0, le=1_000_000)
+    distance_km: float = Field(ge=0, le=50_000)  # > half Earth's circumference is nonsensical
     label: str = ""
 
 
@@ -174,12 +174,12 @@ class SwagGroup(BaseModel):
 
 
 class EventScenarioInput(BaseModel):
-    name: str = Field(min_length=1)
+    name: str = Field(min_length=1, max_length=200)
     event_name: str = "My Event"
     event_type: EventType = EventType.CONFERENCE
     location: str = "Singapore"
-    attendees: int = Field(gt=0)
-    event_days: int = Field(default=1, gt=0)
+    attendees: int = Field(gt=0, le=1_000_000)
+    event_days: int = Field(default=1, gt=0, le=365)
     mode: ScenarioMode = ScenarioMode.BASIC
     travel_segments: List[TravelSegment] = Field(default_factory=list)
     venue_energy: Optional[VenueEnergy] = None
@@ -246,12 +246,18 @@ class ScenarioResult(BaseModel):
 # -- Chat models ---------------------------------------------------------------
 
 class ChatMessage(BaseModel):
-    role: str  # user | assistant
-    content: str
+    role: str = "user"  # constrained to user | assistant
+    content: str = Field(max_length=8000)
+
+    @field_validator("role")
+    @classmethod
+    def _normalize_role(cls, v: str) -> str:
+        # Neutralize role injection (e.g. "system") without rejecting the request.
+        return v if v in ("user", "assistant") else "user"
 
 
 class ChatRequest(BaseModel):
-    messages: List[ChatMessage]
+    messages: List[ChatMessage] = Field(min_length=1, max_length=100)
     event_context: Optional[Dict[str, Any]] = None
     scenario_id: Optional[str] = None
 
@@ -320,6 +326,7 @@ class ComplianceReport(BaseModel):
     checks: List[ComplianceCheck]
     mandatory_frameworks: List[str]
     penalty_risk_usd: float
+    disclaimer: str = ""
 
 
 # -- Carbon Offset models ------------------------------------------------------

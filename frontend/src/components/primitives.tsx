@@ -24,9 +24,27 @@ async function ensureMermaid() {
   if (!mermaidReady) {
     mermaidApi.initialize({
       startOnLoad: false,
-      securityLevel: 'loose',
-      theme: 'neutral',
-      fontFamily: 'Plus Jakarta Sans, sans-serif',
+      // 'strict' keeps mermaid's HTML sanitizer on so user/LLM-derived label text
+      // (e.g. scenario names) cannot inject markup into the rendered SVG.
+      securityLevel: 'strict',
+      theme: 'base',
+      themeVariables: {
+        background: '#ffffff',
+        primaryColor: '#eef6f3',
+        primaryTextColor: '#121826',
+        primaryBorderColor: '#cbd7d2',
+        lineColor: '#667085',
+        secondaryColor: '#f5f7fa',
+        tertiaryColor: '#edf2f7',
+        edgeLabelBackground: '#ffffff',
+        clusterBkg: '#f5f7fa',
+        titleColor: '#12614f',
+        nodeBorder: '#cbd7d2',
+        mainBkg: '#ffffff',
+        nodeTextColor: '#121826',
+        fontFamily: 'Inter, system-ui, sans-serif',
+      },
+      fontFamily: 'Inter, system-ui, sans-serif',
     })
     mermaidReady = true
   }
@@ -126,6 +144,10 @@ export function ChartSurface({ config, empty, height = 280 }: ChartSurfaceProps)
 
     import('chart.js/auto').then(({ Chart: ChartJS }) => {
       if (!active || !canvasRef.current) return
+      ChartJS.defaults.color = '#667085'
+      ChartJS.defaults.borderColor = '#dde3eb'
+      ChartJS.defaults.font.family = "'Inter', 'Segoe UI', system-ui, sans-serif"
+      ChartJS.defaults.font.size = 11
       chart = new ChartJS(canvasRef.current, config)
     })
 

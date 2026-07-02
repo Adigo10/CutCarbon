@@ -5,12 +5,77 @@ Converts natural language event descriptions into EventScenarioInput objects.
 import json
 from typing import Optional, List, Dict, Any
 
-from openai import AsyncOpenAI
+from openai import (
+    AsyncOpenAI,
+    APIConnectionError,
+    APIError,
+    APITimeoutError,
+    RateLimitError,
+)
+from pydantic import BaseModel, Field, ValidationError
 
 from app.config import settings
-from app.models.schemas import ChatMessage, EventScenarioInput
+from app.models.schemas import ChatMessage
 
 client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+
+# Roles we will ever forward to the model — prevents a client injecting role="system"
+# to override the server system prompt.
+_ALLOWED_ROLES = {"user", "assistant"}
+
+# Bound + sanity-check the LLM's extracted event data before it reaches the engine.
+# extra="ignore" drops hallucinated fields; bounds reject absurd values that would
+# otherwise produce plausible-looking garbage totals.
+
+
+class _TravelSegmentExtract(BaseModel):
+    model_config = {"extra": "ignore"}
+    mode: str
+    travel_class: Optional[str] = "economy"
+    attendees: int = Field(ge=1, le=1_000_000)
+    distance_km: float = Field(ge=0, le=50_000)
+    label: Optional[str] = ""
+
+
+class ExtractedEventData(BaseModel):
+    model_config = {"extra": "ignore"}
+    event_name: Optional[str] = None
+    location: Optional[str] = None
+    attendees: Optional[int] = Field(default=None, ge=1, le=1_000_000)
+    event_days: Optional[int] = Field(default=None, ge=1, le=365)
+    travel_segments: Optional[List[_TravelSegmentExtract]] = Field(default=None, max_length=100)
+    venue_grid_region: Optional[str] = None
+    venue_kwh: Optional[float] = Field(default=None, ge=0, le=100_000_000)
+    venue_area_m2: Optional[float] = Field(default=None, ge=0, le=10_000_000)
+    renewable_pct: Optional[float] = Field(default=None, ge=0, le=100)
+    accommodation_type: Optional[str] = None
+    room_nights: Optional[int] = Field(default=None, ge=0, le=100_000_000)
+    catering_type: Optional[str] = None
+    meals: Optional[int] = Field(default=None, ge=0, le=100_000_000)
+    general_waste_kg: Optional[float] = Field(default=None, ge=0)
+    recycled_kg: Optional[float] = Field(default=None, ge=0)
+    has_printed_materials: Optional[bool] = None
+    exhibition_booths_m2: Optional[float] = Field(default=None, ge=0)
+
+
+class ChatServiceError(Exception):
+    """Raised when the upstream LLM call fails — surfaced as a 503 by the router."""
+
+
+# Per-request caps for the LLM calls.
+_OPENAI_TIMEOUT_S = 30
+_OPENAI_MAX_TOKENS = 800
+
+
+def _validate_extracted(args: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Validate + bound LLM tool args. Returns a clean dict, or None if unusable."""
+    try:
+        cleaned = ExtractedEventData.model_validate(args)
+    except ValidationError as exc:
+        print(f"[openai_service] dropped invalid extraction: {exc.error_count()} error(s)")
+        return None
+    data = cleaned.model_dump(exclude_none=True)
+    return data or None
 
 SYSTEM_PROMPT = """You are EventCarbon Co-Pilot, an AI assistant that helps event organizers
 calculate, understand, and reduce the carbon footprint of their events.
@@ -150,17 +215,25 @@ async def chat(
     if context_str:
         system_content += f"\n\n{context_str}"
 
+    # System message is built server-side only; client message roles are constrained
+    # to user/assistant so a client cannot inject role="system" to override the prompt.
     openai_messages = [{"role": "system", "content": system_content}]
     for msg in messages:
-        openai_messages.append({"role": msg.role, "content": msg.content})
+        role = msg.role if msg.role in _ALLOWED_ROLES else "user"
+        openai_messages.append({"role": role, "content": msg.content})
 
-    response = await client.chat.completions.create(
-        model=settings.OPENAI_MODEL,
-        messages=openai_messages,
-        tools=EXTRACTION_TOOLS,
-        tool_choice="auto",
-        temperature=0.3,
-    )
+    try:
+        response = await client.chat.completions.create(
+            model=settings.OPENAI_MODEL,
+            messages=openai_messages,
+            tools=EXTRACTION_TOOLS,
+            tool_choice="auto",
+            temperature=0.3,
+            max_tokens=_OPENAI_MAX_TOKENS,
+            timeout=_OPENAI_TIMEOUT_S,
+        )
+    except (APITimeoutError, RateLimitError, APIConnectionError, APIError) as exc:
+        raise ChatServiceError(f"AI service unavailable: {type(exc).__name__}") from exc
 
     choice = response.choices[0]
     extracted_data = None
@@ -170,9 +243,12 @@ async def chat(
     if choice.finish_reason == "tool_calls" and choice.message.tool_calls:
         tool_results = []
         for tc in choice.message.tool_calls:
-            args = json.loads(tc.function.arguments)
+            try:
+                args = json.loads(tc.function.arguments)
+            except (json.JSONDecodeError, TypeError):
+                args = {}
             if tc.function.name == "update_event_scenario":
-                extracted_data = args
+                extracted_data = _validate_extracted(args)
             elif tc.function.name == "request_financial_analysis":
                 financial_trigger = args
             tool_results.append({
@@ -185,11 +261,16 @@ async def chat(
         openai_messages.append(choice.message)
         openai_messages.extend(tool_results)
 
-        follow_up = await client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
-            messages=openai_messages,
-            temperature=0.3,
-        )
+        try:
+            follow_up = await client.chat.completions.create(
+                model=settings.OPENAI_MODEL,
+                messages=openai_messages,
+                temperature=0.3,
+                max_tokens=_OPENAI_MAX_TOKENS,
+                timeout=_OPENAI_TIMEOUT_S,
+            )
+        except (APITimeoutError, RateLimitError, APIConnectionError, APIError) as exc:
+            raise ChatServiceError(f"AI service unavailable: {type(exc).__name__}") from exc
         reply = follow_up.choices[0].message.content or ""
     else:
         reply = choice.message.content or ""
