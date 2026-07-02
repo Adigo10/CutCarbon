@@ -25,14 +25,14 @@
 │  ┌──────────────────────────────────────────────────┐   │
 │  │  Routers (Request Handlers)                      │   │
 │  │                                                  │   │
-│  │  ├─ /auth          → Login/register/JWT tokens  │   │
+│  │  ├─ /api/auth      → Register/login/JWT tokens  │   │
 │  │  ├─ /api/chat      → OpenAI function calling    │   │
-│  │  ├─ /api/scenarios → CRUD, comparison, cloning  │   │
-│  │  ├─ /api/financial → Tax savings, ROI calc      │   │
+│  │  ├─ /api/scenarios → CRUD, cloning, recalc-all  │   │
+│  │  ├─ /api/financial → Tax savings + compliance   │   │
+│  │  │                   (GHG, ISO20121, NZCE, EU)  │   │
 │  │  ├─ /api/offsets   → Project browse, purchases  │   │
-│  │  ├─ /api/compliance→ GHG, ISO20121, SBTi,EU    │   │
-│  │  ├─ /api/agents    → Trigger web scrapers       │   │
-│  │  └─ /api/exports   → PDF, Excel, JSON downloads │   │
+│  │  ├─ /api/agents    → Web scrapers (admin-only)  │   │
+│  │  └─ /api/exports   → PDF/Excel/CSV/JSON reports │   │
 │  └──────────────────────────────────────────────────┘   │
 │                        ↕️                                │
 │  ┌──────────────────────────────────────────────────┐   │
@@ -40,12 +40,17 @@
 │  │                                                  │   │
 │  │  ├─ emissions_engine.py                         │   │
 │  │  │  └─ Deterministic GHG Protocol calculations  │   │
+│  │  │     (8 categories incl. digital/virtual)     │   │
 │  │  ├─ financial_engine.py                         │   │
-│  │  │  └─ Tax, incentives, ROI by region           │   │
+│  │  │  └─ Tax savings, incentives, compliance      │   │
 │  │  ├─ openai_service.py                           │   │
 │  │  │  └─ Chat with function calling               │   │
-│  │  └─ tinyfish_agent.py                           │   │
-│  │     └─ Web scraper orchestration                │   │
+│  │  ├─ tinyfish_agent.py                           │   │
+│  │  │  └─ Web scraper orchestration                │   │
+│  │  ├─ scenario_serializer.py                      │   │
+│  │  │  └─ ScenarioDB row ↔ API payload mapping     │   │
+│  │  ├─ regions.py → canonical region aliases       │   │
+│  │  └─ data_files.py → shared JSON data loading    │   │
 │  └──────────────────────────────────────────────────┘   │
 │                        ↕️                                │
 │  ┌──────────────────────────────────────────────────┐   │
@@ -56,7 +61,8 @@
 │  │  ├─ Chat messages                               │   │
 │  │  ├─ Financial reports                           │   │
 │  │  ├─ Offset purchases                            │   │
-│  │  ├─ Emission factors (cached)                   │   │
+│  │  ├─ Emission factors (write-only audit log —    │   │
+│  │  │   emission_factors.json is the live source)  │   │
 │  │  └─ Agent run history                           │   │
 │  └──────────────────────────────────────────────────┘   │
 │         (SQLite local / Postgres production)            │
@@ -65,7 +71,7 @@
 ┌─────────────────────────────────────────────────────────┐
 │           EXTERNAL SERVICES (Async)                     │
 │                                                         │
-│  ├─ OpenAI API → GPT-4 function calling               │
+│  ├─ OpenAI API → function calling (gpt-4o-mini)       │
 │  │  (Extracts event data from chat)                    │
 │  │                                                      │
 │  ├─ TinyFish Agents (10x Headless Browser)            │
@@ -191,7 +197,7 @@
         Edit params AI suggests    View:
         Recalculate changes        •Tax savings
              ↓           ↓            •Incentives
-        New results  3-5 ideas      •ROI
+        New results  3-5 ideas      •Cost savings
              ↓           ↓            •Offset cost
         Keep editing? Apply change?    ↓
         [Save] or    [Update]     ┌──────────┐
@@ -230,9 +236,10 @@
                         │                      │
                         │ View scores:         │
                         │ • GHG Protocol: 92%  │
-                        │ • ISO 20121: 85%     │
-                        │ • SBTi: 68%          │
-                        │ • Regional: 95%      │
+                        │ • ISO 20121: 50%     │
+                        │ • NZCE: 60%          │
+                        │ • Intensity: 80%     │
+                        │ • Regional: 70%      │
                         └──────────────────────┘
                                ↓
                         [EXPORT REPORT]
@@ -269,7 +276,7 @@ User message:
  3 days, 60% from USA (flights),
  40% from Asia (train/regional flights)"
 
-Frontend (app.js):
+Frontend (React SPA):
   1. Capture input text
   2. Create ChatRequest object
   3. POST /api/chat with:
@@ -304,7 +311,7 @@ Backend (routers/chat.py):
        }
      ]
 
-OpenAI (GPT-4):
+OpenAI (default model gpt-4o-mini):
   1. Reads user message
   2. Identifies intent (create scenario, ask question, etc)
   3. Extracts key details:
@@ -395,10 +402,17 @@ For each emission category:
     ├─ Generator emissions (if any)
     └─ Equipment_tco2e = 15 tCO2e
 
+  DIGITAL (virtual/hybrid events):
+    ├─ Streaming: virtual attendees × hours × factor
+    ├─ Livestream production, event app, email campaigns
+    ├─ Virtual attendees get NO physical travel/venue proxy
+    └─ Digital_tco2e = 0 tCO2e (fully in-person event)
+
 Aggregation:
   total = travel + venue + accommodation
           + catering + waste + equipment
-        = 1,245 + 310 + 126 + 210 + 35 + 15
+          + swag + digital
+        = 1,245 + 310 + 126 + 210 + 35 + 15 + 0 + 0
         = 1,941 tCO2e
 
 Per-attendee:
@@ -447,7 +461,10 @@ ChatResponse:
 {
   "reply": "Perfect! Here's what I calculated...",
   "extracted_data": { ... },
-  "updated_scenario": { ... },
+  "session_id": "…",
+  "financial_analysis": { ... },   // real financial-engine output
+                                   // when a scenario is selected and
+                                   // the model requests an analysis
   "suggestions": [
     "Switch 100 attendees from flights to train (-180 tCO2e)",
     "Increase renewable to 80% (-60 tCO2e)",
@@ -455,7 +472,7 @@ ChatResponse:
   ]
 }
 
-Frontend (app.js):
+Frontend (React SPA):
   1. Parse response
   2. Display in chat bubble
   3. Render chart with breakdown
@@ -488,10 +505,12 @@ Frontend:
   }
 
 Backend (routers/auth.py):
-  1. Hash password with bcrypt
-  2. Create UserDB record
-  3. Generate JWT token (HS256, expires 24h)
-  4. Return TokenWithUser response
+  1. Validate payload (valid email, password 8–72 chars)
+  2. Hash password with bcrypt
+  3. Create UserDB record
+  4. Generate JWT token (HS256, expires 7 days by default)
+  5. Return TokenWithUser response
+  (Register/login/token are rate limited to 5/min per IP)
 
 Response:
 {
@@ -572,11 +591,15 @@ On page reload:
   2. If present: Include in all API requests
   3. If absent: Redirect to login
 
-Token expiry (24 hours):
+Token expiry (7 days by default, JWT_EXPIRE_MINUTES):
   1. Backend includes exp claim in JWT
   2. Upon expiry: 401 response
   3. Frontend redirects to login
   4. User must re-authenticate
+
+Swagger access:
+  POST /api/auth/token accepts form-encoded credentials
+  (username = email) so the /docs Authorize button works.
 ```
 
 ---
@@ -592,12 +615,13 @@ For full per-agent specifications, validation bounds, unit conversions, caching 
 
 ┌─────────────────────┐         ┌─────────────────────┐
 │ EMA Website         │         │ DEFRA Gov.uk        │
-│ (EU factors)        │         │ (UK factors)        │
+│ (SG grid factor)    │         │ (UK factors)        │
 └─────────────────────┘         └─────────────────────┘
           ↓                               ↓
     ┌─────────────────────────────────────┐
     │ TinyFish Headless Browser Agent     │
-    │ (Scrapes daily @ 2:00 UTC)          │
+    │ (admin-triggered via /api/agents,   │
+    │  2 runs/hour limit, 12h TTL cache)  │
     └─────────────────────────────────────┘
           ↓                    ↓
     Parse HTML           Parse HTML
@@ -605,8 +629,9 @@ For full per-agent specifications, validation bounds, unit conversions, caching 
           ↓                    ↓
     ┌────────────────────────────────────┐
     │ Validate & Transform                │
-    │ (Compare with previous version)     │
-    │ (Flag if >5% change = outlier)     │
+    │ (Per-region min/max bounds; out-of- │
+    │  range values discarded, previous   │
+    │  good value kept)                   │
     └────────────────────────────────────┘
           ↓
     ┌────────────────────────────────────┐
@@ -628,11 +653,11 @@ For full per-agent specifications, validation bounds, unit conversions, caching 
     │ AgentRunDB (Database)              │
     │                                     │
     │ {                                   │
-    │   "agent_name": "EMA",             │
+    │   "agent_name": "sg_grid_factor",  │
     │   "status": "success",             │
     │   "fetched_at": "2026-03-28...",   │
-    │   "num_updates": 12,               │
-    │   "notes": "EU train factors..."   │
+    │   "num_steps": 7,                  │
+    │   "run_id": "<tinyfish-run-id>"    │
     │ }                                   │
     └────────────────────────────────────┘
           ↓
@@ -657,7 +682,7 @@ TIME    ACTION                          SYSTEM
 14:33   User types event description    Message sent to API
         "500 person conference..."
 
-14:33   OpenAI function calling         GPT-4 extracts data
+14:33   OpenAI function calling         LLM extracts data
         Backend calls openai_service    Structured output
 
 14:34   Emissions calculated            GHG Protocol math

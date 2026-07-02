@@ -1,7 +1,7 @@
 # CutCarbon EventCarbon Co-Pilot — Complete User Guide
 
 **Version**: 2.0
-**Last Updated**: March 2026
+**Last Updated**: July 2026
 
 ---
 
@@ -20,11 +20,11 @@
 ## Overview
 
 **CutCarbon** is an AI-powered event carbon accounting platform that helps planners, sustainability teams, and corporate hosts:
-- **Calculate** precise carbon emissions for events (travel, venue, accommodation, catering, waste, equipment)
+- **Calculate** precise carbon emissions for events (travel, venue, accommodation, catering, waste, equipment, merchandise, digital)
 - **Reduce** emissions with smart suggestions aligned to GHG Protocol standards
-- **Finance** carbon reductions with tax savings, incentives, and ROI analysis
+- **Finance** carbon reductions with carbon tax savings and green incentive identification
 - **Offset** residual emissions through verified carbon credit projects
-- **Report** on compliance with frameworks like GHG Protocol, ISO 20121, SBTi, and regional regulations
+- **Report** on compliance with frameworks like GHG Protocol, ISO 20121, Net Zero Carbon Events (NZCE), and regional regulations
 
 The app combines **three power sources**:
 - 🔬 **Deterministic emissions calculations** (GHG Protocol methodology)
@@ -35,15 +35,15 @@ The app combines **three power sources**:
 
 | Feature Area | Capabilities |
 |---|---|
-| **Emissions** | 7 categories: travel, venue energy, accommodation, catering, waste, equipment, merchandise. Scope 1/2/3 per GHG Protocol. Basic (proxy) and advanced (detailed) modes. |
-| **AI Co-Pilot** | Natural language → structured scenario. Context-aware chat. Reduction suggestions. On-the-fly calculations. |
-| **Live Data** | 10 TinyFish agents refresh grid factors (SG/UK/AU/US/EU), carbon prices (SG/EU/UK ETS), aviation factors (ICAO), and food emissions (OWID). See `TINYFISH_AGENTS.md`. |
-| **Scenarios** | Create, edit, clone, compare. Data quality tracking (estimated / partial / verified). Instant recalculation. |
-| **Financial** | Carbon tax savings by region (SG, EU, UK, AU, USA). Green incentive identification. ROI calculator with payback period and NPV. |
+| **Emissions** | 8 categories: travel, venue energy, accommodation, catering, waste, equipment, merchandise, digital/virtual. Scope 1/2/3 per GHG Protocol. Basic (proxy) and advanced (detailed) modes. |
+| **AI Co-Pilot** | Natural language → structured scenario. Context-aware chat. Reduction suggestions. Real financial analysis for the selected scenario, shown as a savings card in chat. |
+| **Live Data** | 10 TinyFish agents refresh grid factors (SG/UK/AU/US/EU), carbon prices (SG/EU/UK ETS), aviation factors, and food emissions (OWID). See `TINYFISH_AGENTS.md`. |
+| **Scenarios** | Create, edit, clone, compare up to 4 side-by-side with deltas vs baseline. Data quality tracking (estimated / partial / verified) plus per-category flags. Instant recalculation. |
+| **Financial** | Carbon tax savings by region (SG, EU, UK, AU, USA). Green incentive identification. Energy and catering cost savings. |
 | **Carbon Credits** | Browse 10+ project types. Purchase and retire credits. Registry tracking (Gold Standard, VCS, ACR, etc.). Carbon neutral certification. |
-| **Compliance** | GHG Protocol, ISO 20121, SBTi, and regional (SG/EU/UK/USA) scoring. |
-| **Exports** | PDF report, Excel workbook, JSON (re-importable), CSV. |
-| **Auth** | JWT-based login/register. User-isolated data. 12-hour session. |
+| **Compliance** | GHG Protocol, ISO 20121, NZCE Measurement Methodology, event carbon-intensity benchmarks, and regional (SG/EU) checks. |
+| **Exports** | PDF report, Excel workbook, JSON (re-importable), CSV — each with a 9-category NZCE mapping section. |
+| **Auth** | JWT-based login/register. User-isolated data. 7-day session. |
 
 ---
 
@@ -70,9 +70,10 @@ Navigate to the **Login/Register** screen:
 └─────────────────────────────┘
 ```
 
-- **Register**: Enter email & password. Account is created instantly.
+- **Register**: Enter a valid email and a password of 8–72 characters. Account is created instantly.
 - **Login**: Existing users log in with email & password.
 - **Token**: JWT tokens are stored in `localStorage` for session persistence.
+- **Rate limits**: Register/login are limited to 5 attempts per minute per IP.
 
 ### 3. Your Dashboard Loads
 
@@ -94,9 +95,9 @@ CutCarbon is organized into **7 tabs** in the main navigation:
 | **Dashboard** | 📊 | Portfolio overview | View aggregate metrics, charts, trends |
 | **AI Co-Pilot** | 🤖 | Chat-based scenario builder | Describe events in plain English; AI extracts data |
 | **Scenarios** | 📋 | Manage emission scenarios | Create, edit, clone, compare scenarios side-by-side |
-| **Financial** | 💰 | Carbon pricing & ROI | View tax savings, incentives, payback periods |
+| **Financial** | 💰 | Carbon pricing & savings | View tax savings, incentives, cost savings |
 | **Carbon Credits** | 🏆 | Offset management | Browse projects, track purchases, retire credits |
-| **Compliance** | 🛡️ | Regulatory reporting | GHG Protocol, ISO 20121, SBTi, regional scores |
+| **Compliance** | 🛡️ | Regulatory reporting | GHG Protocol, ISO 20121, NZCE, intensity benchmark, regional checks |
 | **Data & Exports** | 📤 | Download & agent status | Excel/JSON exports, web scraping history |
 
 ---
@@ -123,7 +124,7 @@ CutCarbon is organized into **7 tabs** in the main navigation:
 
 5. CALCULATE FINANCIAL IMPACT
    └─> See carbon tax savings by region
-   └─> View green incentives & ROI
+   └─> View green incentives & cost savings
 
 6. OFFSET RESIDUALS
    └─> Select verified carbon credit projects
@@ -169,8 +170,7 @@ Suggestions:
 ```
 Baseline: 6,912 tCO2e → $412k tax liability (Singapore)
 After reductions: 5,552 tCO2e → $333k liability
-Savings: $79k USD + tax incentives
-ROI: 4.2 months
+Savings: $79k USD + matched green incentives (listed, not $-quantified)
 ```
 
 **Step 5: Offset Remaining Emissions**
@@ -186,9 +186,9 @@ Total offset cost: $51.5k USD
 
 **Step 6: Export Report**
 ```
-✓ Download scenario as PDF
+✓ Download scenario report as PDF, Excel, CSV, or JSON
 ✓ Share compliance scorecard (GHG Protocol: 92%)
-✓ Generate stakeholder presentation
+✓ Review the NZCE 9-category mapping included in every export
 ```
 
 ---
@@ -232,6 +232,7 @@ and carbon-neutral accommodation."
 - ✅ Recommends meal switches (red meat → vegan)
 - ✅ Identifies equipment minimization
 - ✅ Estimates renewable energy potential
+- ✅ Runs a real financial analysis for the selected scenario (actual financial-engine output, displayed as a savings card in chat)
 
 ---
 
@@ -296,7 +297,16 @@ MERCHANDISE
 ├─ Badges: 2,500 (recycled plastic)
 ├─ Notebooks: 0
 └─ Water bottles: 0 (refill stations)
+
+DIGITAL / VIRTUAL
+├─ Virtual attendees: 500
+├─ Streaming hours/day: 6
+├─ Livestream production hours: 12
+├─ Event app users: 2,000
+└─ Emails sent: 25,000
 ```
+
+For virtual and hybrid events, the digital group replaces physical proxies — virtual attendees are no longer assigned travel or venue estimates.
 
 **Results Display:**
 
@@ -313,7 +323,8 @@ MERCHANDISE
 │  ├─ Accommodation: 385 tCO2e (6%)  [🟠]      │
 │  ├─ Catering: 1,230 tCO2e (18%)  [🔴]        │
 │  ├─ Waste: 95 tCO2e (1%)  [🟣]               │
-│  └─ Equipment & Swag: 20 tCO2e (<1%)  [🩷]   │
+│  ├─ Equipment & Swag: 20 tCO2e (<1%)  [🩷]   │
+│  └─ Digital: 5 tCO2e (<1%)  [⚪]             │
 │                                               │
 │  Scope 1 (Direct): 0 tCO2e                   │
 │  Scope 2 (Electricity): 1,035 tCO2e          │
@@ -334,21 +345,23 @@ MERCHANDISE
 - **Suggestions** — AI-generated reduction strategies
 - **Financial Analysis** — Tax savings for this scenario
 - **Compliance Report** — Score against frameworks
-- **Export** — Download as PDF, Excel, JSON
+- **Export** — Download as PDF, Excel, CSV, JSON
 
 **Scenario Comparison:**
+
+Select **Compare** on up to 4 scenarios in the Scenarios tab. The comparison renders client-side, with the first selected scenario treated as the baseline and deltas shown for the others:
 
 ```
 ┌─────────────────────────┬──────────┬──────────┐
 │ Metric                  │ Baseline │ Optimized│
 ├─────────────────────────┼──────────┼──────────┤
-│ Total Emissions         │ 6,912    │ 4,865    │
-│ Per Attendee            │ 2.77     │ 1.95     │
-│ Travel (% of total)     │ 60%      │ 42%      │
-│ Renewables %            │ 65%      │ 85%      │
-│ Vegan meals %           │ 0%       │ 35%      │
-│ Offset cost @ $12/tCO2e │ $82.9k   │ $58.4k   │
-│ Tax savings (SG)        │ -$412k   │ -$291k   │
+│ Total tCO2e             │ 6,912    │ 4,865    │
+│ Per attendee            │ 2.77     │ 1.95     │
+│ Per attendee-day        │ 0.92     │ 0.65     │
+│ Travel                  │ 4,147    │ 2,043    │
+│ Venue Energy            │ 1,035    │ 830      │
+│ Catering                │ 1,230    │ 940      │
+│ Scope 1 / 2 / 3         │ ...      │ ...      │
 └─────────────────────────┴──────────┴──────────┘
 ```
 
@@ -386,44 +399,28 @@ REGIONAL TAX SCHEMES
    └─ Federal IRA incentives: up to $180/tCO2e
 ```
 
-**Green Incentives & ROI**
+**Green Incentives**
 
 ```
 AVAILABLE INCENTIVES (Singapore)
 ├─ Green Mark Certification (Building)
-│  └─ Rebate: $50k-150k (if venue is Green Mark Gold+)
-│
 ├─ Carbon Neutral Event Badge
-│  └─ Marketing value: $25k-75k (brand lift, PR)
-│
-├─ Sustainability Reporting Credits
-│  └─ ESG points: Counts toward corporate targets
-│  └─ Value: $15-30 per basis point
-│
-└─ Renewable Energy Premium
-   └─ Solar offset: $5-8k for 85%+ renewable mix
-
-COST BREAKDOWN
-├─ Emission reduction actions: $45k
-│  └─ Venue upgrade to renewable: $20k
-│  └─ Catering supplier switch: $8k
-│  └─ Travel incentives (train subsidies): $12k
-│  └─ Digital materials conversion: $5k
-│
-├─ Carbon credit purchases: $58.4k
-│  └─ 4,865 tCO2e @ $12/tCO2e average
-│
-└─ Total event carbon cost: $103.4k
-
-FINANCIAL IMPACT
-├─ Gross carbon tax avoided: $51.2k
-├─ Incentive rebates: $75k
-├─ ESG valuation uplift: $30k
-├─ Brand reputation (PR): $40k
-└─ NET BENEFIT: $92.8k saved vs. baseline
-
-ROI: 6.2 months (payback period)
+├─ Sustainability Reporting Support
+└─ Renewable Energy Programmes
 ```
+
+Matched incentives are listed **for awareness only** — grant and tax-credit values depend on project costs and eligibility criteria the tool doesn't collect, so they are never added to the headline savings figure.
+
+**What's in the headline total**
+
+```
+TOTAL FINANCIAL SAVINGS (USD)
+├─ Carbon tax / ETS liability avoided
+├─ Energy cost savings (kWh reduced × regional rate)
+└─ Catering cost savings (meal switches × per-meal delta)
+```
+
+ROI / payback-period figures are deliberately **not** shown: an event's savings are one-off, so an annualized payback metric would be misleading. Similarly, no dollar value is fabricated for "compliance value" or voluntary-carbon-market resale — compliance status is reported qualitatively in the Compliance tab instead.
 
 **Energy Cost Savings** (if applicable)
 
@@ -432,17 +429,6 @@ If switching to renewable/efficient venue:
 ├─ Original venue: 22,500 kWh @ $0.25/kWh = $5,625
 ├─ Efficient venue: 15,000 kWh @ $0.22/kWh = $3,300
 └─ Savings: $2,325 + ~500 kg CO2e reduced
-```
-
-**Compliance Value**
-
-```
-Reporting frameworks often require carbon accounting.
-Showing proactive emission reductions:
-├─ GHG Protocol Scope 3 coverage: +15 points
-├─ ISO 20121 compliance: +20 points
-├─ SBTi science-based target progress: +25 points
-└─ ESG score improvement: ~5-10% lift
 ```
 
 ---
@@ -553,7 +539,7 @@ DIRECT AIR CAPTURE (Industrial Carbon Removal)
 │ ├─ AusFest 2025: 45% covered             │
 │ └─ Portfolio target: 75% by Dec 2026     │
 │                                          │
-│ [Add Purchase] [Retire Credits] [Guidance]
+│ [Add Purchase] [Retire Credits]           │
 └──────────────────────────────────────────┘
 ```
 
@@ -605,7 +591,7 @@ Event: TechConf Asia 2025 (6,912 tCO2e)
 
 **Framework Overview**
 
-CutCarbon evaluates your scenarios against 4 major frameworks:
+Every compliance report includes four framework checks — GHG Protocol, ISO 20121, NZCE Measurement Methodology, and an event carbon-intensity benchmark — plus region-specific regimes (SGX for Singapore, CSRD for the EU). Scores indicate completeness/maturity of your data, not certified conformance (each report carries this disclaimer).
 
 #### 1. **GHG Protocol** (Most Common)
 
@@ -665,57 +651,62 @@ Recommendations:
 → Develop green procurement policy
 ```
 
-#### 3. **Science-Based Targets Initiative (SBTi)**
+#### 3. **Net Zero Carbon Events (NZCE) Measurement Methodology**
 
 ```
-Framework: SBTi - Net Zero Event Standard
+Framework: NZCE — the event industry's own measurement methodology
+(9 emission categories, Scope 1/2/3 per GHG Protocol, biennial reporting)
 
-Net Zero Pathway Requirement:
-├─ 50% emissions reduction by 2030 (baseline 2025)
-├─ 100% emissions reduction by 2050
-├─ 100% offset of residual emissions
+Categories measured by CutCarbon:
+├─ Travel to/from the Destination
+├─ Local Transportation
+├─ Energy
+├─ Accommodation
+├─ Food & Beverage
+├─ Waste
+├─ Digital Content & Communication
+├─ Production & Materials (partial)
+└─ Freight & Logistics (equipment freight line only)
 
-Your Progress: 68% aligned
+Typical Gaps:
+⚠ Biennial public reporting commitment not evidenced
+⚠ No baseline year or reduction trajectory towards net zero by 2050
 
-2025 Baseline: 6,912 tCO2e
-├─ 2026 Target: 6,912 tCO2e (maintain/reduce)
-├─ 2028 Target: 5,735 tCO2e (-17%)
-├─ 2030 Target: 3,456 tCO2e (-50%)
-└─ 2050 Target: 0 tCO2e (or fully offset)
-
-Recommended Actions:
-→ Set annual reduction targets (5-7% per year)
-→ Shift travel mode: 25% fewer flights by 2027
-→ 100% renewable venue energy by 2028
-→ Net Zero through offsets + reductions by 2030
+Recommendations:
+→ Use the NZCE category mapping section included in exported reports
+→ Become an NZCE signatory; report progress at least every two years
+→ Set a baseline year and interim targets per the NZCE roadmap
 ```
 
-#### 4. **Regional Regulations**
+NZCE is a voluntary, signatory-based initiative, so it is never listed as a mandatory framework.
+
+#### 4. **Event Carbon Intensity (informational benchmark)**
 
 ```
-SINGAPORE (Carbon Tax from 2024)
-├─ Scope: Direct & indirect emissions
-├─ Rate: $25/tCO2e (escalating to $50-80 by 2030)
-├─ Reporting: Annual mandatory for >25k tCO2e
-├─ Your status: ✓ COMPLIANT
+Metric: tCO2e per attendee per day
+Typical event band: ~0.15–0.5 (published MeetGreen/JMIC ranges)
+Threshold used: 0.30 tCO2e/attendee/day
 
-EU (Carbon Border Adjustment Mechanism)
-├─ Scope: Goods imported into EU
-├─ Rate: Variable (indexed to ETS)
-├─ Applicability: If catering/materials sourced from outside EU
-├─ Your status: ? REQUIRES ASSESSMENT
+Your Score: 0.92 tCO2e/attendee/day → PARTIAL (above the typical band)
+```
 
-UK (Carbon Price Floor)
-├─ Scope: UK operations
-├─ Rate: £19.53 + VAT = ~$25/tCO2e
-├─ Applicability: If event is in UK
-├─ Your status: N/A (event in Singapore)
+This check is informational only — it is **not** an SBTi determination. SBTi validates corporate inventories, not individual events, so CutCarbon does not produce SBTi scores.
 
-USA (IRA & Regional Schemes)
-├─ Scope: Renewable energy tax credits
-├─ Incentive: 30% investment tax credit
-├─ Applicability: Venue renewable upgrade
-├─ Your status: $6k potential savings (if applicable)
+#### 5. **Regional Regulations**
+
+```
+SINGAPORE (SGX Sustainability Reporting)
+├─ Mandatory Scope 1+2 reporting from FY2025
+├─ Scope 3 from FY2026 for STI constituents
+├─ Recommendation: align with IFRS S2 / ISSB
+├─ Your status: PARTIAL (annual report preparation needed)
+
+EU (CSRD)
+├─ Double materiality assessment required
+├─ ESRS E1 climate disclosure
+├─ Penalties are member-state specific (surfaced qualitatively,
+│  never as a fabricated dollar figure)
+├─ Your status: PARTIAL / REQUIRES ASSESSMENT
 ```
 
 **Compliance Export**
@@ -723,9 +714,8 @@ USA (IRA & Regional Schemes)
 ```
 [Generate Compliance Report]
 ├─ Overall Score: 88/100 ✓
-├─ Frameworks aligned: 4/4
-├─ Next audit date: Q2 2026
-├─ Export as: PDF | JSON | Excel
+├─ Framework checks: GHG Protocol, ISO 20121, NZCE, intensity + regional
+├─ Export as: PDF | JSON | Excel | CSV (all include the NZCE mapping)
 ```
 
 ---
@@ -744,6 +734,11 @@ Export formats:
 │  └─ Includes: Full scenario payload for re-import
 └─ CSV (Quick analysis)
    └─ Includes: Key metrics only
+
+Every scenario report (all four formats) also includes:
+├─ NZCE mapping — totals mapped onto the 9 NZCE categories
+└─ Per-category data-quality flags
+   (actual / proxy / not provided / not applicable)
 ```
 
 **Web Scraping Agent Status**
@@ -804,6 +799,8 @@ AGENT STATUS
 
 [Trigger Manual Refresh] [View Full History]
 ```
+
+Triggering an agent run is **admin-only**: the logged-in email must be in the `ADMIN_EMAILS` allowlist, and runs are rate-limited to 2 per hour even for admins. Status and history views are available to any authenticated user.
 
 **Agent Run History**
 
@@ -866,6 +863,8 @@ Scenarios are marked as:
 | **Partial** | Mix of supplier data + estimates | "Venue energy verified, catering from menu estimates" |
 | **Verified** | Primary data from suppliers | "Actual kWh consumption, invoiced travel, certified organic catering" |
 
+In addition to the overall level, each emission category carries its own data-quality flag — **actual** (you provided the input), **proxy** (estimated from attendee count), **not provided**, or **not applicable** — recorded in the scenario's assumptions and rendered in every export.
+
 To improve data quality:
 1. Request emissions reports from venue, caterer, transport providers
 2. Use actual consumption data (energy meters, travel bookings)
@@ -918,7 +917,7 @@ A: Yes, through:
 Example: 6,912 tCO2e event → Reduce to 5,000 → Offset remaining 5,000 = Carbon Neutral ✓
 
 **Q: Is data automatically updated?**
-A: Yes. 10 TinyFish agents refresh emission factors on a 12-hour cycle from official sources (grid factors, carbon prices, aviation factors, food emissions). Your calculations always use the latest data. See `TINYFISH_AGENTS.md` for the full agent roster and data sources.
+A: 10 TinyFish agents can refresh emission factors from official sources (grid factors, carbon prices, aviation factors, food emissions), with a 12-hour TTL cache. Runs are triggered by an administrator (email on the `ADMIN_EMAILS` allowlist); after a refresh, use "Recalculate all" so saved scenarios pick up the new factors. See `TINYFISH_AGENTS.md` for the full agent roster and data sources.
 
 ---
 
@@ -956,8 +955,8 @@ A: Yes! Download as:
 
 ### 🔐 Data Privacy & Security
 
-- **Authentication**: JWT tokens, secure password hashing
-- **Storage**: Encrypted database (SQLite locally, Postgres-ready for production)
+- **Authentication**: JWT tokens, bcrypt password hashing, per-IP rate limiting on auth and chat endpoints
+- **Storage**: SQLite locally, Postgres-ready for production
 - **Calculations**: All deterministic (no external API calls except OpenAI for chat)
 - **Agent data**: Emission factors are public sources, no PII collected
 - **User scenarios**: Private to authenticated user account
@@ -977,17 +976,17 @@ A: Yes! Download as:
 
 ### Implemented
 
-- Emission calculations (all 7 categories: travel, venue energy, accommodation, catering, waste, equipment, merchandise)
-- Chat AI (OpenAI function calling for natural language → structured scenario)
+- Emission calculations (all 8 categories: travel, venue energy, accommodation, catering, waste, equipment, merchandise, digital/virtual)
+- Chat AI (OpenAI function calling for natural language → structured scenario, with real financial analysis for the selected scenario)
 - Scenario CRUD (create, read, update, clone, delete) with basic and advanced modes
-- Comparison view (2+ scenarios side-by-side)
-- Financial analysis (tax savings, green incentives, ROI)
-- Compliance scoring (GHG Protocol, ISO 20121, SBTi, regional)
+- Comparison view (up to 4 scenarios side-by-side, deltas vs baseline)
+- Financial analysis (carbon tax savings, energy/catering cost savings, green incentive identification)
+- Compliance checks (GHG Protocol, ISO 20121, NZCE Measurement Methodology, event carbon-intensity benchmark, regional SGX/CSRD)
 - Offset portfolio management (browse, purchase, retire)
 - Dashboard visualizations (KPI cards, pie/bar/line/scope charts, benchmarks)
-- Data exports (PDF, Excel, JSON, CSV)
-- 10 TinyFish web agents updating emission factors and carbon prices on a 12-hour cycle
-- Authentication (JWT-based login/register, user-isolated data)
+- Data exports (PDF, Excel, JSON, CSV — all with NZCE mapping and per-category data-quality flags)
+- 10 TinyFish web agents updating emission factors and carbon prices (admin-triggered, 12-hour TTL cache)
+- Authentication (JWT-based login/register, user-isolated data, admin allowlist for agent runs)
 - Database persistence (SQLite locally, Postgres-ready)
 
 ### Partial / Future

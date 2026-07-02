@@ -29,7 +29,7 @@ npm run dev
 ```
 Visit: http://localhost:8000
 Email: your@email.com
-Password: ••••••••
+Password: •••••••• (8–72 characters)
 [Register or Login]
 ```
 
@@ -56,6 +56,7 @@ After login, you land on the **Dashboard** tab. You'll see:
 │  🔴 Catering: 12%                           │
 │  🟣 Waste: 2%                               │
 │  🩷 Equipment/Swag: 1%                      │
+│  ⚪ Digital: <1%                            │
 │                                             │
 └─────────────────────────────────────────────┘
 ```
@@ -101,6 +102,7 @@ Fill in:
 - **Accommodation**: Type, room nights
 - **Catering**: Meal type (vegan? red meat?), count
 - **Waste/Equipment**: Minimal details needed
+- **Digital**: Virtual attendees, streaming hours, app users (for hybrid/virtual events)
 
 Click **Calculate** → Results appear instantly.
 
@@ -167,19 +169,21 @@ Baseline: 1,245 tCO2e × $25 = $31,125
 After reduction: 1,015 tCO2e × $25 = $25,375
 TAX SAVINGS: $5,750
 
-INCENTIVES:
-  Green venue certification rebate: $5,000
-  Carbon neutral event badge: $2,000
-  ESG score improvement: $3,000
+ALSO IN THE TOTAL:
+  Energy cost savings (kWh reduced × regional rate)
+  Catering cost savings (meal switches)
 
-TOTAL BENEFITS: $15,750 USD
+INCENTIVES (listed for awareness — not added to the total):
+  Green venue certification programmes
+  Carbon neutral event badge
+  Sustainability reporting support
 
-OFFSET COST:
+OFFSET COST (see Carbon Credits tab):
   1,015 tCO2e × $12/tCO2e = $12,180
-
-NET BENEFIT: $3,570 saved vs baseline
-(After offset, your event is CARBON NEUTRAL ✓)
+(After offsetting the remainder, your event is CARBON NEUTRAL ✓)
 ```
+
+Note: the app deliberately shows no ROI/payback figure — event savings are one-off, so an annualized payback would be misleading.
 
 ---
 
@@ -220,10 +224,14 @@ EXPORT OPTIONS:
 
 [PDF] → Share with stakeholders (pretty charts, summary)
 [Excel] → Deep analysis (all calculations, inputs)
+[CSV] → Quick spreadsheet import (key metrics)
 [JSON] → Developer import (API integration)
 
+All formats include the NZCE 9-category mapping and
+per-category data-quality flags.
+
 Also shows:
-✓ Web scraper agent status
+✓ Web scraper agent status (refresh trigger is admin-only)
 ✓ Last emission factor updates
 ✓ Data quality scores
 ```
@@ -251,9 +259,9 @@ Also shows:
 1. **Create scenario 1** (baseline)
 2. **Clone scenario 1** → **Create scenario 2** (optimized)
 3. Edit scenario 2 with improvements
-4. Click **Compare**
-5. See side-by-side metrics
-6. Export comparison as PDF
+4. Click **Compare** on each (up to 4 scenarios)
+5. See side-by-side metrics with deltas vs your baseline
+6. Export each scenario's report (PDF/Excel/CSV/JSON)
 
 **Time: ~5 minutes**
 
@@ -307,10 +315,10 @@ Each scenario shows how you rank vs. industry:
 - "Below average" / "Best practice" = excellent!
 
 ### Tip 5: Track Agent Updates
-Emission factors update daily via web scrapers.
+Emission factors are refreshed by web agents (admin-triggered, 12-hour cache).
 - Check **Data & Exports** to see what changed
-- Old calculations are always re-calculated with latest data
-- You'll never have stale factors
+- Saved scenarios keep their stored results until you run **Recalculate all**
+- Each scenario's export records the factor version (`ef_version`) it was calculated with
 
 ---
 
@@ -348,8 +356,7 @@ SCENARIOS
 FINANCIAL
 ├─ Calculate tax savings
 ├─ View incentives
-├─ Estimate ROI
-└─ Compliance value
+└─ Energy & catering cost savings
 
 CARBON CREDITS
 ├─ Browse offset projects
@@ -360,8 +367,9 @@ CARBON CREDITS
 COMPLIANCE
 ├─ GHG Protocol score
 ├─ ISO 20121 checklist
-├─ SBTi progress
-└─ Regional regulation status
+├─ NZCE Measurement Methodology check
+├─ Event carbon-intensity benchmark
+└─ Regional regulation status (SGX / EU CSRD)
 
 DATA & EXPORTS
 ├─ Download PDF/Excel/JSON
@@ -380,7 +388,7 @@ DATA & EXPORTS
 | Can't find my scenario | Use Dashboard to see all. Search by name. |
 | Want to edit scenario | Click Edit button. Changes recalculate instantly. |
 | Export not working | Try different format. Check browser downloads. |
-| Data seems outdated | Check Data & Exports. Agents refresh daily. |
+| Data seems outdated | Ask an admin to trigger an agent refresh in Data & Exports, then run Recalculate all. |
 
 ---
 

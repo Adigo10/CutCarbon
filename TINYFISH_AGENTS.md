@@ -218,12 +218,14 @@ The `run_id` is the unique TinyFish run identifier, usable to replay or inspect 
 
 All endpoints live under `/api/agents/` (router: `app/routers/agents.py`).
 
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/api/agents/run` | Trigger all agents as a background task. Returns immediately. |
-| `GET` | `/api/agents/run/sync` | Trigger all agents synchronously. Waits for completion. |
-| `GET` | `/api/agents/status` | Per-agent status: last run time, cache validity, result summary. |
-| `GET` | `/api/agents/history` | Paginated run history (50 most recent by default). |
+| Method | Path | Access | Description |
+|---|---|---|---|
+| `POST` | `/api/agents/run` | Admin only | Trigger all agents as a background task. Returns immediately. |
+| `GET` | `/api/agents/run/sync` | Admin only | Trigger all agents synchronously. Waits for completion. |
+| `GET` | `/api/agents/status` | Authenticated | Per-agent status: last run time, cache validity, result summary. |
+| `GET` | `/api/agents/history` | Authenticated | Paginated run history (50 most recent by default). |
+
+The two run endpoints are gated by the `ADMIN_EMAILS` env allowlist (comma-separated emails; empty = nobody) because a run scrapes external sites and rewrites the emission-factor file that drives every user's calculations. They are additionally rate-limited to 2 runs per hour per IP, even for admins (`RATE_LIMIT_ENABLED=false` disables the limit). Status and history remain available to any authenticated user.
 
 The `force=true` query parameter is accepted by both run endpoints to bypass the 12-hour TTL cache.
 
@@ -255,4 +257,12 @@ The `force=true` query parameter is accepted by both run endpoints to bypass the
 | Factor value unchanged after successful run | Parsed value fell outside validation bounds | Lower/raise bounds in `_GRID_FACTOR_BOUNDS` if the source data is legitimately out of range |
 | Unit conversion producing wrong value | Source changed reporting units | Add/adjust conversion in the agent's `_parse_result()` method |
 | Agent always shows `_cache_hit: true` | Within 12-hour TTL window | Use `force=true` to bypass: `GET /api/agents/run/sync?force=true` |
+| Run endpoint returns 403 | Logged-in email not in `ADMIN_EMAILS` | Add the email to the `ADMIN_EMAILS` allowlist in `.env` and restart |
+| Run endpoint returns 429 | 2-runs-per-hour rate limit hit | Wait, or set `RATE_LIMIT_ENABLED=false` (dev/tests only) |
 | DB write fails after successful fetch | `EmissionFactorDB` upsert error | Check `DATABASE_URL` env var and ensure the `emission_factors` table exists (auto-created on startup) |
+
+---
+
+## Future Work
+
+- **FX-rate agent**: currency conversion for live carbon prices (EUR/GBP/SGD → USD) still uses the static committed exchange rates in `tax_incentives.json`, annotated with their `fx_as_of` date. A TinyFish agent that refreshes FX rates is future work; until then, USD figures derived from live prices are converted at those static rates (and labeled as such in savings descriptions).
