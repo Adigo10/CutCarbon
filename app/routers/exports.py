@@ -557,7 +557,96 @@ def _scenario_report_pdf(report: ScenarioReportPayload) -> bytes:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import cm
-    from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    from reportlab.pdfgen import canvas as pdfcanvas
+    from reportlab.platypus import (
+        KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
+    )
+
+    page_width, page_height = A4
+    brand_dark = colors.HexColor("#115e59")
+    brand_green = colors.HexColor("#22c55e")
+    ink = colors.HexColor("#111827")
+    muted = colors.HexColor("#6b7280")
+    copyright_year = (report.exported_at or "")[:4] or "2026"
+
+    def _draw_logo(c, x, y, size):
+        # Native redraw of the brand mark (frontend/public/favicon.svg): teal->green
+        # gradient rounded square with a white "C". No SVG dependency needed.
+        c.saveState()
+        clip = c.beginPath()
+        clip.roundRect(x, y, size, size, size * 0.25)
+        c.clipPath(clip, stroke=0, fill=0)
+        c.linearGradient(x, y + size, x + size, y, (brand_dark, brand_green))
+        c.restoreState()
+        c.saveState()
+        c.setFillColor(colors.white)
+        c.setFont("Helvetica-Bold", size * 0.62)
+        c.drawCentredString(x + size / 2, y + size * 0.26, "C")
+        c.restoreState()
+
+    def _decorate_page(c, page_num, total_pages):
+        """Branded header + copyright footer drawn on every page."""
+        c.saveState()
+        left = 1.5 * cm
+        right = page_width - 1.5 * cm
+
+        if page_num == 1:
+            logo_size = 1.0 * cm
+            logo_y = page_height - 1.9 * cm
+            _draw_logo(c, left, logo_y, logo_size)
+            c.setFillColor(ink)
+            c.setFont("Helvetica-Bold", 13)
+            c.drawString(left + logo_size + 0.35 * cm, logo_y + 0.52 * cm, "CutCarbon")
+            c.setFillColor(muted)
+            c.setFont("Helvetica", 8.5)
+            c.drawString(
+                left + logo_size + 0.35 * cm, logo_y + 0.12 * cm,
+                "EventCarbon Co-Pilot — Event Carbon Footprint Report",
+            )
+            rule_y = page_height - 2.15 * cm
+        else:
+            logo_size = 0.55 * cm
+            logo_y = page_height - 1.35 * cm
+            _draw_logo(c, left, logo_y, logo_size)
+            c.setFillColor(muted)
+            c.setFont("Helvetica", 8)
+            c.drawString(left + logo_size + 0.25 * cm, logo_y + 0.16 * cm, report.report_title)
+            rule_y = page_height - 1.55 * cm
+
+        c.setStrokeColor(colors.HexColor("#1A9E6E"))
+        c.setLineWidth(1)
+        c.line(left, rule_y, right, rule_y)
+
+        c.setLineWidth(0.8)
+        c.line(left, 1.55 * cm, right, 1.55 * cm)
+        c.setFillColor(muted)
+        c.setFont("Helvetica", 7.5)
+        c.drawString(left, 1.15 * cm, f"© {copyright_year} CutCarbon · EventCarbon Co-Pilot. All rights reserved.")
+        c.drawString(
+            left, 0.78 * cm,
+            "Confidential — prepared for the event organizer and its auditors. Not a third-party verification statement.",
+        )
+        c.drawRightString(right, 1.15 * cm, f"Page {page_num} of {total_pages}")
+        c.restoreState()
+
+    class _ReportCanvas(pdfcanvas.Canvas):
+        """Buffers pages so the footer can state 'Page X of Y'."""
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._page_states = []
+
+        def showPage(self):
+            self._page_states.append(dict(self.__dict__))
+            self._startPage()
+
+        def save(self):
+            total = len(self._page_states)
+            for index, state in enumerate(self._page_states, start=1):
+                self.__dict__.update(state)
+                _decorate_page(self, index, total)
+                super().showPage()
+            super().save()
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -565,8 +654,11 @@ def _scenario_report_pdf(report: ScenarioReportPayload) -> bytes:
         pagesize=A4,
         leftMargin=1.5 * cm,
         rightMargin=1.5 * cm,
-        topMargin=1.5 * cm,
-        bottomMargin=1.5 * cm,
+        topMargin=2.5 * cm,
+        bottomMargin=2.1 * cm,
+        title=report.report_title,
+        author="CutCarbon EventCarbon Co-Pilot",
+        subject="Event carbon footprint report",
     )
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name="ReportTitle", parent=styles["Title"], textColor=colors.HexColor("#1A9E6E")))
@@ -718,7 +810,54 @@ def _scenario_report_pdf(report: ScenarioReportPayload) -> bytes:
         for paragraph in assumption_paragraphs[:8]:
             story.extend([Spacer(1, 0.1 * cm), paragraph])
 
-    doc.build(story)
+    # Sign-off block: signature lines for the report preparer and approver.
+    sig_table = Table(
+        [
+            [Paragraph("<b>Prepared by</b>", styles["BodySmall"]),
+             Paragraph("<b>Approved by</b>", styles["BodySmall"])],
+            ["", ""],
+            ["Signature", "Signature"],
+            ["Name / Title", "Name / Title"],
+            ["Date", "Date"],
+        ],
+        colWidths=[7.5 * cm, 7.5 * cm],
+        rowHeights=[None, 1.2 * cm, None, None, None],
+    )
+    sig_table.setStyle(
+        TableStyle(
+            [
+                ("LINEBELOW", (0, 1), (0, 1), 0.7, ink),
+                ("LINEBELOW", (1, 1), (1, 1), 0.7, ink),
+                ("FONTNAME", (0, 2), (-1, -1), "Helvetica"),
+                ("FONTSIZE", (0, 2), (-1, -1), 8),
+                ("TEXTCOLOR", (0, 2), (-1, -1), muted),
+                ("TOPPADDING", (0, 2), (-1, 2), 2),
+                ("BOTTOMPADDING", (0, 2), (-1, 2), 10),
+                ("BOTTOMPADDING", (0, 3), (-1, 3), 10),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 36),
+                ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
+            ]
+        )
+    )
+    story.append(
+        KeepTogether(
+            [
+                Spacer(1, 0.7 * cm),
+                Paragraph("Sign-off", styles["SectionHeading"]),
+                Spacer(1, 0.25 * cm),
+                Paragraph(
+                    "This report was generated by CutCarbon EventCarbon Co-Pilot from the scenario "
+                    "inputs and emission factors recorded above.",
+                    styles["BodySmall"],
+                ),
+                Spacer(1, 0.3 * cm),
+                sig_table,
+            ]
+        )
+    )
+
+    doc.build(story, canvasmaker=_ReportCanvas)
     return buf.getvalue()
 
 
