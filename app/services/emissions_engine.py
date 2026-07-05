@@ -3,6 +3,7 @@ Deterministic emissions calculation engine.
 Implements GHG Protocol Scope 1/2/3 methodology for events.
 """
 import json
+import logging
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
@@ -12,10 +13,36 @@ from app.models.schemas import (
     BenchmarkComparison, TravelMode, TravelClass, GridRegion, ScenarioMode
 )
 
+logger = logging.getLogger(__name__)
+
 _DATA_DIR = Path(__file__).parent.parent / "data"
 
-with open(_DATA_DIR / "emission_factors.json") as f:
+with open(_DATA_DIR / "emission_factors.json", encoding="utf-8") as f:
     EF = json.load(f)
+
+from app.services.data_files import TAX_DATA as _TAX_DATA  # noqa: E402
+from app.utils.time import utcnow
+
+# Single source for the offset price used in suggestions (Gold Standard / VCS average).
+_OFFSET_PRICE_USD = (
+    _TAX_DATA.get("reduction_action_savings", {})
+    .get("carbon_offset_purchase", {})
+    .get("cost_per_tco2e_usd", 15.0)
+)
+
+
+def reload_factors() -> None:
+    """Re-read emission_factors.json into the shared EF dict IN PLACE.
+
+    The in-place update (clear + update) is deliberate: other modules import this
+    same dict object (e.g. ``from app.services.emissions_engine import EF``), so
+    rebinding the name would not propagate. Mutating in place means a TinyFish
+    refresh is reflected by the very next calculation without a process restart.
+    """
+    with open(_DATA_DIR / "emission_factors.json", encoding="utf-8") as f:
+        fresh = json.load(f)
+    EF.clear()
+    EF.update(fresh)
 
 
 def _travel_emissions(segments, attendees: int) -> tuple[float, dict]:
@@ -32,20 +59,50 @@ def _travel_emissions(segments, attendees: int) -> tuple[float, dict]:
     else:
         for seg in segments:
             mode = seg.mode.value
-            ef_data = EF["travel"].get(mode, {})
-            if isinstance(ef_data, dict):
-                if seg.travel_class == TravelClass.ECONOMY:
-                    ef = ef_data.get("economy", ef_data.get("factor", 0.2))
-                elif seg.travel_class == TravelClass.BUSINESS:
-                    ef = ef_data.get("business", ef_data.get("factor", 0.2) * 2)
+            ef_data = EF["travel"].get(mode)
+            if not isinstance(ef_data, dict):
+                logger.error("No emission factor for travel mode %r; segment excluded", mode)
+                notes[f"travel_{mode}"] = f"No emission factor for '{mode}'; segment excluded from total"
+                continue
+            if "economy" in ef_data:
+                # Cabin-class factor table (flights). If the requested class has no
+                # published factor (e.g. short-haul first), fall back to the highest
+                # class available rather than inventing a multiplier.
+                requested = seg.travel_class.value
+                if requested in ef_data:
+                    ef = ef_data[requested]
                 else:
-                    ef = ef_data.get("first", ef_data.get("factor", 0.2) * 3)
+                    fallback = "business" if "business" in ef_data else "economy"
+                    ef = ef_data[fallback]
+                    notes[f"travel_{mode}_class"] = (
+                        f"No published {requested}-class factor for {mode}; used {fallback}"
+                    )
+            elif "factor" in ef_data:
+                # Single-factor mode (rail, road, ferry, private jet): cabin class
+                # does not change the per-passenger-km factor.
+                ef = ef_data["factor"]
             else:
-                ef = ef_data if isinstance(ef_data, (int, float)) else 0.1
-            seg_kg = seg.attendees * seg.distance_km * ef
-            total_kg += seg_kg
+                logger.error("Malformed emission factor for travel mode %r; segment excluded", mode)
+                notes[f"travel_{mode}"] = f"No usable emission factor for '{mode}'; segment excluded from total"
+                continue
+            total_kg += seg.attendees * seg.distance_km * ef
 
     return total_kg, notes
+
+
+def estimate_venue_kwh(venue_energy, attendees: int, event_days: int) -> float:
+    """Electricity consumption (kWh) implied by a venue-energy input.
+
+    Single source for the kWh derivation shared by _venue_energy_emissions and by
+    financial back-calculations: actual kWh when provided, else area proxy, else
+    attendee proxy.
+    """
+    if venue_energy is not None:
+        if venue_energy.kwh_consumed is not None:
+            return venue_energy.kwh_consumed
+        if venue_energy.venue_area_m2 is not None:
+            return venue_energy.venue_area_m2 * event_days * 30
+    return attendees * 2.0 * event_days * 30
 
 
 def _venue_energy_emissions(venue_energy, attendees: int, event_days: int) -> tuple[float, float, dict]:
@@ -55,21 +112,20 @@ def _venue_energy_emissions(venue_energy, attendees: int, event_days: int) -> tu
 
     if venue_energy is None:
         proxy_area = attendees * 2.0
-        total_kg = proxy_area * event_days * EF["venue_energy"]["proxy_factors"]["conference_centre_per_m2_day"]
-        notes["venue"] = f"Proxy: {proxy_area}m2 at 2.8 kg CO2e/m2/day"
+        proxy_factor = EF["venue_energy"]["proxy_factors"]["conference_centre_per_m2_day"]
+        total_kg = proxy_area * event_days * proxy_factor
+        notes["venue"] = f"Proxy: {proxy_area}m2 at {proxy_factor} kg CO2e/m2/day"
         return total_kg, scope1_kg, notes
 
     grid_key = venue_energy.grid_region.value
     grid_ef = EF["venue_energy"]["grids"].get(grid_key, EF["venue_energy"]["grids"]["global_average"])["factor"]
 
-    if venue_energy.kwh_consumed:
-        kwh = venue_energy.kwh_consumed
+    kwh = estimate_venue_kwh(venue_energy, attendees, event_days)
+    if venue_energy.kwh_consumed is not None:
         notes["venue"] = f"Actual kWh: {kwh:.0f}"
-    elif venue_energy.venue_area_m2:
-        kwh = venue_energy.venue_area_m2 * event_days * 30
+    elif venue_energy.venue_area_m2 is not None:
         notes["venue"] = f"Proxy kWh from area: {kwh:.0f}"
     else:
-        kwh = attendees * 2.0 * event_days * 30
         notes["venue"] = f"Proxy kWh from attendees: {kwh:.0f}"
 
     effective_ef = grid_ef * (1 - venue_energy.renewable_pct / 100)
@@ -161,15 +217,16 @@ def _waste_emissions(waste, attendees: int) -> tuple[float, dict]:
     return total_kg, notes
 
 
-def _equipment_emissions(equipment, event_days: int) -> tuple[float, float, float, dict]:
-    """Returns total kg, scope1 kg (generators), scope2 kg (electricity-based), notes."""
+def _equipment_emissions(equipment, event_days: int) -> tuple[float, float, float, float, dict]:
+    """Returns total kg, scope1 kg (generators), scope2 kg (electricity), scope3 kg (stage+freight), notes."""
     notes = {}
     if equipment is None:
-        return 0.0, 0.0, 0.0, notes
+        return 0.0, 0.0, 0.0, 0.0, notes
 
     eq = EF.get("equipment", {})
     scope1_kg = 0.0
     scope2_kg = 0.0
+    scope3_kg = 0.0
 
     # Stage
     stage_kg = equipment.stage_m2 * event_days * eq.get("stage_per_m2_per_day", {}).get("factor", 0.5)
@@ -194,15 +251,65 @@ def _equipment_emissions(equipment, event_days: int) -> tuple[float, float, floa
     gen_kg = equipment.generator_hours * eq.get("generator_diesel_per_hour", {}).get("factor", 8.5)
     scope1_kg += gen_kg
 
-    # Freight (Scope 3)
+    # Freight (Scope 3 — upstream transport) and stage build (Scope 3 — purchased materials)
     freight_kg = equipment.freight_tonne_km * eq.get("freight_truck_per_km", {}).get("factor", 0.107)
+    scope3_kg = stage_kg + freight_kg
 
-    total_kg = stage_kg + lighting_kg + sound_kg + led_kg + proj_kg + gen_kg + freight_kg
+    total_kg = scope1_kg + scope2_kg + scope3_kg
 
     if total_kg > 0:
         notes["equipment"] = f"Stage {equipment.stage_m2}m2, lighting {equipment.lighting_days}d, sound {equipment.sound_system_days}d, LED {equipment.led_screen_m2}m2, gen {equipment.generator_hours}h"
+    if scope2_kg > 0:
+        notes["equipment_electricity"] = (
+            "Equipment electricity uses global-average grid factors, not the venue grid."
+        )
 
-    return total_kg, scope1_kg, scope2_kg, notes
+    return total_kg, scope1_kg, scope2_kg, scope3_kg, notes
+
+
+def _digital_emissions(digital, attendees: int, event_days: int, event_type: str) -> tuple[float, dict]:
+    """Digital/virtual emissions: streaming, livestream production, event app, email.
+
+    All Scope 3. Proxy fires only for virtual/hybrid events with no digital input
+    (100% / 30% of attendees streaming 6h per day respectively).
+    """
+    notes = {}
+    dig = EF.get("digital", {})
+    stream_ef = dig.get("virtual_attendee_per_hour", {}).get("factor", 0.036)
+
+    if digital is None:
+        if event_type == "virtual_event":
+            virtual_attendees = attendees
+        elif event_type == "hybrid_event":
+            virtual_attendees = round(attendees * 0.3)
+        else:
+            return 0.0, notes
+        total_kg = virtual_attendees * 6.0 * event_days * stream_ef
+        notes["digital"] = f"Proxy: {virtual_attendees} virtual attendees streaming 6h/day"
+        return total_kg, notes
+
+    total_kg = digital.virtual_attendees * digital.streaming_hours_per_day * event_days * stream_ef
+
+    if digital.livestream_production_hours > 0:
+        # Factor is per hour per 1000 viewers (encoding + CDN delivery).
+        production_ef = dig.get("livestream_per_hour", {}).get("factor", 4.5)
+        total_kg += digital.livestream_production_hours * production_ef * max(digital.virtual_attendees, 1) / 1000
+
+    if digital.event_app_users > 0:
+        total_kg += digital.event_app_users * event_days * dig.get("event_app_per_user", {}).get("factor", 0.008)
+
+    if digital.emails_sent > 0:
+        total_kg += digital.emails_sent / 1000 * dig.get("email_campaign_per_1000", {}).get("factor", 0.6)
+
+    if total_kg > 0:
+        parts = [f"{digital.virtual_attendees} virtual attendees x {digital.streaming_hours_per_day:g}h/day"]
+        if digital.event_app_users:
+            parts.append(f"{digital.event_app_users} app users")
+        if digital.emails_sent:
+            parts.append(f"{digital.emails_sent} emails")
+        notes["digital"] = ", ".join(parts)
+
+    return total_kg, notes
 
 
 def _swag_emissions(swag, attendees: int) -> tuple[float, dict]:
@@ -245,8 +352,22 @@ def _swag_emissions(swag, attendees: int) -> tuple[float, dict]:
     return total_kg, notes
 
 
-def get_benchmark_comparison(event_type: str, per_attendee_day: float) -> Optional[BenchmarkComparison]:
-    """Compare against industry benchmarks."""
+# Benchmark bands keyed per *whole-event* attendee (not per attendee-day). For these
+# event types the comparison must use the per-attendee value, otherwise a multi-day
+# event is divided by days and looks artificially better than the band.
+_PER_ATTENDEE_BENCHMARK_TYPES = {"gala_dinner", "sporting_event", "wedding"}
+
+
+def get_benchmark_comparison(
+    event_type: str,
+    per_attendee_day: float,
+    per_attendee: Optional[float] = None,
+) -> Optional[BenchmarkComparison]:
+    """Compare against industry benchmarks.
+
+    Most bands are per attendee-day; gala/sporting/wedding bands are per whole-event
+    attendee, so we compare those against ``per_attendee`` when it is provided.
+    """
     benchmarks = EF.get("benchmarks", {})
     type_map = {
         "conference": "conference_per_attendee_day",
@@ -262,6 +383,12 @@ def get_benchmark_comparison(event_type: str, per_attendee_day: float) -> Option
     bm_key = type_map.get(event_type)
     if not bm_key or bm_key not in benchmarks:
         return None
+
+    # Pick the comparison basis that matches the band's unit.
+    compare_value = per_attendee_day
+    if event_type in _PER_ATTENDEE_BENCHMARK_TYPES and per_attendee is not None:
+        compare_value = per_attendee
+    per_attendee_day = compare_value
 
     bm = benchmarks[bm_key]
     typical = bm["typical"]
@@ -288,11 +415,6 @@ def get_benchmark_comparison(event_type: str, per_attendee_day: float) -> Option
     )
 
 
-def _get_benchmark(event_type: str, per_attendee_day: float) -> Optional[BenchmarkComparison]:
-    """Backward-compatible alias for older imports."""
-    return get_benchmark_comparison(event_type, per_attendee_day)
-
-
 def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
     """Main entry point: calculate all emissions for a scenario."""
     attendees = scenario.attendees
@@ -304,36 +426,60 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
     scope2_total = 0.0
     scope3_total = 0.0
 
+    # Fully virtual events get NO physical proxies — without this gate the travel
+    # proxy alone (70% long-haul flights) would dwarf a virtual event's real
+    # footprint. Explicitly provided inputs (e.g. a studio venue) are still honored.
+    is_virtual = scenario.event_type.value == "virtual_event"
+
     # Travel (Scope 3)
-    travel_kg, t_notes = _travel_emissions(scenario.travel_segments, attendees)
+    if is_virtual and not scenario.travel_segments:
+        travel_kg, t_notes = 0.0, {"travel": "Virtual event: no physical travel assumed"}
+    else:
+        travel_kg, t_notes = _travel_emissions(scenario.travel_segments, attendees)
     scope3_total += travel_kg
 
     # Venue energy (Scope 2, with potential Scope 1 from generators)
-    energy_kg, venue_s1_kg, e_notes = _venue_energy_emissions(scenario.venue_energy, attendees, days)
+    if is_virtual and scenario.venue_energy is None:
+        energy_kg, venue_s1_kg, e_notes = 0.0, 0.0, {"venue": "Virtual event: no physical venue assumed"}
+    else:
+        energy_kg, venue_s1_kg, e_notes = _venue_energy_emissions(scenario.venue_energy, attendees, days)
     scope2_total += energy_kg
     scope1_total += venue_s1_kg
 
     # Accommodation (Scope 3)
-    accom_kg, a_notes = _accommodation_emissions(scenario.accommodation, attendees, days)
+    if is_virtual and scenario.accommodation is None:
+        accom_kg, a_notes = 0.0, {}
+    else:
+        accom_kg, a_notes = _accommodation_emissions(scenario.accommodation, attendees, days)
     scope3_total += accom_kg
 
     # Catering (Scope 3)
-    catering_kg, c_notes = _catering_emissions(scenario.catering, attendees, days)
+    if is_virtual and scenario.catering is None:
+        catering_kg, c_notes = 0.0, {}
+    else:
+        catering_kg, c_notes = _catering_emissions(scenario.catering, attendees, days)
     scope3_total += catering_kg
 
     # Waste (Scope 3)
-    waste_kg, w_notes = _waste_emissions(scenario.waste, attendees)
+    if is_virtual and scenario.waste is None:
+        waste_kg, w_notes = 0.0, {}
+    else:
+        waste_kg, w_notes = _waste_emissions(scenario.waste, attendees)
     scope3_total += waste_kg
 
-    # Equipment (Scope 1 generators + Scope 2 electricity + Scope 3 freight)
-    equip_kg, equip_s1, equip_s2, eq_notes = _equipment_emissions(scenario.equipment, days)
+    # Equipment (Scope 1 generators + Scope 2 electricity + Scope 3 stage/freight)
+    equip_kg, equip_s1, equip_s2, equip_s3, eq_notes = _equipment_emissions(scenario.equipment, days)
     scope1_total += equip_s1
     scope2_total += equip_s2
-    scope3_total += max(0, equip_kg - equip_s1 - equip_s2)  # freight portion (clamped)
+    scope3_total += equip_s3
 
     # Swag (Scope 3)
     swag_kg, sw_notes = _swag_emissions(scenario.swag, attendees)
     scope3_total += swag_kg
+
+    # Digital / virtual (Scope 3)
+    digital_kg, d_notes = _digital_emissions(scenario.digital, attendees, days, scenario.event_type.value)
+    scope3_total += digital_kg
 
     assumptions.update(t_notes)
     assumptions.update(e_notes)
@@ -342,23 +488,68 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
     assumptions.update(w_notes)
     assumptions.update(eq_notes)
     assumptions.update(sw_notes)
+    assumptions.update(d_notes)
 
-    total_kg = travel_kg + energy_kg + accom_kg + catering_kg + waste_kg + equip_kg + swag_kg
+    total_kg = travel_kg + energy_kg + accom_kg + catering_kg + waste_kg + equip_kg + swag_kg + digital_kg
     total_tco2e = total_kg / 1000
     per_attendee = total_tco2e / attendees if attendees > 0 else 0
     per_attendee_day = per_attendee / days if days > 0 else per_attendee
 
-    # Data quality flag
-    has_actual_data = any([
-        scenario.travel_segments,
-        scenario.venue_energy and (scenario.venue_energy.kwh_consumed or scenario.venue_energy.venue_area_m2),
-        scenario.accommodation,
-        scenario.catering,
-        scenario.waste,
-        scenario.equipment,
-        scenario.swag,
-    ])
-    quality = "partial" if has_actual_data else "estimated"
+    # Data quality flag. A populated venue_energy (even grid + renewable only) counts
+    # as real input. "verified" is reachable only when the scenario is in ADVANCED mode
+    # AND all core categories carry measured inputs — i.e. complete primary data, not
+    # proxy estimates. (This is a completeness tier, not a third-party assurance claim.)
+    core_provided = {
+        "travel": bool(scenario.travel_segments),
+        "venue_energy": scenario.venue_energy is not None,
+        "accommodation": scenario.accommodation is not None,
+        "catering": scenario.catering is not None,
+        "waste": scenario.waste is not None,
+    }
+    has_actual_data = (
+        any(core_provided.values())
+        or scenario.equipment is not None
+        or scenario.swag is not None
+        or scenario.digital is not None
+    )
+    all_core_provided = all(core_provided.values())
+
+    # Per-category primary-vs-proxy disclosure (NZCE/TRACE expect this). Persisted in
+    # assumptions so it flows into every export's Assumptions section automatically.
+    def _quality(provided: bool, gated: bool = False, optional: bool = False) -> str:
+        if provided:
+            return "actual"
+        if gated:
+            return "not applicable (virtual event)"
+        return "not provided" if optional else "proxy"
+
+    assumptions["category_data_quality"] = {
+        "travel": _quality(core_provided["travel"], gated=is_virtual),
+        "venue_energy": _quality(core_provided["venue_energy"], gated=is_virtual),
+        "accommodation": _quality(core_provided["accommodation"], gated=is_virtual),
+        "catering": _quality(core_provided["catering"], gated=is_virtual),
+        "waste": _quality(core_provided["waste"], gated=is_virtual),
+        "equipment": _quality(scenario.equipment is not None, optional=True),
+        "swag": _quality(scenario.swag is not None, optional=True),
+        "digital": (
+            "actual" if scenario.digital is not None
+            else ("proxy" if scenario.event_type.value in ("virtual_event", "hybrid_event") else "not provided")
+        ),
+    }
+
+    if all_core_provided and scenario.mode == ScenarioMode.ADVANCED:
+        quality = "verified"
+    elif has_actual_data:
+        quality = "partial"
+    else:
+        quality = "estimated"
+
+    if scenario.mode == ScenarioMode.ADVANCED and not all_core_provided:
+        missing = [k for k, v in core_provided.items() if not v]
+        assumptions["data_quality"] = (
+            "Advanced mode: some categories still use proxy estimates "
+            f"({', '.join(missing)})."
+        )
 
     scopes = ScopeBreakdown(
         scope1_tco2e=round(scope1_total / 1000, 4),
@@ -374,6 +565,7 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
         materials_waste_tco2e=round(waste_kg / 1000, 4),
         equipment_tco2e=round(equip_kg / 1000, 4),
         swag_tco2e=round(swag_kg / 1000, 4),
+        digital_tco2e=round(digital_kg / 1000, 4),
         total_tco2e=round(total_tco2e, 4),
         per_attendee_tco2e=round(per_attendee, 4),
         per_attendee_day_tco2e=round(per_attendee_day, 4),
@@ -382,7 +574,7 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
     )
 
     # Benchmark
-    benchmark = get_benchmark_comparison(scenario.event_type.value, per_attendee_day)
+    benchmark = get_benchmark_comparison(scenario.event_type.value, per_attendee_day, per_attendee)
 
     return ScenarioResult(
         name=scenario.name,
@@ -394,7 +586,7 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
         emissions=emissions,
         benchmark=benchmark,
         assumptions=assumptions,
-        created_at=datetime.utcnow().isoformat(),
+        created_at=utcnow().isoformat(),
     )
 
 
@@ -418,6 +610,7 @@ def build_factors_snapshot(scenario: EventScenarioInput) -> dict:
     return {
         "travel_long_haul_economy_kg_per_pkm": EF["travel"]["long_haul_flight"]["economy"],
         "travel_short_haul_economy_kg_per_pkm": EF["travel"]["short_haul_flight"]["economy"],
+        "travel_short_haul_business_kg_per_pkm": EF["travel"]["short_haul_flight"]["business"],
         "travel_car_petrol_kg_per_pkm": EF["travel"]["car_petrol"]["factor"],
         "venue_grid_kg_per_kwh": grid_ef,
         "venue_grid_region": grid_key,
@@ -427,149 +620,131 @@ def build_factors_snapshot(scenario: EventScenarioInput) -> dict:
         "catering_type": catering_type,
         "waste_landfill_kg_per_kg": EF["materials_waste"]["general_landfill"]["factor"],
         "ef_version": EF.get("version", "unknown"),
-        "captured_at": datetime.utcnow().isoformat(),
+        "captured_at": utcnow().isoformat(),
     }
 
 
-def get_reduction_suggestions(result: ScenarioResult, target_pct: float = 30.0) -> list[dict]:
-    """Generate ranked reduction suggestions to hit target % reduction."""
+def get_reduction_suggestions(
+    result: ScenarioResult,
+    target_pct: float = 30.0,
+    catering_type: Optional[str] = None,
+    equipment_input: Optional[dict] = None,
+) -> list[dict]:
+    """Generate ranked reduction suggestions as a realistic portfolio.
+
+    Each lever's saving is drawn from the remaining (un-claimed) emissions in its
+    category and clamped to what is left, so the suggested reductions can never sum
+    to more than the category — or the event — total. Carbon offsets are returned as
+    a separate neutralization entry (``is_neutralization=True``) appended after the
+    ranked reductions and applied to the *residual* after reductions, so buying
+    credits never ranks among (or inflates) the actual reductions.
+    """
     emissions = result.emissions
-    suggestions = []
+    attendees = result.attendees
+    days = result.event_days
 
-    # Travel is usually biggest lever
-    if emissions.travel_tco2e > 0:
-        suggestions.append({
-            "action": "enable_hybrid",
-            "label": "Enable hybrid/virtual attendance (30% remote)",
-            "co2e_saved_tco2e": round(emissions.travel_tco2e * 0.3, 3),
-            "estimated_cost_usd": result.attendees * 0.3 * 30,
-            "category": "travel",
-            "difficulty": "medium",
-            "scope": 3,
-        })
-        suggestions.append({
-            "action": "shift_to_rail",
-            "label": "Shift short-haul flights to rail (where <4h journey)",
-            "co2e_saved_tco2e": round(emissions.travel_tco2e * 0.15, 3),
-            "estimated_cost_usd": -result.attendees * 0.2 * 15,
-            "category": "travel",
-            "difficulty": "hard",
-            "scope": 3,
-        })
-        suggestions.append({
-            "action": "shuttle_bus",
-            "label": "Provide shuttle buses from airports/stations to venue",
-            "co2e_saved_tco2e": round(emissions.travel_tco2e * 0.05, 3),
-            "estimated_cost_usd": result.attendees * 5,
-            "category": "travel",
-            "difficulty": "easy",
-            "scope": 3,
-        })
+    # Remaining reducible budget per category (tCO2e).
+    remaining = {
+        "travel": max(0.0, emissions.travel_tco2e),
+        "catering": max(0.0, emissions.catering_tco2e),
+        "energy": max(0.0, emissions.venue_energy_tco2e),
+        "equipment": max(0.0, emissions.equipment_tco2e),
+        "accommodation": max(0.0, emissions.accommodation_tco2e),
+        "waste": max(0.0, emissions.materials_waste_tco2e),
+        "swag": max(0.0, emissions.swag_tco2e),
+        "digital": max(0.0, emissions.digital_tco2e),
+    }
 
-    # Catering switch
-    if emissions.catering_tco2e > 0:
-        meals = result.attendees * result.event_days * 2
-        co2e_saved = meals * 2.1 / 1000
-        suggestions.append({
-            "action": "vegetarian_menu",
-            "label": "Switch to fully vegetarian menu",
-            "co2e_saved_tco2e": round(co2e_saved, 3),
-            "estimated_cost_usd": -meals * 2.5,
-            "category": "catering",
-            "difficulty": "easy",
-            "scope": 3,
-        })
-        suggestions.append({
-            "action": "local_seasonal",
-            "label": "Source local and seasonal ingredients",
-            "co2e_saved_tco2e": round(emissions.catering_tco2e * 0.15, 3),
-            "estimated_cost_usd": meals * 1.5,
-            "category": "catering",
-            "difficulty": "medium",
-            "scope": 3,
+    reductions: list[dict] = []
+
+    def add(action, label, category, raw_saved, cost, difficulty, scope):
+        cap = remaining.get(category)
+        saved = raw_saved
+        if cap is not None:
+            saved = min(raw_saved, cap)
+            remaining[category] = max(0.0, cap - saved)
+        if saved <= 0:
+            return
+        reductions.append({
+            "action": action,
+            "label": label,
+            "co2e_saved_tco2e": round(saved, 3),
+            "estimated_cost_usd": round(cost, 0),
+            "category": category,
+            "difficulty": difficulty,
+            "scope": scope,
         })
 
-    # Renewable energy
-    if emissions.venue_energy_tco2e > 0:
-        suggestions.append({
-            "action": "renewable_energy",
-            "label": "Switch venue to 100% renewable energy tariff",
-            "co2e_saved_tco2e": round(emissions.venue_energy_tco2e, 3),
-            "estimated_cost_usd": result.attendees * result.event_days * 2,
-            "category": "energy",
-            "difficulty": "easy",
-            "scope": 2,
-        })
+    # Travel — levers share the (clamped) travel budget, so they can't sum past 100%.
+    if remaining["travel"] > 0:
+        add("enable_hybrid", "Enable hybrid/virtual attendance (30% remote)",
+            "travel", emissions.travel_tco2e * 0.30, attendees * 0.3 * 30, "medium", 3)
+        add("shift_to_rail", "Shift short-haul flights to rail (where <4h journey)",
+            "travel", emissions.travel_tco2e * 0.15, -attendees * 0.2 * 15, "hard", 3)
+        add("shuttle_bus", "Provide shuttle buses from airports/stations to venue",
+            "travel", emissions.travel_tco2e * 0.05, attendees * 5, "easy", 3)
 
-    # Equipment
-    if emissions.equipment_tco2e > 0:
-        suggestions.append({
-            "action": "led_lighting",
-            "label": "Switch to LED lighting (40% energy reduction)",
-            "co2e_saved_tco2e": round(emissions.equipment_tco2e * 0.4, 3),
-            "estimated_cost_usd": 500 * result.event_days,
-            "category": "equipment",
-            "difficulty": "easy",
-            "scope": 2,
-        })
+    # Catering — vegetarian and local/seasonal are mutually exclusive (take the bigger
+    # lever). Skip the vegetarian switch entirely when the menu is already plant-based.
+    if remaining["catering"] > 0:
+        already_low = (catering_type or "") in {"vegetarian_meal", "vegan_meal", "local_organic"}
+        if already_low:
+            add("local_seasonal", "Source local and seasonal ingredients",
+                "catering", emissions.catering_tco2e * 0.15, attendees * days * 2 * 1.5, "medium", 3)
+        else:
+            add("vegetarian_menu", "Switch to a fully vegetarian menu",
+                "catering", emissions.catering_tco2e * 0.55, -attendees * days * 2 * 2.5, "easy", 3)
+
+    # Renewable energy tariff zeroes purchased-electricity (market-based) emissions.
+    if remaining["energy"] > 0:
+        add("renewable_energy", "Switch venue to 100% renewable energy tariff",
+            "energy", emissions.venue_energy_tco2e, attendees * days * 2, "easy", 2)
+
+    # Equipment — the LED retrofit applies only to the lighting-electricity share,
+    # never to the generators or freight also bundled in equipment_tco2e.
+    if remaining["equipment"] > 0 and equipment_input:
+        lighting_days = equipment_input.get("lighting_days") or 0
+        lighting_ef = EF.get("equipment", {}).get("lighting_rig_per_day", {}).get("factor", 45.0)
+        lighting_tco2e = lighting_days * lighting_ef / 1000
+        if lighting_tco2e > 0:
+            add("led_lighting", "Switch to LED lighting (40% lighting-energy reduction)",
+                "equipment", lighting_tco2e * 0.40, 500 * days, "easy", 2)
 
     # Accommodation
-    if emissions.accommodation_tco2e > 0:
-        suggestions.append({
-            "action": "eco_accommodation",
-            "label": "Choose green-certified hotels (eco-lodge / green mark)",
-            "co2e_saved_tco2e": round(emissions.accommodation_tco2e * 0.40, 3),
-            "estimated_cost_usd": 0,
-            "category": "accommodation",
-            "difficulty": "medium",
-            "scope": 3,
-        })
+    if remaining["accommodation"] > 0:
+        add("eco_accommodation", "Choose green-certified hotels (eco-lodge / green mark)",
+            "accommodation", emissions.accommodation_tco2e * 0.40, 0, "medium", 3)
 
-    # Digital materials
-    suggestions.append({
-        "action": "digital_materials",
-        "label": "Replace printed materials with digital (app/QR)",
-        "co2e_saved_tco2e": round(result.attendees * 0.00025, 3),
-        "estimated_cost_usd": -result.attendees * 2.0,
-        "category": "waste",
-        "difficulty": "easy",
-        "scope": 3,
-    })
+    # Waste — digital materials + zero-waste both draw from the waste budget.
+    if remaining["waste"] > 0:
+        add("digital_materials", "Replace printed materials with digital (app/QR)",
+            "waste", attendees * 0.00025, -attendees * 2.0, "easy", 3)
+        add("zero_waste", "Zero-waste catering (compost + eliminate single-use)",
+            "waste", attendees * 0.0008 * days, attendees * 1.5, "medium", 3)
 
-    # Sustainable swag
-    if emissions.swag_tco2e > 0:
-        suggestions.append({
-            "action": "sustainable_swag",
-            "label": "Switch to recycled materials or digital-only swag",
-            "co2e_saved_tco2e": round(emissions.swag_tco2e * 0.6, 3),
-            "estimated_cost_usd": -result.attendees * 3,
-            "category": "swag",
+    # Swag
+    if remaining["swag"] > 0:
+        add("sustainable_swag", "Switch to recycled materials or digital-only swag",
+            "swag", emissions.swag_tco2e * 0.60, -attendees * 3, "easy", 3)
+
+    # Rank reductions by impact.
+    reductions.sort(key=lambda x: x["co2e_saved_tco2e"], reverse=True)
+
+    # Neutralization (offsets) — applied to the residual AFTER reductions and kept out
+    # of the reduction ranking. Buying credits is a cost, not an emission reduction.
+    total_reduced = sum(s["co2e_saved_tco2e"] for s in reductions)
+    residual = max(0.0, emissions.total_tco2e - total_reduced)
+    offset_qty = round(residual * (target_pct / 100), 3)
+    if offset_qty > 0:
+        reductions.append({
+            "action": "offset_residual",
+            "label": "Neutralize residual emissions with Gold Standard credits (a cost, not a reduction)",
+            "co2e_saved_tco2e": offset_qty,
+            "estimated_cost_usd": round(offset_qty * _OFFSET_PRICE_USD, 0),
+            "category": "offsets",
             "difficulty": "easy",
-            "scope": 3,
+            "scope": "all",
+            "is_neutralization": True,
         })
 
-    # Zero waste
-    suggestions.append({
-        "action": "zero_waste",
-        "label": "Zero-waste catering (compost + eliminate single-use)",
-        "co2e_saved_tco2e": round(result.attendees * 0.0008 * result.event_days, 3),
-        "estimated_cost_usd": result.attendees * 1.5,
-        "category": "waste",
-        "difficulty": "medium",
-        "scope": 3,
-    })
-
-    # Carbon offsets (always last)
-    suggestions.append({
-        "action": "offset_residual",
-        "label": "Offset residual emissions with Gold Standard credits",
-        "co2e_saved_tco2e": round(emissions.total_tco2e * (target_pct / 100), 3),
-        "estimated_cost_usd": round(emissions.total_tco2e * (target_pct / 100) * 15, 0),
-        "category": "offsets",
-        "difficulty": "easy",
-        "scope": "all",
-    })
-
-    # Sort by CO2e saved descending
-    suggestions.sort(key=lambda x: x["co2e_saved_tco2e"], reverse=True)
-    return suggestions
+    return reductions

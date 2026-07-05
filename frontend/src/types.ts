@@ -44,7 +44,6 @@ export interface VenueEnergyPayload {
 export interface AccommodationPayload {
   accommodation_type: string
   room_nights: number
-  attendees_sharing?: number
 }
 
 export interface CateringPayload {
@@ -76,6 +75,14 @@ export interface SwagPayload {
   water_bottles: number
 }
 
+export interface DigitalPayload {
+  virtual_attendees: number
+  streaming_hours_per_day: number
+  livestream_production_hours?: number
+  event_app_users?: number
+  emails_sent?: number
+}
+
 export interface ScenarioInputPayload {
   name: string
   event_name: string
@@ -90,6 +97,7 @@ export interface ScenarioInputPayload {
   catering?: CateringPayload
   equipment?: EquipmentPayload
   swag?: SwagPayload
+  digital?: DigitalPayload
 }
 
 export interface ScopeBreakdown {
@@ -106,6 +114,7 @@ export interface Emissions {
   materials_waste_tco2e: number
   equipment_tco2e: number
   swag_tco2e: number
+  digital_tco2e: number
   total_tco2e: number
   per_attendee_tco2e: number
   per_attendee_day_tco2e: number
@@ -161,18 +170,22 @@ export interface ReductionSuggestion {
   category: string
   difficulty: string
   scope: number | string
+  is_neutralization?: boolean
 }
 
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   extracted_data?: Record<string, unknown>
+  financial_analysis?: FinancialResult
 }
 
 export interface ChatResponse {
   reply: string
   extracted_data?: Record<string, unknown> | null
   suggestions: string[]
+  session_id?: string
+  financial_analysis?: FinancialResult | null
 }
 
 export interface FinancialCalcState {
@@ -181,6 +194,7 @@ export interface FinancialCalcState {
   reduction_pct: number
   energy_kwh: number
   meal_switches: number
+  attendees: number
   actions: string[]
   linked_scenario_id: string | null
   linked_scenario_name: string | null
@@ -361,4 +375,8 @@ export interface ScenarioDraft {
   tote_bags: number
   lanyards: number
   badges: number
+  virtual_attendees: number
+  streaming_hours_per_day: number
+  event_app_users: number
+  emails_sent: number
 }

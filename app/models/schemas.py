@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 from typing import Optional, List, Dict, Any
 from enum import Enum
 from uuid import uuid4
@@ -117,69 +117,77 @@ class OffsetStatus(str, Enum):
 class TravelSegment(BaseModel):
     mode: TravelMode
     travel_class: TravelClass = TravelClass.ECONOMY
-    attendees: int
-    distance_km: float
+    attendees: int = Field(gt=0, le=1_000_000)
+    distance_km: float = Field(ge=0, le=50_000)  # > half Earth's circumference is nonsensical
     label: str = ""
 
 
 class VenueEnergy(BaseModel):
     grid_region: GridRegion = GridRegion.GLOBAL
-    kwh_consumed: Optional[float] = None
-    venue_area_m2: Optional[float] = None
-    event_days: int = 1
-    renewable_pct: float = 0.0  # 0-100
+    kwh_consumed: Optional[float] = Field(default=None, ge=0)
+    venue_area_m2: Optional[float] = Field(default=None, ge=0)
+    renewable_pct: float = Field(default=0.0, ge=0, le=100)
 
 
 class AccommodationGroup(BaseModel):
     accommodation_type: AccommodationType = AccommodationType.STANDARD
-    room_nights: int
-    attendees_sharing: float = 1.5  # avg attendees per room
+    room_nights: int = Field(ge=0)
 
 
 class CateringGroup(BaseModel):
     catering_type: CateringType = CateringType.MIXED
-    meals: int
+    meals: int = Field(ge=0)
     include_beverages: bool = True
     include_alcohol: bool = False
-    coffee_tea_cups: int = 0
+    coffee_tea_cups: int = Field(default=0, ge=0)
 
 
 class WasteGroup(BaseModel):
-    general_waste_kg: float = 0.0
-    recycled_kg: float = 0.0
-    composted_kg: float = 0.0
+    general_waste_kg: float = Field(default=0.0, ge=0)
+    recycled_kg: float = Field(default=0.0, ge=0)
+    composted_kg: float = Field(default=0.0, ge=0)
     printed_materials_per_attendee: bool = True
-    exhibition_booths_m2: float = 0.0
+    exhibition_booths_m2: float = Field(default=0.0, ge=0)
 
 
 class EquipmentGroup(BaseModel):
-    stage_m2: float = 0.0
-    lighting_days: int = 0
-    sound_system_days: int = 0
-    led_screen_m2: float = 0.0
-    projectors: int = 0
-    generator_hours: float = 0.0
-    freight_tonne_km: float = 0.0
+    stage_m2: float = Field(default=0.0, ge=0)
+    lighting_days: int = Field(default=0, ge=0)
+    sound_system_days: int = Field(default=0, ge=0)
+    led_screen_m2: float = Field(default=0.0, ge=0)
+    projectors: int = Field(default=0, ge=0)
+    generator_hours: float = Field(default=0.0, ge=0)
+    freight_tonne_km: float = Field(default=0.0, ge=0)
 
 
 class SwagGroup(BaseModel):
-    tshirts: int = 0
+    tshirts: int = Field(default=0, ge=0)
     tshirt_type: str = "cotton"  # cotton | organic | recycled
-    tote_bags: int = 0
-    lanyards: int = 0
-    badges: int = 0
+    tote_bags: int = Field(default=0, ge=0)
+    lanyards: int = Field(default=0, ge=0)
+    badges: int = Field(default=0, ge=0)
     badge_type: str = "plastic"  # plastic | recycled
-    notebooks: int = 0
-    water_bottles: int = 0
+    notebooks: int = Field(default=0, ge=0)
+    water_bottles: int = Field(default=0, ge=0)
+
+
+class DigitalGroup(BaseModel):
+    """Digital content & communication (NZCE category 9): streaming, app, email."""
+
+    virtual_attendees: int = Field(default=0, ge=0, le=1_000_000)
+    streaming_hours_per_day: float = Field(default=6.0, ge=0, le=24)
+    livestream_production_hours: float = Field(default=0.0, ge=0, le=10_000)
+    event_app_users: int = Field(default=0, ge=0, le=1_000_000)
+    emails_sent: int = Field(default=0, ge=0, le=100_000_000)
 
 
 class EventScenarioInput(BaseModel):
-    name: str
+    name: str = Field(min_length=1, max_length=200)
     event_name: str = "My Event"
     event_type: EventType = EventType.CONFERENCE
     location: str = "Singapore"
-    attendees: int
-    event_days: int = 1
+    attendees: int = Field(gt=0, le=1_000_000)
+    event_days: int = Field(default=1, gt=0, le=365)
     mode: ScenarioMode = ScenarioMode.BASIC
     travel_segments: List[TravelSegment] = Field(default_factory=list)
     venue_energy: Optional[VenueEnergy] = None
@@ -188,6 +196,14 @@ class EventScenarioInput(BaseModel):
     waste: Optional[WasteGroup] = None
     equipment: Optional[EquipmentGroup] = None
     swag: Optional[SwagGroup] = None
+    digital: Optional[DigitalGroup] = None
+
+    @model_validator(mode="after")
+    def validate_travel_attendees(self):
+        travel_attendees = sum(segment.attendees for segment in self.travel_segments)
+        if travel_attendees > self.attendees:
+            raise ValueError("travel segment attendees cannot exceed scenario attendees")
+        return self
 
 
 # -- Output / result models ----------------------------------------------------
@@ -206,6 +222,7 @@ class EmissionBreakdown(BaseModel):
     materials_waste_tco2e: float = 0.0
     equipment_tco2e: float = 0.0
     swag_tco2e: float = 0.0
+    digital_tco2e: float = 0.0
     total_tco2e: float = 0.0
     per_attendee_tco2e: float = 0.0
     per_attendee_day_tco2e: float = 0.0
@@ -220,6 +237,32 @@ class BenchmarkComparison(BaseModel):
     industry_best_practice: float
     percentile_rank: str  # "above average" | "average" | "below average" | "best practice"
     gap_to_best_practice_pct: float
+
+
+class ScenarioDetail(BaseModel):
+    """Full scenario wire format returned by the scenario endpoints."""
+
+    scenario_id: str
+    name: str
+    event_name: Optional[str] = ""
+    location: Optional[str] = ""
+    event_type: str = "conference"
+    attendees: int
+    event_days: int
+    mode: str = "basic"
+    emissions: "EmissionBreakdown"
+    benchmark: Optional[BenchmarkComparison] = None
+    assumptions: Dict[str, Any] = Field(default_factory=dict)
+    input_payload: Dict[str, Any] = Field(default_factory=dict)
+    factors_snapshot: Dict[str, Any] = Field(default_factory=dict)
+    created_at: str = ""
+
+
+class RecalculateAllResponse(BaseModel):
+    updated_count: int
+    failed_count: int
+    failures: List[Dict[str, Any]]
+    scenarios: List[ScenarioDetail]
 
 
 class ScenarioResult(BaseModel):
@@ -239,12 +282,18 @@ class ScenarioResult(BaseModel):
 # -- Chat models ---------------------------------------------------------------
 
 class ChatMessage(BaseModel):
-    role: str  # user | assistant
-    content: str
+    role: str = "user"  # constrained to user | assistant
+    content: str = Field(max_length=8000)
+
+    @field_validator("role")
+    @classmethod
+    def _normalize_role(cls, v: str) -> str:
+        # Neutralize role injection (e.g. "system") without rejecting the request.
+        return v if v in ("user", "assistant") else "user"
 
 
 class ChatRequest(BaseModel):
-    messages: List[ChatMessage]
+    messages: List[ChatMessage] = Field(min_length=1, max_length=100)
     event_context: Optional[Dict[str, Any]] = None
     scenario_id: Optional[str] = None
 
@@ -252,20 +301,25 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
     extracted_data: Optional[Dict[str, Any]] = None
-    updated_scenario: Optional[EventScenarioInput] = None
     suggestions: List[str] = Field(default_factory=list)
+    # Server-validated session id the turn was persisted under; clients should adopt
+    # it so /history/{session_id} lookups work.
+    session_id: str = ""
+    # Real financial-engine output when the model called request_financial_analysis
+    # (shape: FinancialResult). None otherwise.
+    financial_analysis: Optional[Dict[str, Any]] = None
 
 
 # -- Financial models ----------------------------------------------------------
 
 class FinancialRequest(BaseModel):
     scenario_id: Optional[str] = None
-    baseline_tco2e: float
-    reduced_tco2e: float
+    baseline_tco2e: float = Field(ge=0)
+    reduced_tco2e: float = Field(ge=0)
     region: str = "singapore"
-    energy_kwh_saved: float = 0.0
-    meal_switches: int = 0
-    attendees: int = 0
+    energy_kwh_saved: float = Field(default=0.0, ge=0)
+    meal_switches: int = Field(default=0, ge=0)
+    attendees: int = Field(default=0, ge=0)
     actions_taken: List[str] = Field(default_factory=list)
 
 
@@ -292,12 +346,12 @@ class FinancialResult(BaseModel):
 # -- Compliance models ---------------------------------------------------------
 
 class ComplianceRequest(BaseModel):
-    total_tco2e: float
+    total_tco2e: float = Field(ge=0)
     has_scope3: bool = True
     has_ghg_report: bool = False
     region: str = "singapore"
-    event_days: int = 1
-    attendees: int = 100
+    event_days: int = Field(default=1, gt=0)
+    attendees: int = Field(default=100, gt=0)
 
 
 class ComplianceCheck(BaseModel):
@@ -313,6 +367,7 @@ class ComplianceReport(BaseModel):
     checks: List[ComplianceCheck]
     mandatory_frameworks: List[str]
     penalty_risk_usd: float
+    disclaimer: str = ""
 
 
 # -- Carbon Offset models ------------------------------------------------------
@@ -321,9 +376,9 @@ class OffsetPurchaseCreate(BaseModel):
     scenario_id: Optional[str] = None
     project_type: OffsetProjectType
     registry: str = "gold_standard"
-    quantity_tco2e: float
-    price_per_tco2e_usd: float
-    vintage_year: int = 2025
+    quantity_tco2e: float = Field(gt=0)
+    price_per_tco2e_usd: float = Field(ge=0)
+    vintage_year: int = Field(default=2025, ge=1900, le=2100)
     serial_number: Optional[str] = None
     notes: Optional[str] = None
 
@@ -397,6 +452,10 @@ class ScenarioReportPayload(BaseModel):
     compliance_overrides: ScenarioComplianceOverrides = Field(
         default_factory=ScenarioComplianceOverrides
     )
+    # Indicative mapping of this report's categories to the 9 Net Zero Carbon
+    # Events (NZCE) Measurement Methodology categories.
+    nzce_categories: List[ScenarioReportMetric] = Field(default_factory=list)
+    nzce_note: str = ""
 
 
 # -- Export models -------------------------------------------------------------
@@ -414,13 +473,15 @@ class ScenarioExport(BaseModel):
 # -- Auth schemas --------------------------------------------------------------
 
 class UserCreate(BaseModel):
-    email: str
-    password: str
+    email: EmailStr
+    # 72 = bcrypt input limit; passlib silently truncates beyond it.
+    password: str = Field(min_length=8, max_length=72)
 
 
 class UserLogin(BaseModel):
+    # Deliberately plain str so pre-existing loosely-formed accounts can still log in.
     email: str
-    password: str
+    password: str = Field(max_length=72)
 
 
 class Token(BaseModel):

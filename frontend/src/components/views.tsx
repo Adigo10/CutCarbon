@@ -3,6 +3,7 @@ import {
   ACCOMMODATION_OPTIONS,
   AVAILABLE_ACTIONS,
   CATERING_OPTIONS,
+  EMISSION_CATEGORIES,
   EVENT_TYPES,
   FINANCIAL_REGIONS,
   GRID_OPTIONS,
@@ -185,6 +186,24 @@ export function ChatView({
                 <div className="message-copy">
                   <span>{message.content}</span>
                 </div>
+                {message.financial_analysis ? (
+                  <div className="signal-grid">
+                    <article className="signal-card">
+                      <span className="eyebrow">CO2e reduced</span>
+                      <strong>{formatTons(message.financial_analysis.total_co2e_reduced)}</strong>
+                    </article>
+                    <article className="signal-card">
+                      <span className="eyebrow">Carbon tax savings</span>
+                      <strong>
+                        {formatCurrency(message.financial_analysis.carbon_tax_savings[0]?.savings_usd ?? 0)}
+                      </strong>
+                    </article>
+                    <article className="signal-card">
+                      <span className="eyebrow">Total savings</span>
+                      <strong>{formatCurrency(message.financial_analysis.total_financial_savings_usd)}</strong>
+                    </article>
+                  </div>
+                ) : null}
                 {message.extracted_data && Object.keys(message.extracted_data).length ? (
                   <div className="extracted-box">
                     <Button tone="soft" onClick={() => onApplyExtracted(message.extracted_data ?? {})}>
@@ -254,6 +273,7 @@ interface ScenariosViewProps {
   scenarios: Scenario[]
   selectedScenario: Scenario | null
   suggestions: ReductionSuggestion[]
+  comparisonIds: string[]
   onSubmit: () => void
   onCancelEdit: () => void
   onEdit: (scenario: Scenario) => void
@@ -262,6 +282,7 @@ interface ScenariosViewProps {
   onDownloadReport: (scenario: Scenario, format: ScenarioReportFormat) => void
   onSelectScenario: (scenario: Scenario) => void
   onLoadSuggestions: (scenario: Scenario) => void
+  onToggleCompare: (id: string) => void
 }
 
 export function ScenariosView({
@@ -272,6 +293,7 @@ export function ScenariosView({
   scenarios,
   selectedScenario,
   suggestions,
+  comparisonIds,
   onSubmit,
   onCancelEdit,
   onEdit,
@@ -280,6 +302,7 @@ export function ScenariosView({
   onDownloadReport,
   onSelectScenario,
   onLoadSuggestions,
+  onToggleCompare,
 }: ScenariosViewProps) {
   const [query, setQuery] = useState('')
   const deferredQuery = useDeferredValue(query)
@@ -287,6 +310,24 @@ export function ScenariosView({
   const filteredScenarios = scenarios.filter((scenario) =>
     `${scenario.name} ${scenario.location} ${scenario.event_type}`.toLowerCase().includes(deferredQuery.toLowerCase()),
   )
+  const comparisonScenarios = comparisonIds
+    .map((id) => scenarios.find((scenario) => scenario.scenario_id === id))
+    .filter((scenario): scenario is Scenario => Boolean(scenario))
+    .slice(0, 4)
+  const comparisonRows: Array<{ label: string; digits: number; value: (scenario: Scenario) => number }> = [
+    { label: 'Total tCO2e', digits: 2, value: (scenario) => scenario.emissions.total_tco2e },
+    { label: 'Per attendee', digits: 3, value: (scenario) => scenario.emissions.per_attendee_tco2e },
+    { label: 'Per attendee-day', digits: 3, value: (scenario) => scenario.emissions.per_attendee_day_tco2e },
+    ...EMISSION_CATEGORIES.map((category) => ({
+      label: category.label,
+      digits: 2,
+      value: (scenario: Scenario) =>
+        Number(scenario.emissions[category.key as keyof typeof scenario.emissions] ?? 0),
+    })),
+    { label: 'Scope 1', digits: 2, value: (scenario) => scenario.emissions.scopes?.scope1_tco2e ?? 0 },
+    { label: 'Scope 2', digits: 2, value: (scenario) => scenario.emissions.scopes?.scope2_tco2e ?? 0 },
+    { label: 'Scope 3', digits: 2, value: (scenario) => scenario.emissions.scopes?.scope3_tco2e ?? 0 },
+  ]
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -633,6 +674,61 @@ export function ScenariosView({
             </label>
           </div>
 
+          <div className="subpanel">
+            <div className="subpanel-header">
+              <div>
+                <span className="eyebrow">Digital & virtual</span>
+                <h4>Online reach assumptions</h4>
+              </div>
+            </div>
+            <div className="form-grid">
+              <label className="field">
+                <span>Virtual attendees</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={draft.virtual_attendees}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, virtual_attendees: Number(event.target.value) }))
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Streaming hours / day</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={draft.streaming_hours_per_day}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, streaming_hours_per_day: Number(event.target.value) }))
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Event app users</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={draft.event_app_users}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, event_app_users: Number(event.target.value) }))
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Emails sent</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={draft.emails_sent}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, emails_sent: Number(event.target.value) }))
+                  }
+                />
+              </label>
+            </div>
+          </div>
+
           <div className="hero-actions">
             <Button tone="primary" busy={scenarioLoading} type="submit">
               {editingScenario ? 'Update scenario' : 'Calculate scenario'}
@@ -713,6 +809,13 @@ export function ScenariosView({
                     <Button tone="soft" onClick={() => onLoadSuggestions(scenario)} type="button">
                       Reduce
                     </Button>
+                    <Button
+                      tone={comparisonIds.includes(scenario.scenario_id) ? 'primary' : 'soft'}
+                      onClick={() => onToggleCompare(scenario.scenario_id)}
+                      type="button"
+                    >
+                      Compare
+                    </Button>
                     <Button tone="danger" onClick={() => onDelete(scenario.scenario_id)} type="button">
                       Delete
                     </Button>
@@ -724,6 +827,55 @@ export function ScenariosView({
             <EmptyState title="No scenarios found" body="Create a baseline or clear the search query to see everything again." />
           )}
         </Panel>
+
+        {comparisonScenarios.length >= 2 ? (
+          <Panel>
+            <div className="panel-heading">
+              <div>
+                <span className="eyebrow">Comparison</span>
+                <h3>Side-by-side scenarios</h3>
+              </div>
+              <Badge tone="cyan">Baseline: {comparisonScenarios[0].name}</Badge>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Metric</th>
+                    {comparisonScenarios.map((scenario) => (
+                      <th key={scenario.scenario_id}>{scenario.name}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {comparisonRows.map((row) => {
+                    const baselineValue = row.value(comparisonScenarios[0])
+                    const minDelta = 0.5 / 10 ** row.digits
+                    return (
+                      <tr key={row.label}>
+                        <td>{row.label}</td>
+                        {comparisonScenarios.map((scenario, index) => {
+                          const value = row.value(scenario)
+                          const delta = value - baselineValue
+                          return (
+                            <td key={scenario.scenario_id}>
+                              {formatTons(value, row.digits)}{' '}
+                              {index > 0 && Math.abs(delta) >= minDelta ? (
+                                <Badge tone={delta < 0 ? 'fresh' : 'rose'}>
+                                  {`${delta > 0 ? '+' : ''}${delta.toFixed(row.digits)}`}
+                                </Badge>
+                              ) : null}
+                            </td>
+                          )
+                        })}
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+        ) : null}
 
         {suggestions.length ? (
           <Panel>
@@ -1476,8 +1628,8 @@ export function DataView({
   const downloadCards = [
     ['/api/exports/scenarios.xlsx', 'scenarios.xlsx', 'Scenarios (Excel)', true],
     ['/api/exports/scenarios.json', 'scenarios.json', 'Scenarios (JSON)', true],
-    ['/api/exports/emission-factors.xlsx', 'emission-factors.xlsx', 'Emission Factors (Excel)', false],
-    ['/api/exports/emission-factors.json', 'emission-factors.json', 'Emission Factors (JSON)', false],
+    ['/api/exports/emission-factors.xlsx', 'emission-factors.xlsx', 'Emission Factors (Excel)', true],
+    ['/api/exports/emission-factors.json', 'emission-factors.json', 'Emission Factors (JSON)', true],
     ['/api/exports/agent-runs.xlsx', 'agent-runs.xlsx', 'Agent Runs (Excel)', true],
   ] as const
 

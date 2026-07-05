@@ -1,4 +1,10 @@
 .env
 .carbon_venv
 __pycachce__/
+__pycache__/
 *.pyc
+
+# Local databases — never commit (contains user password hashes & data)
+*.db
+*.sqlite
+*.sqlite3

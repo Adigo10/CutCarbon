@@ -1,6 +1,7 @@
 """
 Data export router — download raw or processed data as Excel (.xlsx), JSON, CSV, or PDF.
 """
+import asyncio
 import csv
 import io
 import json
@@ -21,12 +22,47 @@ from app.models.schemas import (
     ScenarioReportPayload,
 )
 from app.routers.auth import get_current_user
-from app.services.emissions_engine import get_benchmark_comparison
 from app.services.financial_engine import get_compliance_report
+from app.services.scenario_serializer import serialize_scenario
+from app.utils.time import utcnow
 
 router = APIRouter()
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
+
+# CSV/Excel formula-injection mitigation. A string cell beginning with any of these
+# is interpreted as a formula (or DDE payload) by Excel/LibreOffice/Sheets when the
+# file is opened — dangerous because these reports are built for third-party auditors.
+# Prefixing a single quote forces the cell to be treated as literal text.
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _safe_cell(value):
+    """Neutralize spreadsheet formula injection for a single cell value."""
+    if isinstance(value, str) and value[:1] in _FORMULA_PREFIXES:
+        return "'" + value
+    return value
+
+
+class _SafeCsvWriter:
+    """csv.writer wrapper that sanitizes every cell against formula injection."""
+
+    def __init__(self, buf):
+        self._w = csv.writer(buf)
+
+    def writerow(self, row):
+        self._w.writerow([_safe_cell(c) for c in row])
+
+    def writerows(self, rows):
+        for row in rows:
+            self.writerow(row)
+
+
+def _pdf_text(value) -> str:
+    """Escape user-derived text before it is parsed as reportlab Paragraph markup."""
+    from xml.sax.saxutils import escape
+
+    return escape(str(value))
 _REPORT_METHODODOLOGY = "GHG Protocol Corporate Standard, ISO 14064-1"
 _REPORT_DISCLAIMER = (
     "Calculations are based on industry-standard emission factors and scenario assumptions. "
@@ -40,15 +76,30 @@ _CATEGORY_LABELS = [
     ("materials_waste_tco2e", "Materials & Waste"),
     ("equipment_tco2e", "Equipment"),
     ("swag_tco2e", "Swag"),
+    ("digital_tco2e", "Digital & Virtual"),
 ]
 
 
-def _wb_response(wb, filename: str) -> StreamingResponse:
+def _wb_bytes(wb) -> bytes:
+    """Sanitize + serialize a workbook (CPU-bound — call via asyncio.to_thread).
+
+    Single chokepoint for every .xlsx export: neutralize formula injection in any
+    string cell before serializing. openpyxl auto-types a leading "=" as a formula,
+    so we rewrite dangerous string cells to literal text here.
+    """
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, str) and cell.value[:1] in _FORMULA_PREFIXES:
+                    cell.value = "'" + cell.value
     buf = io.BytesIO()
     wb.save(buf)
-    buf.seek(0)
+    return buf.getvalue()
+
+
+def _xlsx_response(content: bytes, filename: str) -> StreamingResponse:
     return StreamingResponse(
-        buf,
+        iter([content]),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
@@ -65,55 +116,12 @@ def _style_header(ws, row=1):
         cell.alignment = Alignment(horizontal="center")
 
 
-def _iso(dt: Optional[datetime]) -> str:
-    return dt.isoformat() if dt else ""
-
-
 def _labelize(value: str) -> str:
     return value.replace("_", " ").replace("/", " / ").title()
 
 
 def _scenario_location(s: ScenarioDB) -> str:
     return getattr(s, "location", None) or (s.input_payload or {}).get("location", "")
-
-
-def _serialize_scenario_row(s: ScenarioDB) -> dict[str, Any]:
-    event_type = getattr(s, "event_type", "conference") or "conference"
-    per_attendee_day = round(s.per_attendee_tco2e / max(s.event_days or 1, 1), 4) if s.per_attendee_tco2e else 0
-    benchmark = get_benchmark_comparison(event_type, per_attendee_day)
-    return {
-        "scenario_id": s.id,
-        "name": s.name,
-        "event_name": s.event_name,
-        "location": _scenario_location(s),
-        "event_type": event_type,
-        "attendees": s.attendees,
-        "event_days": s.event_days,
-        "mode": s.mode,
-        "emissions": {
-            "travel_tco2e": s.travel_tco2e,
-            "venue_energy_tco2e": s.venue_energy_tco2e,
-            "accommodation_tco2e": s.accommodation_tco2e,
-            "catering_tco2e": s.catering_tco2e,
-            "materials_waste_tco2e": s.materials_waste_tco2e,
-            "equipment_tco2e": getattr(s, "equipment_tco2e", 0) or 0,
-            "swag_tco2e": getattr(s, "swag_tco2e", 0) or 0,
-            "total_tco2e": s.total_tco2e,
-            "per_attendee_tco2e": s.per_attendee_tco2e,
-            "per_attendee_day_tco2e": per_attendee_day,
-            "data_quality": s.data_quality,
-            "scopes": {
-                "scope1_tco2e": getattr(s, "scope1_tco2e", 0) or 0,
-                "scope2_tco2e": getattr(s, "scope2_tco2e", 0) or 0,
-                "scope3_tco2e": getattr(s, "scope3_tco2e", 0) or 0,
-            },
-        },
-        "assumptions": s.assumptions or {},
-        "input_payload": s.input_payload or {},
-        "factors_snapshot": getattr(s, "factors_snapshot", None) or {},
-        "benchmark": benchmark.model_dump() if benchmark else None,
-        "created_at": _iso(s.created_at),
-    }
 
 
 async def _get_scenario_or_404(
@@ -151,6 +159,85 @@ def _build_category_rows(scenario_data: dict[str, Any]) -> list[ScenarioReportMe
             )
         )
     return rows
+
+
+# Modes counted as NZCE "Local Transportation" (venue-area movement) rather than
+# "Travel to/from the Destination".
+_NZCE_LOCAL_MODES = {"mrt_metro", "taxi_rideshare", "shuttle_bus", "bus_coach", "e_scooter", "cycling"}
+
+_NZCE_BASE_NOTE = (
+    "Indicative mapping to the Net Zero Carbon Events (NZCE) Measurement Methodology "
+    "v1 categories, derived from this report's category totals."
+)
+
+
+def _build_nzce_rows(scenario_data: dict[str, Any]) -> tuple[list[ScenarioReportMetric], str]:
+    """Map stored category totals onto the 9 NZCE categories.
+
+    Travel is split into to/from-destination vs local transportation by re-running
+    the per-segment factor math on the stored input payload; equipment is split into
+    freight vs production/materials via its freight_tonne_km line.
+    """
+    from app.services.emissions_engine import EF
+
+    emissions = scenario_data["emissions"]
+    payload = scenario_data.get("input_payload") or {}
+    total = float(emissions.get("total_tco2e") or 0)
+    note = _NZCE_BASE_NOTE
+
+    travel_total = float(emissions.get("travel_tco2e") or 0)
+    local_travel = 0.0
+    segments = payload.get("travel_segments") or []
+    if segments and travel_total > 0:
+        local_kg = 0.0
+        all_kg = 0.0
+        for seg in segments:
+            ef_data = EF["travel"].get(seg.get("mode")) or {}
+            if "economy" in ef_data:
+                cls = seg.get("travel_class") or "economy"
+                ef = ef_data.get(cls) or ef_data.get("business") or ef_data.get("economy") or 0
+            else:
+                ef = ef_data.get("factor", 0)
+            kg = (seg.get("attendees") or 0) * (seg.get("distance_km") or 0) * ef
+            all_kg += kg
+            if seg.get("mode") in _NZCE_LOCAL_MODES:
+                local_kg += kg
+        if all_kg > 0:
+            local_travel = round(travel_total * (local_kg / all_kg), 4)
+    elif travel_total > 0:
+        note += " Proxy travel is mapped entirely to Travel to/from the Destination."
+    dest_travel = round(travel_total - local_travel, 4)
+
+    equipment_total = float(emissions.get("equipment_tco2e") or 0)
+    freight = 0.0
+    freight_tkm = ((payload.get("equipment") or {}).get("freight_tonne_km")) or 0
+    if freight_tkm and equipment_total > 0:
+        freight_ef = EF.get("equipment", {}).get("freight_truck_per_km", {}).get("factor", 0.107)
+        freight = round(min(equipment_total, freight_tkm * freight_ef / 1000), 4)
+    production = round(float(emissions.get("swag_tco2e") or 0) + max(0.0, equipment_total - freight), 4)
+
+    rows_spec = [
+        ("nzce_production_materials", "Production & Materials", production),
+        ("nzce_freight_logistics", "Freight & Logistics", freight),
+        ("nzce_food_beverage", "Food & Beverage", emissions.get("catering_tco2e")),
+        ("nzce_travel_destination", "Travel to/from the Destination", dest_travel),
+        ("nzce_local_transportation", "Local Transportation", local_travel),
+        ("nzce_accommodation", "Accommodation", emissions.get("accommodation_tco2e")),
+        ("nzce_energy", "Energy", emissions.get("venue_energy_tco2e")),
+        ("nzce_waste", "Waste", emissions.get("materials_waste_tco2e")),
+        ("nzce_digital", "Digital Content & Communication", emissions.get("digital_tco2e")),
+    ]
+    rows = [
+        ScenarioReportMetric(
+            key=key,
+            label=label,
+            value=round(float(value or 0), 4),
+            unit="tCO2e",
+            pct_total=round(float(value or 0) / total * 100, 1) if total > 0 else None,
+        )
+        for key, label, value in rows_spec
+    ]
+    return rows, note
 
 
 async def _build_offset_summary_for_scenario(
@@ -201,8 +288,9 @@ async def build_scenario_report_payload(
     has_ghg_report: bool = False,
 ) -> ScenarioReportPayload:
     scenario = await _get_scenario_or_404(scenario_id, db, current_user)
-    scenario_data = _serialize_scenario_row(scenario)
+    scenario_data = serialize_scenario(scenario)
     categories = _build_category_rows(scenario_data)
+    nzce_categories, nzce_note = _build_nzce_rows(scenario_data)
     emissions = scenario_data["emissions"]
     offset_summary = await _build_offset_summary_for_scenario(
         scenario_id=scenario.id,
@@ -221,7 +309,7 @@ async def build_scenario_report_payload(
 
     return ScenarioReportPayload(
         report_title=f"Carbon Footprint Report - {scenario.event_name or scenario.name}",
-        exported_at=datetime.utcnow().isoformat(),
+        exported_at=utcnow().isoformat(),
         methodology=_REPORT_METHODODOLOGY,
         disclaimer=_REPORT_DISCLAIMER,
         scenario=scenario_data,
@@ -237,11 +325,13 @@ async def build_scenario_report_payload(
             has_scope3=has_scope3,
             has_ghg_report=has_ghg_report,
         ),
+        nzce_categories=nzce_categories,
+        nzce_note=nzce_note,
     )
 
 
 def _scenario_report_filename(prefix: str, scenario_id: str, extension: str) -> str:
-    stamp = datetime.utcnow().strftime("%Y%m%d")
+    stamp = utcnow().strftime("%Y%m%d")
     return f"{prefix}_{scenario_id}_{stamp}.{extension}"
 
 
@@ -263,7 +353,7 @@ def _pdf_response(content: bytes, filename: str) -> StreamingResponse:
 
 def _scenario_report_csv_bytes(report: ScenarioReportPayload) -> bytes:
     buf = io.StringIO(newline="")
-    writer = csv.writer(buf)
+    writer = _SafeCsvWriter(buf)
     writer.writerow(["section", "key", "label", "value", "unit"])
 
     scenario = report.scenario
@@ -292,6 +382,11 @@ def _scenario_report_csv_bytes(report: ScenarioReportPayload) -> bytes:
             writer.writerow(
                 ("categories_pct", f"{category.key}_pct_total", f"{category.label} % of total", category.pct_total, "pct")
             )
+
+    for row in report.nzce_categories:
+        writer.writerow(("nzce", row.key, row.label, row.value, row.unit))
+    if report.nzce_note:
+        writer.writerow(("nzce", "note", "NZCE Mapping Note", report.nzce_note, ""))
 
     for key, value in report.scope_breakdown.model_dump().items():
         writer.writerow(("scopes", key, _labelize(key), value, "tCO2e"))
@@ -325,7 +420,11 @@ def _scenario_report_csv_bytes(report: ScenarioReportPayload) -> bytes:
             writer.writerow(("compliance_recommendation", f"{prefix}.recommendation_{rec_idx}", f"{check.framework} recommendation", rec, ""))
 
     for key, value in report.assumptions.items():
-        writer.writerow(("assumptions", key, _labelize(key), value, ""))
+        if isinstance(value, dict):
+            for subkey, subvalue in value.items():
+                writer.writerow(("assumptions", f"{key}.{subkey}", _labelize(f"{key} {subkey}"), subvalue, ""))
+        else:
+            writer.writerow(("assumptions", key, _labelize(key), value, ""))
 
     for key, value in report.factor_snapshot.items():
         unit = ""
@@ -393,6 +492,15 @@ def _scenario_report_xlsx(report: ScenarioReportPayload):
         chart.height = 8
         summary_ws.add_chart(chart, "E4")
 
+    nzce_ws = wb.create_sheet("NZCE Mapping")
+    nzce_ws.append(["NZCE Category", "tCO2e", "% of Total"])
+    _style_header(nzce_ws)
+    for row in report.nzce_categories:
+        nzce_ws.append([row.label, row.value, row.pct_total if row.pct_total is not None else ""])
+    if report.nzce_note:
+        nzce_ws.append([])
+        nzce_ws.append(["Note", report.nzce_note])
+
     compliance_ws = wb.create_sheet("Compliance")
     compliance_ws.append(["Framework", "Status", "Score %", "Gaps", "Recommendations"])
     _style_header(compliance_ws)
@@ -426,7 +534,11 @@ def _scenario_report_xlsx(report: ScenarioReportPayload):
     _style_header(assumptions_ws)
     if report.assumptions:
         for key, value in report.assumptions.items():
-            assumptions_ws.append([key, value])
+            if isinstance(value, dict):
+                for subkey, subvalue in value.items():
+                    assumptions_ws.append([f"{key}.{subkey}", str(subvalue)])
+            else:
+                assumptions_ws.append([key, value])
     else:
         assumptions_ws.append(["notes", "No assumptions recorded"])
 
@@ -445,7 +557,96 @@ def _scenario_report_pdf(report: ScenarioReportPayload) -> bytes:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import cm
-    from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    from reportlab.pdfgen import canvas as pdfcanvas
+    from reportlab.platypus import (
+        KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
+    )
+
+    page_width, page_height = A4
+    brand_dark = colors.HexColor("#115e59")
+    brand_green = colors.HexColor("#22c55e")
+    ink = colors.HexColor("#111827")
+    muted = colors.HexColor("#6b7280")
+    copyright_year = (report.exported_at or "")[:4] or "2026"
+
+    def _draw_logo(c, x, y, size):
+        # Native redraw of the brand mark (frontend/public/favicon.svg): teal->green
+        # gradient rounded square with a white "C". No SVG dependency needed.
+        c.saveState()
+        clip = c.beginPath()
+        clip.roundRect(x, y, size, size, size * 0.25)
+        c.clipPath(clip, stroke=0, fill=0)
+        c.linearGradient(x, y + size, x + size, y, (brand_dark, brand_green))
+        c.restoreState()
+        c.saveState()
+        c.setFillColor(colors.white)
+        c.setFont("Helvetica-Bold", size * 0.62)
+        c.drawCentredString(x + size / 2, y + size * 0.26, "C")
+        c.restoreState()
+
+    def _decorate_page(c, page_num, total_pages):
+        """Branded header + copyright footer drawn on every page."""
+        c.saveState()
+        left = 1.5 * cm
+        right = page_width - 1.5 * cm
+
+        if page_num == 1:
+            logo_size = 1.0 * cm
+            logo_y = page_height - 1.9 * cm
+            _draw_logo(c, left, logo_y, logo_size)
+            c.setFillColor(ink)
+            c.setFont("Helvetica-Bold", 13)
+            c.drawString(left + logo_size + 0.35 * cm, logo_y + 0.52 * cm, "CutCarbon")
+            c.setFillColor(muted)
+            c.setFont("Helvetica", 8.5)
+            c.drawString(
+                left + logo_size + 0.35 * cm, logo_y + 0.12 * cm,
+                "EventCarbon Co-Pilot — Event Carbon Footprint Report",
+            )
+            rule_y = page_height - 2.15 * cm
+        else:
+            logo_size = 0.55 * cm
+            logo_y = page_height - 1.35 * cm
+            _draw_logo(c, left, logo_y, logo_size)
+            c.setFillColor(muted)
+            c.setFont("Helvetica", 8)
+            c.drawString(left + logo_size + 0.25 * cm, logo_y + 0.16 * cm, report.report_title)
+            rule_y = page_height - 1.55 * cm
+
+        c.setStrokeColor(colors.HexColor("#1A9E6E"))
+        c.setLineWidth(1)
+        c.line(left, rule_y, right, rule_y)
+
+        c.setLineWidth(0.8)
+        c.line(left, 1.55 * cm, right, 1.55 * cm)
+        c.setFillColor(muted)
+        c.setFont("Helvetica", 7.5)
+        c.drawString(left, 1.15 * cm, f"© {copyright_year} CutCarbon · EventCarbon Co-Pilot. All rights reserved.")
+        c.drawString(
+            left, 0.78 * cm,
+            "Confidential — prepared for the event organizer and its auditors. Not a third-party verification statement.",
+        )
+        c.drawRightString(right, 1.15 * cm, f"Page {page_num} of {total_pages}")
+        c.restoreState()
+
+    class _ReportCanvas(pdfcanvas.Canvas):
+        """Buffers pages so the footer can state 'Page X of Y'."""
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._page_states = []
+
+        def showPage(self):
+            self._page_states.append(dict(self.__dict__))
+            self._startPage()
+
+        def save(self):
+            total = len(self._page_states)
+            for index, state in enumerate(self._page_states, start=1):
+                self.__dict__.update(state)
+                _decorate_page(self, index, total)
+                super().showPage()
+            super().save()
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -453,8 +654,11 @@ def _scenario_report_pdf(report: ScenarioReportPayload) -> bytes:
         pagesize=A4,
         leftMargin=1.5 * cm,
         rightMargin=1.5 * cm,
-        topMargin=1.5 * cm,
-        bottomMargin=1.5 * cm,
+        topMargin=2.5 * cm,
+        bottomMargin=2.1 * cm,
+        title=report.report_title,
+        author="CutCarbon EventCarbon Co-Pilot",
+        subject="Event carbon footprint report",
     )
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name="ReportTitle", parent=styles["Title"], textColor=colors.HexColor("#1A9E6E")))
@@ -487,10 +691,13 @@ def _scenario_report_pdf(report: ScenarioReportPayload) -> bytes:
     for key, value in report.factor_snapshot.items():
         factor_rows.append([_labelize(key), str(value)])
 
-    assumption_paragraphs = [
-        Paragraph(f"<b>{_labelize(key)}:</b> {value}", styles["BodySmall"])
-        for key, value in report.assumptions.items()
-    ]
+    assumption_paragraphs = []
+    for key, value in report.assumptions.items():
+        if isinstance(value, dict):
+            value = ", ".join(f"{k}: {v}" for k, v in value.items())
+        assumption_paragraphs.append(
+            Paragraph(f"<b>{_pdf_text(_labelize(key))}:</b> {_pdf_text(value)}", styles["BodySmall"])
+        )
 
     story = [
         Paragraph(report.report_title, styles["ReportTitle"]),
@@ -498,7 +705,7 @@ def _scenario_report_pdf(report: ScenarioReportPayload) -> bytes:
         Paragraph(f"Generated {report.exported_at}", styles["BodyText"]),
         Spacer(1, 0.2 * cm),
         Paragraph(
-            f"{scenario['name']} in {scenario['location']} covers {scenario['attendees']} attendees across "
+            f"{_pdf_text(scenario['name'])} in {_pdf_text(scenario['location'])} covers {scenario['attendees']} attendees across "
             f"{scenario['event_days']} day(s). Total modeled emissions are {emissions['total_tco2e']:.3f} tCO2e.",
             styles["BodyText"],
         ),
@@ -542,6 +749,25 @@ def _scenario_report_pdf(report: ScenarioReportPayload) -> bytes:
         Spacer(1, 0.35 * cm),
     ]
 
+    if report.nzce_categories:
+        story.extend(
+            [
+                Paragraph("NZCE Category Mapping", styles["SectionHeading"]),
+                Spacer(1, 0.2 * cm),
+                _table(
+                    [["NZCE Category", "tCO2e", "% of Total"]]
+                    + [
+                        [row.label, f"{row.value:.4f}", f"{row.pct_total:.1f}%" if row.pct_total is not None else "—"]
+                        for row in report.nzce_categories
+                    ],
+                    [8 * cm, 3 * cm, 3 * cm],
+                ),
+                Spacer(1, 0.15 * cm),
+                Paragraph(_pdf_text(report.nzce_note), styles["BodySmall"]),
+                Spacer(1, 0.35 * cm),
+            ]
+        )
+
     if benchmark:
         story.extend(
             [
@@ -584,23 +810,59 @@ def _scenario_report_pdf(report: ScenarioReportPayload) -> bytes:
         for paragraph in assumption_paragraphs[:8]:
             story.extend([Spacer(1, 0.1 * cm), paragraph])
 
-    doc.build(story)
+    # Sign-off block: signature lines for the report preparer and approver.
+    sig_table = Table(
+        [
+            [Paragraph("<b>Prepared by</b>", styles["BodySmall"]),
+             Paragraph("<b>Approved by</b>", styles["BodySmall"])],
+            ["", ""],
+            ["Signature", "Signature"],
+            ["Name / Title", "Name / Title"],
+            ["Date", "Date"],
+        ],
+        colWidths=[7.5 * cm, 7.5 * cm],
+        rowHeights=[None, 1.2 * cm, None, None, None],
+    )
+    sig_table.setStyle(
+        TableStyle(
+            [
+                ("LINEBELOW", (0, 1), (0, 1), 0.7, ink),
+                ("LINEBELOW", (1, 1), (1, 1), 0.7, ink),
+                ("FONTNAME", (0, 2), (-1, -1), "Helvetica"),
+                ("FONTSIZE", (0, 2), (-1, -1), 8),
+                ("TEXTCOLOR", (0, 2), (-1, -1), muted),
+                ("TOPPADDING", (0, 2), (-1, 2), 2),
+                ("BOTTOMPADDING", (0, 2), (-1, 2), 10),
+                ("BOTTOMPADDING", (0, 3), (-1, 3), 10),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 36),
+                ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
+            ]
+        )
+    )
+    story.append(
+        KeepTogether(
+            [
+                Spacer(1, 0.7 * cm),
+                Paragraph("Sign-off", styles["SectionHeading"]),
+                Spacer(1, 0.25 * cm),
+                Paragraph(
+                    "This report was generated by CutCarbon EventCarbon Co-Pilot from the scenario "
+                    "inputs and emission factors recorded above.",
+                    styles["BodySmall"],
+                ),
+                Spacer(1, 0.3 * cm),
+                sig_table,
+            ]
+        )
+    )
+
+    doc.build(story, canvasmaker=_ReportCanvas)
     return buf.getvalue()
 
 
-@router.get("/scenarios.xlsx", summary="Download all scenarios as Excel")
-async def export_scenarios_xlsx(
-    db: AsyncSession = Depends(get_db),
-    current_user: UserDB = Depends(get_current_user),
-):
+def _build_scenarios_workbook(rows):
     from openpyxl import Workbook
-
-    q = (
-        select(ScenarioDB)
-        .where(ScenarioDB.user_id == current_user.id)
-        .order_by(desc(ScenarioDB.created_at))
-    )
-    rows = (await db.execute(q)).scalars().all()
 
     wb = Workbook()
 
@@ -610,6 +872,7 @@ async def export_scenarios_xlsx(
         "ID", "Name", "Location", "Event Type", "Attendees", "Days", "Mode",
         "Travel tCO2e", "Venue Energy tCO2e", "Accommodation tCO2e",
         "Catering tCO2e", "Materials & Waste tCO2e",
+        "Equipment tCO2e", "Swag tCO2e", "Digital tCO2e",
         "Total tCO2e", "Per Attendee tCO2e",
         "Scope 1", "Scope 2", "Scope 3",
         "Data Quality", "Created At",
@@ -625,6 +888,9 @@ async def export_scenarios_xlsx(
             round(s.accommodation_tco2e or 0, 4),
             round(s.catering_tco2e or 0, 4),
             round(s.materials_waste_tco2e or 0, 4),
+            round(getattr(s, "equipment_tco2e", 0) or 0, 4),
+            round(getattr(s, "swag_tco2e", 0) or 0, 4),
+            round(getattr(s, "digital_tco2e", 0) or 0, 4),
             round(s.total_tco2e or 0, 4),
             round(s.per_attendee_tco2e or 0, 4),
             round(s.scope1_tco2e or 0, 4),
@@ -647,8 +913,24 @@ async def export_scenarios_xlsx(
     ws2.column_dimensions["B"].width = 30
     ws2.column_dimensions["C"].width = 80
 
-    filename = f"cutcarbon_scenarios_{datetime.utcnow().strftime('%Y%m%d')}.xlsx"
-    return _wb_response(wb, filename)
+    return wb
+
+
+@router.get("/scenarios.xlsx", summary="Download all scenarios as Excel")
+async def export_scenarios_xlsx(
+    db: AsyncSession = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user),
+):
+    q = (
+        select(ScenarioDB)
+        .where(ScenarioDB.user_id == current_user.id)
+        .order_by(desc(ScenarioDB.created_at))
+    )
+    rows = (await db.execute(q)).scalars().all()
+
+    content = await asyncio.to_thread(lambda: _wb_bytes(_build_scenarios_workbook(rows)))
+    filename = f"cutcarbon_scenarios_{utcnow().strftime('%Y%m%d')}.xlsx"
+    return _xlsx_response(content, filename)
 
 
 @router.get("/scenarios/{scenario_id}.json", response_model=ScenarioReportPayload, summary="Download single scenario report package as JSON")
@@ -691,8 +973,9 @@ async def export_scenario_csv(
         has_scope3=has_scope3,
         has_ghg_report=has_ghg_report,
     )
+    content = await asyncio.to_thread(_scenario_report_csv_bytes, report)
     return _csv_response(
-        _scenario_report_csv_bytes(report),
+        content,
         _scenario_report_filename("cutcarbon_report", scenario_id, "csv"),
     )
 
@@ -714,8 +997,8 @@ async def export_scenario_xlsx(
         has_scope3=has_scope3,
         has_ghg_report=has_ghg_report,
     )
-    wb = _scenario_report_xlsx(report)
-    return _wb_response(wb, _scenario_report_filename("cutcarbon_report", scenario_id, "xlsx"))
+    content = await asyncio.to_thread(lambda: _wb_bytes(_scenario_report_xlsx(report)))
+    return _xlsx_response(content, _scenario_report_filename("cutcarbon_report", scenario_id, "xlsx"))
 
 
 @router.get("/scenarios/{scenario_id}.pdf", summary="Download single scenario report package as PDF")
@@ -735,18 +1018,18 @@ async def export_scenario_pdf(
         has_scope3=has_scope3,
         has_ghg_report=has_ghg_report,
     )
+    content = await asyncio.to_thread(_scenario_report_pdf, report)
     return _pdf_response(
-        _scenario_report_pdf(report),
+        content,
         _scenario_report_filename("cutcarbon_report", scenario_id, "pdf"),
     )
 
 
-@router.get("/emission-factors.xlsx", summary="Download emission factor catalog as Excel")
-async def export_emission_factors_xlsx():
+def _build_factor_workbook():
     from openpyxl import Workbook
 
     ef_path = _DATA_DIR / "emission_factors.json"
-    with open(ef_path) as f:
+    with open(ef_path, encoding="utf-8") as f:
         ef = json.load(f)
 
     wb = Workbook()
@@ -781,23 +1064,20 @@ async def export_emission_factors_xlsx():
         max_len = max((len(str(cell.value or "")) for cell in col), default=0)
         ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 45)
 
-    filename = f"cutcarbon_emission_factors_{datetime.utcnow().strftime('%Y%m%d')}.xlsx"
-    return _wb_response(wb, filename)
+    return wb
 
 
-@router.get("/agent-runs.xlsx", summary="Download TinyFish agent run history as Excel")
-async def export_agent_runs_xlsx(
-    db: AsyncSession = Depends(get_db),
-    limit: int = 500,
+@router.get("/emission-factors.xlsx", summary="Download emission factor catalog as Excel")
+async def export_emission_factors_xlsx(
     current_user: UserDB = Depends(get_current_user),
 ):
-    from openpyxl import Workbook
+    content = await asyncio.to_thread(lambda: _wb_bytes(_build_factor_workbook()))
+    filename = f"cutcarbon_emission_factors_{utcnow().strftime('%Y%m%d')}.xlsx"
+    return _xlsx_response(content, filename)
 
-    rows = (
-        await db.execute(
-            select(AgentRunDB).order_by(desc(AgentRunDB.fetched_at)).limit(limit)
-        )
-    ).scalars().all()
+
+def _build_agent_runs_workbook(rows):
+    from openpyxl import Workbook
 
     wb = Workbook()
     ws = wb.active
@@ -821,18 +1101,40 @@ async def export_agent_runs_xlsx(
 
         ws.column_dimensions[get_column_letter(i)].width = width
 
-    filename = f"cutcarbon_agent_runs_{datetime.utcnow().strftime('%Y%m%d')}.xlsx"
-    return _wb_response(wb, filename)
+    return wb
+
+
+@router.get("/agent-runs.xlsx", summary="Download TinyFish agent run history as Excel")
+async def export_agent_runs_xlsx(
+    db: AsyncSession = Depends(get_db),
+    limit: int = 500,
+    current_user: UserDB = Depends(get_current_user),
+):
+    rows = (
+        await db.execute(
+            select(AgentRunDB).order_by(desc(AgentRunDB.fetched_at)).limit(limit)
+        )
+    ).scalars().all()
+
+    content = await asyncio.to_thread(lambda: _wb_bytes(_build_agent_runs_workbook(rows)))
+    filename = f"cutcarbon_agent_runs_{utcnow().strftime('%Y%m%d')}.xlsx"
+    return _xlsx_response(content, filename)
+
+
+def _load_factor_json() -> dict:
+    ef_path = _DATA_DIR / "emission_factors.json"
+    with open(ef_path, encoding="utf-8") as f:
+        return json.load(f)
 
 
 @router.get("/emission-factors.json", summary="Download emission_factors.json (raw)")
-async def export_emission_factors_json():
-    ef_path = _DATA_DIR / "emission_factors.json"
-    with open(ef_path) as f:
-        data = json.load(f)
+async def export_emission_factors_json(
+    current_user: UserDB = Depends(get_current_user),
+):
+    data = await asyncio.to_thread(_load_factor_json)
     return JSONResponse(
         content=data,
-        headers={"Content-Disposition": f'attachment; filename="emission_factors_{datetime.utcnow().strftime("%Y%m%d")}.json"'},
+        headers={"Content-Disposition": f'attachment; filename="emission_factors_{utcnow().strftime("%Y%m%d")}.json"'},
     )
 
 
@@ -848,8 +1150,8 @@ async def export_scenarios_json(
     )
     rows = (await db.execute(q)).scalars().all()
 
-    data = [_serialize_scenario_row(s) for s in rows]
+    data = [serialize_scenario(s) for s in rows]
     return JSONResponse(
         content=data,
-        headers={"Content-Disposition": f'attachment; filename="cutcarbon_scenarios_{datetime.utcnow().strftime("%Y%m%d")}.json"'},
+        headers={"Content-Disposition": f'attachment; filename="cutcarbon_scenarios_{utcnow().strftime("%Y%m%d")}.json"'},
     )

@@ -1,6 +1,4 @@
 """Carbon offset portfolio management — browse projects, track purchases, retire credits."""
-import json
-from pathlib import Path
 from datetime import datetime
 from typing import List, Optional
 
@@ -13,13 +11,10 @@ from app.models.schemas import (
     OffsetPurchaseCreate, OffsetPurchaseOut, OffsetPortfolioSummary, OffsetRecommendation
 )
 from app.routers.auth import get_current_user
+from app.services.data_files import CARBON_OFFSETS as OFFSET_DATA
+from app.utils.time import utcnow
 
 router = APIRouter()
-
-_DATA_DIR = Path(__file__).parent.parent / "data"
-
-with open(_DATA_DIR / "carbon_offsets.json") as f:
-    OFFSET_DATA = json.load(f)
 
 
 @router.get("/projects")
@@ -40,12 +35,6 @@ async def market_overview():
     return OFFSET_DATA["market_data"]
 
 
-@router.get("/guidance")
-async def retirement_guidance():
-    """Best practices for claiming and retiring carbon credits."""
-    return OFFSET_DATA["retirement_guidance"]
-
-
 @router.post("", response_model=OffsetPurchaseOut)
 async def create_purchase(
     purchase: OffsetPurchaseCreate,
@@ -53,6 +42,16 @@ async def create_purchase(
     current_user: UserDB = Depends(get_current_user),
 ):
     """Record a carbon offset purchase."""
+    if purchase.scenario_id:
+        scenario = await db.scalar(
+            select(ScenarioDB).where(
+                ScenarioDB.id == purchase.scenario_id,
+                ScenarioDB.user_id == current_user.id,
+            )
+        )
+        if not scenario:
+            raise HTTPException(status_code=404, detail="Scenario not found")
+
     total_cost = purchase.quantity_tco2e * purchase.price_per_tco2e_usd
     db_obj = OffsetPurchaseDB(
         user_id=current_user.id,
@@ -66,7 +65,7 @@ async def create_purchase(
         serial_number=purchase.serial_number,
         status="purchased",
         notes=purchase.notes,
-        created_at=datetime.utcnow(),
+        created_at=utcnow(),
     )
     db.add(db_obj)
     await db.commit()
@@ -108,7 +107,7 @@ async def retire_credit(
         raise HTTPException(status_code=400, detail="Already retired")
 
     p.status = "retired"
-    p.retired_at = datetime.utcnow()
+    p.retired_at = utcnow()
     await db.commit()
     return _to_out(p)
 
@@ -199,7 +198,6 @@ async def recommend_offsets(
     residual = scenario.total_tco2e
     projects = OFFSET_DATA["project_types"]
 
-    recommendations = []
     # Recommended portfolio: 50% avoidance, 30% nature-based, 20% removal
     portfolio_mix = [
         ("renewable_energy", 0.30),
@@ -210,26 +208,35 @@ async def recommend_offsets(
         ("direct_air_capture", 0.10),
     ]
 
+    # First pass: unconstrained quantities/costs sized to fully cover the residual.
+    raw = []
+    total_cost_unconstrained = 0.0
     for proj_key, pct in portfolio_mix:
         proj = projects.get(proj_key)
         if not proj:
             continue
-        qty = round(residual * pct, 3)
+        qty = residual * pct
         price = proj["avg_price_usd"]
-        cost = round(qty * price, 2)
+        raw.append((proj_key, proj, qty, price))
+        total_cost_unconstrained += qty * price
 
-        if budget_usd and cost > budget_usd * pct * 1.5:
-            # Adjust quantity to fit budget
-            qty = round(budget_usd * pct / price, 3)
-            cost = round(qty * price, 2)
+    # Scale the whole portfolio down to fit the budget (if any), preserving the mix —
+    # so total spend converges to min(budget, full-coverage cost) instead of the old
+    # incoherent per-line 1.5x trigger that never summed to the stated budget.
+    scale = 1.0
+    if budget_usd and total_cost_unconstrained > budget_usd and total_cost_unconstrained > 0:
+        scale = budget_usd / total_cost_unconstrained
 
+    recommendations = []
+    for proj_key, proj, qty, price in raw:
+        scaled_qty = round(qty * scale, 3)
         recommendations.append(OffsetRecommendation(
             project_type=proj_key,
             label=proj["label"],
             description=proj["description"],
             avg_price_usd=price,
-            recommended_qty_tco2e=qty,
-            estimated_cost_usd=cost,
+            recommended_qty_tco2e=scaled_qty,
+            estimated_cost_usd=round(scaled_qty * price, 2),
             permanence=proj["permanence"],
             co_benefits=proj["co_benefits"],
             sdgs=proj["sdgs"],

@@ -3,14 +3,96 @@ OpenAI service: chat co-pilot with function calling for structured data extracti
 Converts natural language event descriptions into EventScenarioInput objects.
 """
 import json
+import logging
 from typing import Optional, List, Dict, Any
 
-from openai import AsyncOpenAI
+from openai import (
+    AsyncOpenAI,
+    APIConnectionError,
+    APIError,
+    APITimeoutError,
+    RateLimitError,
+)
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from app.config import settings
-from app.models.schemas import ChatMessage, EventScenarioInput
+from app.models.schemas import ChatMessage
+
+logger = logging.getLogger(__name__)
 
 client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+
+# Roles we will ever forward to the model — prevents a client injecting role="system"
+# to override the server system prompt.
+_ALLOWED_ROLES = {"user", "assistant"}
+
+# Cabin class only changes the emission factor for these modes; the engine ignores it
+# everywhere else, so normalize to economy to keep stored payloads honest.
+_FLIGHT_CLASS_MODES = {"short_haul_flight", "long_haul_flight"}
+
+# Bound + sanity-check the LLM's extracted event data before it reaches the engine.
+# extra="ignore" drops hallucinated fields; bounds reject absurd values that would
+# otherwise produce plausible-looking garbage totals.
+
+
+class _TravelSegmentExtract(BaseModel):
+    model_config = {"extra": "ignore"}
+    mode: str
+    travel_class: Optional[str] = "economy"
+    attendees: int = Field(ge=1, le=1_000_000)
+    distance_km: float = Field(ge=0, le=50_000)
+    label: Optional[str] = ""
+
+    @model_validator(mode="after")
+    def _class_only_for_flights(self):
+        if self.mode not in _FLIGHT_CLASS_MODES:
+            self.travel_class = "economy"
+        return self
+
+
+class ExtractedEventData(BaseModel):
+    model_config = {"extra": "ignore"}
+    event_name: Optional[str] = None
+    location: Optional[str] = None
+    attendees: Optional[int] = Field(default=None, ge=1, le=1_000_000)
+    event_days: Optional[int] = Field(default=None, ge=1, le=365)
+    travel_segments: Optional[List[_TravelSegmentExtract]] = Field(default=None, max_length=100)
+    venue_grid_region: Optional[str] = None
+    venue_kwh: Optional[float] = Field(default=None, ge=0, le=100_000_000)
+    venue_area_m2: Optional[float] = Field(default=None, ge=0, le=10_000_000)
+    renewable_pct: Optional[float] = Field(default=None, ge=0, le=100)
+    accommodation_type: Optional[str] = None
+    room_nights: Optional[int] = Field(default=None, ge=0, le=100_000_000)
+    catering_type: Optional[str] = None
+    meals: Optional[int] = Field(default=None, ge=0, le=100_000_000)
+    general_waste_kg: Optional[float] = Field(default=None, ge=0)
+    recycled_kg: Optional[float] = Field(default=None, ge=0)
+    has_printed_materials: Optional[bool] = None
+    exhibition_booths_m2: Optional[float] = Field(default=None, ge=0)
+    virtual_attendees: Optional[int] = Field(default=None, ge=0, le=1_000_000)
+    streaming_hours_per_day: Optional[float] = Field(default=None, ge=0, le=24)
+    event_app_users: Optional[int] = Field(default=None, ge=0, le=1_000_000)
+    emails_sent: Optional[int] = Field(default=None, ge=0, le=100_000_000)
+
+
+class ChatServiceError(Exception):
+    """Raised when the upstream LLM call fails — surfaced as a 503 by the router."""
+
+
+# Per-request caps for the LLM calls.
+_OPENAI_TIMEOUT_S = 30
+_OPENAI_MAX_TOKENS = 800
+
+
+def _validate_extracted(args: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Validate + bound LLM tool args. Returns a clean dict, or None if unusable."""
+    try:
+        cleaned = ExtractedEventData.model_validate(args)
+    except ValidationError as exc:
+        logger.warning("dropped invalid extraction: %s error(s)", exc.error_count())
+        return None
+    data = cleaned.model_dump(exclude_none=True)
+    return data or None
 
 SYSTEM_PROMPT = """You are EventCarbon Co-Pilot, an AI assistant that helps event organizers
 calculate, understand, and reduce the carbon footprint of their events.
@@ -21,7 +103,7 @@ Your capabilities:
 3. Explain emissions methodology in plain language
 4. Suggest practical, ranked reduction actions with cost implications
 5. Calculate financial savings from carbon tax, incentives, and cost reductions
-6. Assess compliance with GHG Protocol, ISO 20121, SBTi, and regional regulations
+6. Assess alignment with GHG Protocol, ISO 20121, Net Zero Carbon Events (NZCE), and regional regimes (SGX, EU CSRD)
 
 When users describe their event, extract:
 - Attendee count, event duration, location
@@ -62,7 +144,11 @@ EXTRACTION_TOOLS = [
                                              "bus_coach", "shuttle_bus", "mrt_metro", "taxi_rideshare",
                                              "ferry", "e_scooter", "cycling"]
                                 },
-                                "travel_class": {"type": "string", "enum": ["economy", "business", "first"]},
+                                "travel_class": {
+                                    "type": "string",
+                                    "enum": ["economy", "business", "first"],
+                                    "description": "Cabin class — flights only; omit for trains, cars, buses and other ground/sea modes"
+                                },
                                 "attendees": {"type": "integer"},
                                 "distance_km": {"type": "number"},
                                 "label": {"type": "string"}
@@ -95,6 +181,10 @@ EXTRACTION_TOOLS = [
                     "recycled_kg": {"type": "number"},
                     "has_printed_materials": {"type": "boolean"},
                     "exhibition_booths_m2": {"type": "number"},
+                    "virtual_attendees": {"type": "integer", "description": "Number of remote/virtual attendees (for virtual or hybrid events)"},
+                    "streaming_hours_per_day": {"type": "number", "description": "Hours of video streaming per virtual attendee per day"},
+                    "event_app_users": {"type": "integer", "description": "Active event-app users"},
+                    "emails_sent": {"type": "integer", "description": "Total campaign emails sent for the event"},
                 },
                 "required": []
             }
@@ -104,11 +194,12 @@ EXTRACTION_TOOLS = [
         "type": "function",
         "function": {
             "name": "request_financial_analysis",
-            "description": "Trigger financial savings and compliance analysis for a scenario",
+            "description": "Run the real financial analysis (carbon tax savings, energy/catering cost savings, incentives) for the user's currently selected scenario. Use the returned numbers verbatim — do not invent figures.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "region": {"type": "string"},
+                    "region": {"type": "string", "description": "Carbon-pricing region, e.g. singapore, eu, uk, australia, usa"},
+                    "reduction_pct": {"type": "number", "description": "Assumed emission reduction percentage (default 30)"},
                     "actions": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -140,9 +231,14 @@ def _build_context_message(event_context: Optional[Dict]) -> str:
 async def chat(
     messages: List[ChatMessage],
     event_context: Optional[Dict] = None,
+    financial_provider=None,
 ) -> Dict[str, Any]:
-    """
-    Send messages to OpenAI and return reply + any extracted structured data.
+    """Send messages to OpenAI; return reply + any extracted structured data.
+
+    ``financial_provider`` is an optional callable(args: dict) -> Optional[dict]
+    supplied by the router. When the model calls request_financial_analysis, its
+    real output is fed back as the tool result so the follow-up reply states
+    engine-computed numbers instead of hallucinating them.
     """
     context_str = _build_context_message(event_context)
 
@@ -150,46 +246,69 @@ async def chat(
     if context_str:
         system_content += f"\n\n{context_str}"
 
+    # System message is built server-side only; client message roles are constrained
+    # to user/assistant so a client cannot inject role="system" to override the prompt.
     openai_messages = [{"role": "system", "content": system_content}]
     for msg in messages:
-        openai_messages.append({"role": msg.role, "content": msg.content})
+        role = msg.role if msg.role in _ALLOWED_ROLES else "user"
+        openai_messages.append({"role": role, "content": msg.content})
 
-    response = await client.chat.completions.create(
-        model=settings.OPENAI_MODEL,
-        messages=openai_messages,
-        tools=EXTRACTION_TOOLS,
-        tool_choice="auto",
-        temperature=0.3,
-    )
+    try:
+        response = await client.chat.completions.create(
+            model=settings.OPENAI_MODEL,
+            messages=openai_messages,
+            tools=EXTRACTION_TOOLS,
+            tool_choice="auto",
+            temperature=0.3,
+            max_tokens=_OPENAI_MAX_TOKENS,
+            timeout=_OPENAI_TIMEOUT_S,
+        )
+    except (APITimeoutError, RateLimitError, APIConnectionError, APIError) as exc:
+        raise ChatServiceError(f"AI service unavailable: {type(exc).__name__}") from exc
 
     choice = response.choices[0]
     extracted_data = None
-    financial_trigger = None
+    financial_analysis = None
 
     # Handle tool calls
     if choice.finish_reason == "tool_calls" and choice.message.tool_calls:
         tool_results = []
         for tc in choice.message.tool_calls:
-            args = json.loads(tc.function.arguments)
+            try:
+                args = json.loads(tc.function.arguments)
+            except (json.JSONDecodeError, TypeError):
+                args = {}
             if tc.function.name == "update_event_scenario":
-                extracted_data = args
+                extracted_data = _validate_extracted(args)
+                tool_content = {"status": "ok", "received": args}
             elif tc.function.name == "request_financial_analysis":
-                financial_trigger = args
+                if financial_provider is not None:
+                    financial_analysis = financial_provider(args)
+                tool_content = financial_analysis or {
+                    "error": "No scenario selected — ask the user to select or create a scenario first."
+                }
+            else:
+                tool_content = {"status": "ok"}
             tool_results.append({
                 "tool_call_id": tc.id,
                 "role": "tool",
-                "content": json.dumps({"status": "ok", "received": args}),
+                "content": json.dumps(tool_content),
             })
 
         # Get final reply after tool use
         openai_messages.append(choice.message)
         openai_messages.extend(tool_results)
 
-        follow_up = await client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
-            messages=openai_messages,
-            temperature=0.3,
-        )
+        try:
+            follow_up = await client.chat.completions.create(
+                model=settings.OPENAI_MODEL,
+                messages=openai_messages,
+                temperature=0.3,
+                max_tokens=_OPENAI_MAX_TOKENS,
+                timeout=_OPENAI_TIMEOUT_S,
+            )
+        except (APITimeoutError, RateLimitError, APIConnectionError, APIError) as exc:
+            raise ChatServiceError(f"AI service unavailable: {type(exc).__name__}") from exc
         reply = follow_up.choices[0].message.content or ""
     else:
         reply = choice.message.content or ""
@@ -200,7 +319,7 @@ async def chat(
     return {
         "reply": reply,
         "extracted_data": extracted_data,
-        "financial_trigger": financial_trigger,
+        "financial_analysis": financial_analysis,
         "suggestions": suggestions,
     }
 
@@ -232,10 +351,3 @@ def _generate_suggestions(
         ])
 
     return suggestions[:3]
-
-
-async def generate_scenario_from_chat(raw_text: str) -> Optional[Dict]:
-    """One-shot: extract a full scenario from a single text description."""
-    messages = [ChatMessage(role="user", content=raw_text)]
-    result = await chat(messages)
-    return result.get("extracted_data")

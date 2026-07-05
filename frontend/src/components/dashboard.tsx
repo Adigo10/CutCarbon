@@ -12,6 +12,7 @@ import {
   formatNumber,
   formatTons,
   intensityBand,
+  labelize,
   scenarioGapToBest,
   scenarioRank,
   selectedScenarioCategoryRows,
@@ -57,33 +58,34 @@ export function DashboardView({
 }: DashboardViewProps) {
   if (!scenarios.length || !selectedScenario) {
     return (
-      <div className="workspace-grid">
-        <Panel className="hero-shell hero-shell-empty">
-          <div className="hero-copy">
-            <span className="eyebrow">Carbon Intelligence Workspace</span>
-            <h2>Create your first scenario to activate portfolio analytics.</h2>
+      <div className="dashboard-empty">
+        <section className="empty-command">
+          <div>
+            <span className="eyebrow">Carbon intelligence workspace</span>
+            <h2>Start with one measured event baseline.</h2>
             <p>
-              Once a baseline event is created, this dashboard will compare portfolio totals,
-              map scope composition, and prioritize reduction actions.
+              Build the first scenario, then CutCarbon will unlock portfolio analytics,
+              reduction pathways, financial impact, offsets, and compliance outputs.
             </p>
-            <div className="hero-actions hero-actions-row">
-              <Button tone="primary" onClick={() => onOpenTab('scenarios')}>
-                Create scenario
-              </Button>
-              <Button tone="soft" onClick={() => onOpenTab('chat')}>
-                Open AI assistant
-              </Button>
-            </div>
           </div>
-          <div className="quick-actions">
-            {QUICK_ACTIONS.map((action) => (
-              <article key={action.title} className="quick-action-card">
-                <span className="quick-action-title">{action.title}</span>
-                <p>{action.body}</p>
-              </article>
-            ))}
+          <div className="hero-actions hero-actions-row">
+            <Button tone="primary" onClick={() => onOpenTab('scenarios')}>
+              Create scenario
+            </Button>
+            <Button tone="soft" onClick={() => onOpenTab('chat')}>
+              Open AI assistant
+            </Button>
           </div>
-        </Panel>
+        </section>
+        <div className="quick-actions">
+          {QUICK_ACTIONS.map((action, index) => (
+            <article key={action.title} className="quick-action-card">
+              <span>{String(index + 1).padStart(2, '0')}</span>
+              <strong>{action.title}</strong>
+              <p>{action.body}</p>
+            </article>
+          ))}
+        </div>
         <EmptyState
           title="No scenario data available"
           body="Create a baseline event or use the AI assistant to draft one from natural language."
@@ -112,10 +114,10 @@ export function DashboardView({
               label: 'Total tCO2e',
               data: sortedScenarios.map((scenario) => Number(scenario.emissions.total_tco2e.toFixed(3))),
               backgroundColor: sortedScenarios.map((scenario) =>
-                scenario.scenario_id === selectedScenario.scenario_id ? '#1f6f6d' : 'rgba(31,111,109,0.16)',
+                scenario.scenario_id === selectedScenario.scenario_id ? 'rgba(20,111,72,0.72)' : 'rgba(20,111,72,0.14)',
               ),
-              borderColor: '#1f6f6d',
-              borderRadius: 8,
+              borderColor: 'rgba(20,111,72,0.35)',
+              borderRadius: 6,
               borderWidth: 0,
               yAxisID: 'y',
             },
@@ -125,11 +127,11 @@ export function DashboardView({
               data: sortedScenarios.map((scenario) =>
                 Number((scenario.emissions.per_attendee_tco2e * 1000).toFixed(1)),
               ),
-              borderColor: '#3b6e8f',
+              borderColor: '#247b92',
               tension: 0.4,
               borderDash: [5, 4],
               pointRadius: 3,
-              pointBackgroundColor: '#3b6e8f',
+              pointBackgroundColor: '#247b92',
               yAxisID: 'y1',
             },
           ],
@@ -140,28 +142,28 @@ export function DashboardView({
           interaction: { mode: 'index', intersect: false },
           plugins: {
             legend: {
-              labels: { color: '#64748b', boxWidth: 10, padding: 16 },
+              labels: { color: '#647268', boxWidth: 10, padding: 16 },
             },
           },
           scales: {
             x: {
-              ticks: { color: '#94a3b8', font: { size: 11 } },
+              ticks: { color: '#647268', font: { size: 11 } },
               grid: { display: false },
               border: { display: false },
             },
             y: {
               ticks: {
-                color: '#1f6f6d',
+                color: '#146f48',
                 font: { size: 11 },
                 callback: (value) => `${value} t`,
               },
-              grid: { color: 'rgba(15,23,42,0.05)' },
+              grid: { color: '#dce4d8' },
               border: { display: false },
             },
             y1: {
               position: 'right',
               ticks: {
-                color: '#3b6e8f',
+                color: '#247b92',
                 font: { size: 11 },
                 callback: (value) => `${value} kg`,
               },
@@ -194,19 +196,19 @@ export function DashboardView({
           indexAxis: 'y',
           plugins: {
             legend: {
-              labels: { color: '#64748b', boxWidth: 10, padding: 16 },
+              labels: { color: '#647268', boxWidth: 10, padding: 16 },
             },
           },
           scales: {
             x: {
               stacked: true,
-              ticks: { color: '#94a3b8', font: { size: 11 }, callback: (value) => `${value} t` },
-              grid: { color: 'rgba(15,23,42,0.05)' },
+              ticks: { color: '#647268', font: { size: 11 }, callback: (value) => `${value} t` },
+              grid: { color: '#dce4d8' },
               border: { display: false },
             },
             y: {
               stacked: true,
-              ticks: { color: '#64748b', font: { size: 11 } },
+              ticks: { color: '#647268', font: { size: 11 } },
               grid: { display: false },
               border: { display: false },
             },
@@ -235,7 +237,7 @@ export function DashboardView({
           plugins: {
             legend: {
               position: 'right',
-              labels: { color: '#64748b', boxWidth: 10, padding: 14 },
+              labels: { color: '#647268', boxWidth: 10, padding: 14 },
             },
           },
         },
@@ -263,12 +265,12 @@ export function DashboardView({
           plugins: { legend: { display: false } },
           scales: {
             x: {
-              ticks: { color: '#94a3b8', font: { size: 11 }, callback: (value) => `${value} t` },
-              grid: { color: 'rgba(15,23,42,0.05)' },
+              ticks: { color: '#647268', font: { size: 11 }, callback: (value) => `${value} t` },
+              grid: { color: '#dce4d8' },
               border: { display: false },
             },
             y: {
-              ticks: { color: '#64748b', font: { size: 11 } },
+              ticks: { color: '#647268', font: { size: 11 } },
               grid: { display: false },
               border: { display: false },
             },
@@ -297,8 +299,8 @@ export function DashboardView({
           maintainAspectRatio: false,
           plugins: { legend: { display: false } },
           scales: {
-            x: { ticks: { color: '#94a3b8', font: { size: 11 }, callback: (value) => `${value} t` }, grid: { color: 'rgba(15,23,42,0.05)' }, border: { display: false } },
-            y: { ticks: { color: '#64748b', font: { size: 11 } }, grid: { display: false }, border: { display: false } },
+            x: { ticks: { color: '#647268', font: { size: 11 }, callback: (value) => `${value} t` }, grid: { color: '#dce4d8' }, border: { display: false } },
+            y: { ticks: { color: '#647268', font: { size: 11 } }, grid: { display: false }, border: { display: false } },
           },
         },
       }
@@ -335,11 +337,11 @@ export function DashboardView({
           },
           scales: {
             x: {
-              ticks: { color: '#94a3b8', font: { size: 11 }, maxRotation: 0, autoSkip: false },
+              ticks: { color: '#647268', font: { size: 11 }, maxRotation: 25, autoSkip: true },
               grid: { display: false },
               border: { display: false },
             },
-            y: { ticks: { color: '#64748b', font: { size: 11 } }, grid: { color: 'rgba(15,23,42,0.05)' }, border: { display: false } },
+            y: { ticks: { color: '#647268', font: { size: 11 } }, grid: { color: '#dce4d8' }, border: { display: false } },
           },
         },
       }
@@ -358,12 +360,12 @@ export function DashboardView({
             Math.max(selectedScenario.emissions.total_tco2e - estimatedReductionOpportunity(selectedScenario), 0),
             0,
           ],
-          borderColor: '#1f6f6d',
-          backgroundColor: 'rgba(31,111,109,0.08)',
+          borderColor: '#146f48',
+          backgroundColor: 'rgba(20,111,72,0.08)',
           fill: true,
           tension: 0.4,
           pointRadius: 4,
-          pointBackgroundColor: '#1f6f6d',
+          pointBackgroundColor: '#146f48',
         },
       ],
     },
@@ -372,64 +374,70 @@ export function DashboardView({
       maintainAspectRatio: false,
       plugins: { legend: { display: false } },
       scales: {
-        x: { ticks: { color: '#94a3b8', font: { size: 11 } }, grid: { display: false }, border: { display: false } },
-        y: { ticks: { color: '#64748b', font: { size: 11 }, callback: (value) => `${value} t` }, grid: { color: 'rgba(15,23,42,0.05)' }, border: { display: false } },
+        x: { ticks: { color: '#647268', font: { size: 11 } }, grid: { display: false }, border: { display: false } },
+        y: { ticks: { color: '#647268', font: { size: 11 }, callback: (value) => `${value} t` }, grid: { color: '#dce4d8' }, border: { display: false } },
       },
     },
   }
 
   return (
-    <div className="workspace-grid">
-      <Panel className="scenario-picker-panel">
-        <div className="scenario-picker-head">
-          <span className="eyebrow">Scenarios</span>
-          <span className="eyebrow">{sortedScenarios.length} total</span>
-        </div>
-        <div className="scenario-chip-row" role="list" aria-label="Scenario list">
-          {sortedScenarios.map((scenario) => (
-            <button
-              key={scenario.scenario_id}
-              className={scenario.scenario_id === selectedScenario.scenario_id ? 'scenario-chip is-active' : 'scenario-chip'}
-              onClick={() => onSelectScenario(scenario)}
-              type="button"
-            >
-              <span>{scenario.name}</span>
-              <small>{formatTons(scenario.emissions.total_tco2e)}</small>
-            </button>
-          ))}
-        </div>
-      </Panel>
-
-      <Panel className="hero-shell hero-shell-compact hero-shell-minimal">
-        <div className="hero-copy">
-          <span className="eyebrow" style={{ opacity: 0.6, marginBottom: '0.1rem' }}>Portfolio overview</span>
-          <p className="hero-compact-copy">
-            <strong>{selectedScenario.name}</strong> • {formatTons(selectedScenario.emissions.total_tco2e, 3)} • {hotspot.label}
+    <div className="dashboard-canvas">
+      <section className="dashboard-command-center">
+        <div className="active-plan">
+          <span className="eyebrow">Active event plan</span>
+          <h2>{selectedScenario.name}</h2>
+          <p>
+            {selectedScenario.location} · {labelize(selectedScenario.event_type)} · {selectedScenario.attendees} attendees · hotspot: {hotspot.label}
           </p>
-        </div>
-        <div className="hero-summary">
-          <div className="hero-summary-metrics">
-            <div className="metric-mini">
-              <small>Scenarios</small>
-              <strong>{scenarios.length}</strong>
+          <div className="active-plan-ledger">
+            <div>
+              <span>Total footprint</span>
+              <strong>{formatTons(selectedScenario.emissions.total_tco2e, 3)}</strong>
             </div>
-            <div className="metric-mini">
-              <small>Intensity</small>
+            <div>
+              <span>Portfolio rank</span>
+              <strong>#{scenarioRank(selectedScenario, scenarios)} of {scenarios.length}</strong>
+            </div>
+            <div>
+              <span>Intensity band</span>
               <strong>{intensityBand(selectedScenario)}</strong>
             </div>
           </div>
           <div className="hero-actions hero-actions-row">
             <Button tone="soft" onClick={() => onOpenTab('scenarios')}>
-              Edit
+              Edit scenario
             </Button>
             <Button tone="primary" onClick={() => onOpenTab('financial')}>
-              Price
+              Model savings
+            </Button>
+            <Button tone="ghost" onClick={() => onLoadSuggestions(selectedScenario)}>
+              Load reductions
             </Button>
           </div>
         </div>
-      </Panel>
 
-      <div className="metric-grid">
+        <div className="scenario-queue">
+          <div className="scenario-picker-head">
+            <span className="eyebrow">Scenario queue</span>
+            <span>{sortedScenarios.length} saved</span>
+          </div>
+          <div className="scenario-chip-row" role="list" aria-label="Scenario list">
+            {sortedScenarios.map((scenario) => (
+              <button
+                key={scenario.scenario_id}
+                className={scenario.scenario_id === selectedScenario.scenario_id ? 'scenario-chip is-active' : 'scenario-chip'}
+                onClick={() => onSelectScenario(scenario)}
+                type="button"
+              >
+                <span>{scenario.name}</span>
+                <small>{formatTons(scenario.emissions.total_tco2e)}</small>
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <div className="metric-grid metric-ledger">
         <MetricCard
           eyebrow="Current total"
           value={formatTons(selectedScenario.emissions.total_tco2e)}
@@ -450,7 +458,7 @@ export function DashboardView({
         <MetricCard
           eyebrow="Reduction opportunity"
           value={formatTons(estimatedReductionOpportunity(selectedScenario))}
-          detail="Modeled top-category abatement"
+          detail="Illustrative default — load Suggestions for the modeled plan"
           tone="rose"
         />
       </div>
@@ -546,12 +554,12 @@ export function DashboardView({
               <strong>
                 {financialResult && financialCalc.linked_scenario_id === selectedScenario.scenario_id
                   ? formatCurrency(financialResult.total_financial_savings_usd)
-                  : formatCurrency(selectedScenario.emissions.total_tco2e * 0.3 * 25 * 0.74)}
+                  : '—'}
               </strong>
               <p>
                 {financialResult && financialCalc.linked_scenario_id === selectedScenario.scenario_id
                   ? 'From linked financial analysis.'
-                  : 'Modeled at a 30% reduction.'}
+                  : 'Run financial analysis for a real estimate.'}
               </p>
             </article>
             <article className="signal-card">

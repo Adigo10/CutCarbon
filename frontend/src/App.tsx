@@ -23,6 +23,7 @@ import {
   applyExtractedData,
   buildScenarioPayload,
   financialPresetFromScenario,
+  formatTons,
 } from './lib/format'
 import type {
   AgentRun,
@@ -63,12 +64,13 @@ function App() {
   const [scenarioDraft, setScenarioDraft] = useState<ScenarioDraft>(createDefaultScenarioDraft)
   const [editingScenario, setEditingScenario] = useState<Scenario | null>(null)
   const [scenarioLoading, setScenarioLoading] = useState(false)
+  const [comparisonIds, setComparisonIds] = useState<string[]>([])
   const [suggestions, setSuggestions] = useState<ReductionSuggestion[]>([])
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
   const [chatContext, setChatContext] = useState<Record<string, unknown>>({})
-  const [sessionId] = useState(() => `session-${Math.random().toString(36).slice(2, 9)}`)
+  const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID())
   const [financialCalc, setFinancialCalc] = useState(createDefaultFinancialCalc)
   const [financialResult, setFinancialResult] = useState<FinancialResult | null>(null)
   const [financialLoading, setFinancialLoading] = useState(false)
@@ -107,6 +109,7 @@ function App() {
     setCurrentUser(null)
     setScenarios([])
     setSelectedScenarioId(null)
+    setComparisonIds([])
     setSuggestions([])
     setFinancialResult(null)
     setOffsetPurchases([])
@@ -315,6 +318,10 @@ function App() {
       tote_bags: payload?.swag?.tote_bags ?? 0,
       lanyards: payload?.swag?.lanyards ?? 0,
       badges: payload?.swag?.badges ?? 0,
+      virtual_attendees: payload?.digital?.virtual_attendees ?? 0,
+      streaming_hours_per_day: payload?.digital?.streaming_hours_per_day ?? 6,
+      event_app_users: payload?.digital?.event_app_users ?? 0,
+      emails_sent: payload?.digital?.emails_sent ?? 0,
     })
     handleOpenTab('scenarios')
   }
@@ -322,6 +329,16 @@ function App() {
   function handleCancelEdit() {
     setEditingScenario(null)
     setScenarioDraft(createDefaultScenarioDraft())
+  }
+
+  function handleToggleCompare(id: string) {
+    if (!comparisonIds.includes(id) && comparisonIds.length >= 4) {
+      pushToast('Comparison is limited to 4 scenarios', 'warning')
+      return
+    }
+    setComparisonIds((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
+    )
   }
 
   async function handleCloneScenario(scenario: Scenario) {
@@ -344,6 +361,7 @@ function App() {
     try {
       await api.deleteScenario(id, token)
       setScenarios((current) => current.filter((scenario) => scenario.scenario_id !== id))
+      setComparisonIds((current) => current.filter((comparisonId) => comparisonId !== id))
       setSuggestions([])
       pushToast('Scenario deleted', 'neutral')
     } catch (error) {
@@ -397,8 +415,12 @@ function App() {
         role: 'assistant',
         content: response.reply,
         extracted_data: response.extracted_data ?? undefined,
+        financial_analysis: response.financial_analysis ?? undefined,
       }
       setChatMessages((current) => [...current, assistantMessage])
+      if (response.session_id && response.session_id !== sessionId) {
+        setSessionId(response.session_id)
+      }
       setChatContext((current) => ({
         ...current,
         event_name: response.extracted_data?.event_name ?? current.event_name,
@@ -431,7 +453,7 @@ function App() {
           region: financialCalc.region,
           energy_kwh_saved: financialCalc.energy_kwh,
           meal_switches: financialCalc.meal_switches,
-          attendees: complianceInput.attendees,
+          attendees: financialCalc.attendees,
           actions_taken: financialCalc.actions,
         },
         token,
@@ -613,6 +635,7 @@ function App() {
           scenarios={scenarios}
           selectedScenario={selectedScenario}
           suggestions={suggestions}
+          comparisonIds={comparisonIds}
           onSubmit={handleScenarioSubmit}
           onCancelEdit={handleCancelEdit}
           onEdit={handleEditScenario}
@@ -621,6 +644,7 @@ function App() {
           onDownloadReport={handleDownloadScenarioReport}
           onSelectScenario={(scenario) => setSelectedScenarioId(scenario.scenario_id)}
           onLoadSuggestions={handleLoadSuggestions}
+          onToggleCompare={handleToggleCompare}
         />
       )
       break
@@ -716,49 +740,58 @@ function App() {
   return (
     <>
       <div className="app-shell">
-        <aside className="workspace-rail">
-          <div className="rail-brand">
-            <img className="app-logo" src="/favicon.svg" alt="CutCarbon logo" />
+        <header className="workspace-topbar">
+          <div className="topbar-brand">
+            <img className="app-logo" src="/favicon.svg" alt="" />
             <div>
               <strong>CutCarbon</strong>
+              <span>Carbon operations suite</span>
             </div>
           </div>
-          <nav className="rail-nav">
+
+          <nav className="workspace-tabs" aria-label="Primary navigation">
             {NAV_ITEMS.map((item) => (
               <button
                 key={item.id}
-                className={item.id === activeTab ? 'rail-link is-active' : 'rail-link'}
+                className={item.id === activeTab ? 'workspace-tab is-active' : 'workspace-tab'}
                 onClick={() => handleOpenTab(item.id)}
                 type="button"
               >
-                <span className="rail-link-mark" style={{ background: item.accent }} />
+                <span className="workspace-tab-mark" style={{ background: item.accent }} />
                 <span>{item.label}</span>
               </button>
             ))}
           </nav>
-          <div className="rail-foot">
-            <span>{currentUser.email}</span>
-            <Button tone="ghost" onClick={handleLogout}>
-              Sign out
+
+          <div className="topbar-actions">
+            <Button tone="soft" busy={agentsRunning} onClick={handleRefreshAgents}>
+              Refresh factors
             </Button>
+            <Button tone="primary" onClick={() => handleOpenTab('chat')}>
+              Ask co-pilot
+            </Button>
+            <div className="account-menu">
+              <span>{currentUser.email}</span>
+              <Button tone="ghost" onClick={handleLogout}>
+                Sign out
+              </Button>
+            </div>
           </div>
-        </aside>
+        </header>
 
         <main className="workspace-main">
-          <header className="workspace-header">
+          <section className="workspace-command">
             <div>
-              <h2>{currentNav.label}</h2>
+              <span className="eyebrow">Workspace</span>
+              <h1>{currentNav.label}</h1>
               <p>{currentNav.description}</p>
             </div>
-            <div className="workspace-header-actions">
-              <Button tone="soft" busy={agentsRunning} onClick={handleRefreshAgents}>
-                Refresh factors
-              </Button>
-              <Button tone="primary" onClick={() => handleOpenTab('chat')}>
-                Ask co-pilot
-              </Button>
+            <div className="workspace-context">
+              <span>Active scenario</span>
+              <strong>{selectedScenario ? selectedScenario.name : 'No scenario selected'}</strong>
+              <small>{selectedScenario ? formatTons(selectedScenario.emissions.total_tco2e, 3) : 'Create a scenario to start analytics'}</small>
             </div>
-          </header>
+          </section>
 
           {workspace}
         </main>

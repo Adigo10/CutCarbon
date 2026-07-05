@@ -7,7 +7,7 @@ from typing import AsyncGenerator
 
 from sqlalchemy import (
     Column, String, Integer, Float, Text, DateTime, Boolean, JSON, text,
-    ForeignKey, Index, inspect,
+    ForeignKey, Index, inspect, event,
 )
 from sqlalchemy.ext.asyncio import (
     AsyncSession, create_async_engine
@@ -20,6 +20,7 @@ except ImportError:  # SQLAlchemy 1.4 fallback
 from sqlalchemy.orm import declarative_base
 
 from app.config import settings
+from app.utils.time import utcnow
 
 try:
     from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -31,6 +32,14 @@ engine = create_async_engine(
     echo=False,
     connect_args={"check_same_thread": False} if "sqlite" in settings.DATABASE_URL else {},
 )
+
+
+if "sqlite" in settings.DATABASE_URL:
+    @event.listens_for(engine.sync_engine, "connect")
+    def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
 if async_sessionmaker is not None:
     AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
@@ -53,29 +62,17 @@ class UserDB(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     email = Column(String, unique=True, nullable=False, index=True)
     hashed_password = Column(String, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     is_active = Column(Boolean, default=True)
-
-
-class EventDB(Base):
-    __tablename__ = "events"
-
-    id = Column(String, primary_key=True)
-    name = Column(String, nullable=False)
-    location = Column(String)
-    organizer = Column(String)
-    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class ScenarioDB(Base):
     __tablename__ = "scenarios"
     __table_args__ = (
         Index("ix_scenarios_user_created", "user_id", "created_at"),
-        Index("ix_scenarios_event_id", "event_id"),
     )
 
     id = Column(String, primary_key=True)
-    event_id = Column(String, ForeignKey("events.id"), nullable=True)
     name = Column(String, nullable=False)
     event_name = Column(String)
     location = Column(String)
@@ -92,6 +89,7 @@ class ScenarioDB(Base):
     materials_waste_tco2e = Column(Float, default=0.0)
     equipment_tco2e = Column(Float, default=0.0)
     swag_tco2e = Column(Float, default=0.0)
+    digital_tco2e = Column(Float, default=0.0)
     total_tco2e = Column(Float, default=0.0)
     per_attendee_tco2e = Column(Float, default=0.0)
     data_quality = Column(String, default="estimated")
@@ -104,8 +102,8 @@ class ScenarioDB(Base):
     assumptions = Column(JSON, default=dict)
     input_payload = Column(JSON, default=dict)
     factors_snapshot = Column(JSON, default=dict)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
 
 
@@ -120,7 +118,7 @@ class ChatMessageDB(Base):
     role = Column(String)
     content = Column(Text)
     extracted_data = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=utcnow, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
 
 
@@ -137,11 +135,18 @@ class FinancialReportDB(Base):
     reduced_tco2e = Column(Float)
     total_savings_usd = Column(Float)
     report_json = Column(JSON)
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=utcnow, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
 
 
 class EmissionFactorDB(Base):
+    """Audit log of TinyFish-fetched factor values with provenance.
+
+    Deliberately write-only: emission_factors.json is the live source of truth for
+    calculations; this table records what each agent fetched and when, so auto-fetched
+    values (is_verified=False) can be human-reviewed later.
+    """
+
     __tablename__ = "emission_factors"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -152,7 +157,7 @@ class EmissionFactorDB(Base):
     unit = Column(String)
     source_url = Column(String, nullable=True)
     methodology_tag = Column(String, nullable=True)
-    last_updated = Column(DateTime, default=datetime.utcnow)
+    last_updated = Column(DateTime, default=utcnow)
     is_verified = Column(Boolean, default=False)
 
 
@@ -176,7 +181,7 @@ class OffsetPurchaseDB(Base):
     status = Column(String, default="purchased", index=True)  # purchased | retired | cancelled
     retired_at = Column(DateTime, nullable=True)
     notes = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=utcnow, index=True)
 
 
 class AgentRunDB(Base):
@@ -191,7 +196,7 @@ class AgentRunDB(Base):
     num_steps = Column(Integer, nullable=True)
     result_json = Column(JSON, nullable=True)
     error = Column(Text, nullable=True)
-    fetched_at = Column(DateTime, default=datetime.utcnow, index=True)
+    fetched_at = Column(DateTime, default=utcnow, index=True)
 
 
 # -- Session dependency --------------------------------------------------------
@@ -202,7 +207,13 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def init_db():
-    """Create all tables on startup."""
+    """Create all tables on startup.
+
+    The additive ALTER TABLE migrations below are the deliberate lightweight
+    mechanism for local SQLite deployments (column additions only, idempotent).
+    A move to Postgres should introduce Alembic instead of extending this list —
+    the DDL here is SQLite-flavored.
+    """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -220,6 +231,7 @@ async def init_db():
                 ("scope3_tco2e", "ALTER TABLE scenarios ADD COLUMN scope3_tco2e FLOAT DEFAULT 0.0"),
                 ("equipment_tco2e", "ALTER TABLE scenarios ADD COLUMN equipment_tco2e FLOAT DEFAULT 0.0"),
                 ("swag_tco2e", "ALTER TABLE scenarios ADD COLUMN swag_tco2e FLOAT DEFAULT 0.0"),
+                ("digital_tco2e", "ALTER TABLE scenarios ADD COLUMN digital_tco2e FLOAT DEFAULT 0.0"),
                 ("event_type", "ALTER TABLE scenarios ADD COLUMN event_type TEXT DEFAULT 'conference'"),
                 ("updated_at", "ALTER TABLE scenarios ADD COLUMN updated_at DATETIME"),
                 ("factors_snapshot", "ALTER TABLE scenarios ADD COLUMN factors_snapshot JSON DEFAULT '{}'"),
@@ -241,7 +253,6 @@ async def init_db():
 
         indexes = [
             "CREATE INDEX IF NOT EXISTS ix_scenarios_user_created ON scenarios (user_id, created_at)",
-            "CREATE INDEX IF NOT EXISTS ix_scenarios_event_id ON scenarios (event_id)",
             "CREATE INDEX IF NOT EXISTS ix_chat_messages_user_session_created ON chat_messages (user_id, session_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_financial_reports_user_scenario_created ON financial_reports (user_id, scenario_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_offset_purchases_user_scenario_status ON offset_purchases (user_id, scenario_id, status)",
