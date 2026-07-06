@@ -16,7 +16,6 @@ import type {
   Scenario,
   ScenarioReportFormat,
   ScenarioInputPayload,
-  TokenWithUser,
   UserOut,
 } from '../types'
 
@@ -111,20 +110,9 @@ function buildReportQuery(options?: ReportDownloadOptions): string {
 }
 
 export const api = {
-  login(email: string, password: string) {
-    return request<TokenWithUser>('/api/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password }),
-    })
-  },
-
-  register(email: string, password: string) {
-    return request<TokenWithUser>('/api/auth/register', {
-      method: 'POST',
-      body: JSON.stringify({ email, password }),
-    })
-  },
-
+  // Registration and login are handled by supabase-js (see lib/supabase.ts); the API
+  // only exposes /me plus the authenticated resource endpoints below. The `token`
+  // threaded into each call is the Supabase access token held in App state.
   me(token: string) {
     return request<UserOut>('/api/auth/me', undefined, token)
   },

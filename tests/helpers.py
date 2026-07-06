@@ -1,8 +1,46 @@
 """Shared helpers for API-level tests."""
 
 import copy
+import uuid
+from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
+from jose import jwt
+
+from app.config import settings
+
+
+def make_supabase_token(
+    email: str,
+    *,
+    sub: str | None = None,
+    expires_in: int = 3600,
+    aud: str | None = None,
+    issuer: str | None = None,
+    secret: str | None = None,
+) -> str:
+    """Mint an HS256 token shaped like a Supabase access token.
+
+    The verifier's HS256 branch (app/auth/supabase.py) accepts it when signed with the
+    test SUPABASE_JWT_SECRET and stamped with the expected audience/issuer — so tests
+    exercise the real get_current_user + JIT-provisioning path without hitting Supabase.
+    `sub` is derived deterministically from the email so repeated calls map to one user.
+    """
+    now = datetime.now(timezone.utc)
+    claims = {
+        "sub": sub or str(uuid.uuid5(uuid.NAMESPACE_URL, email)),
+        "email": email,
+        "role": "authenticated",
+        "aud": aud or settings.SUPABASE_JWT_AUD,
+        "iss": issuer or f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1",
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(seconds=expires_in)).timestamp()),
+    }
+    return jwt.encode(claims, secret or settings.SUPABASE_JWT_SECRET, algorithm="HS256")
+
+
+def auth_headers(email: str, **kwargs) -> dict[str, str]:
+    return {"Authorization": f"Bearer {make_supabase_token(email, **kwargs)}"}
 
 SEEDED_SCENARIO_PAYLOAD = {
     "name": "APAC Summit Baseline",
@@ -41,13 +79,12 @@ SEEDED_SCENARIO_PAYLOAD = {
 
 
 def register_user(client: TestClient, email: str = "reporter@example.com") -> dict[str, str]:
-    response = client.post(
-        "/api/auth/register",
-        json={"email": email, "password": "super-secret"},
-    )
-    assert response.status_code == 201
-    token = response.json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}
+    """Return auth headers for `email`.
+
+    There is no server-side registration under Supabase Auth — the profile row is
+    JIT-provisioned on the first authenticated request made with these headers.
+    """
+    return auth_headers(email)
 
 
 def create_scenario(client: TestClient, headers: dict[str, str], **overrides) -> dict:

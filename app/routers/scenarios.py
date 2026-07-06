@@ -97,7 +97,9 @@ async def create_scenario(
 ):
     """Calculate emissions for a scenario and save to DB."""
     result: ScenarioResult = calculate_scenario(payload)
-    scenario_id = str(uuid.uuid4())[:8]
+    # Full uuid4 hex (not truncated) — matches the clone path and avoids the 32-bit
+    # birthday-collision surface a truncated id would have.
+    scenario_id = uuid.uuid4().hex
     db_obj = _save_result(scenario_id, result, payload, current_user.id)
     db.add(db_obj)
     await db.commit()

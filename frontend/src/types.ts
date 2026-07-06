@@ -17,15 +17,9 @@ export interface NavItem {
 }
 
 export interface UserOut {
-  id: number
+  id: string
   email: string
   created_at: string
-}
-
-export interface TokenWithUser {
-  access_token: string
-  token_type: string
-  user: UserOut
 }
 
 export interface TravelSegment {

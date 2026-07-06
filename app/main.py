@@ -33,10 +33,11 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# The SPA authenticates with a Bearer token in localStorage (not a cookie), so we
-# do NOT need credentialed CORS. Wildcard origin + allow_credentials=True is both
-# spec-invalid and unsafe, so credentials are disabled here. To use cookies later,
-# replace "*" with an explicit env-driven origin allowlist and re-enable credentials.
+# The SPA authenticates with a Supabase-issued Bearer token (managed by supabase-js
+# in localStorage, not a cookie), so we do NOT need credentialed CORS. Wildcard
+# origin + allow_credentials=True is both spec-invalid and unsafe, so credentials are
+# disabled here. To use cookies later, replace "*" with an explicit env-driven origin
+# allowlist and re-enable credentials.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

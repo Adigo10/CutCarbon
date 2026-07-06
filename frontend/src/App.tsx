@@ -12,6 +12,7 @@ import {
 } from './components/views'
 import './App.css'
 import { api } from './lib/api'
+import { supabase } from './lib/supabase'
 import {
   NAV_ITEMS,
   createDefaultComplianceInput,
@@ -56,7 +57,10 @@ function App() {
   const [authError, setAuthError] = useState('')
   const [authLoading, setAuthLoading] = useState(false)
   const [currentUser, setCurrentUser] = useState<UserOut | null>(null)
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem('cc_token'))
+  // The access token is owned by the Supabase session (see the auth-listener effect
+  // below), not localStorage. It stays in state so the existing api.*(token) calls
+  // and `if (!token)` guards keep working unchanged.
+  const [token, setToken] = useState<string | null>(null)
   const [scenarios, setScenarios] = useState<Scenario[]>([])
   const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(
     () => localStorage.getItem('cc_selected_scenario_id'),
@@ -105,6 +109,7 @@ function App() {
   }, [])
 
   const clearSession = () => {
+    void supabase.auth.signOut()
     setToken(null)
     setCurrentUser(null)
     setScenarios([])
@@ -116,14 +121,25 @@ function App() {
     setOffsetPortfolio(null)
     setOffsetRecommendations([])
     setComplianceReport(null)
-    localStorage.removeItem('cc_token')
     localStorage.removeItem('cc_selected_scenario_id')
   }
 
+  // Mirror the Supabase session into `token`: hydrate on mount, then follow sign-in,
+  // sign-out, and silent token-refresh events. supabase-js persists/refreshes the
+  // session itself, so there's no localStorage token handling here.
   useEffect(() => {
-    if (!token) return
-    localStorage.setItem('cc_token', token)
-  }, [pushToast, token])
+    let mounted = true
+    supabase.auth.getSession().then(({ data }) => {
+      if (mounted) setToken(data.session?.access_token ?? null)
+    })
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setToken(session?.access_token ?? null)
+    })
+    return () => {
+      mounted = false
+      sub.subscription.unsubscribe()
+    }
+  }, [])
 
   useEffect(() => {
     if (selectedScenario?.scenario_id) {
@@ -237,15 +253,31 @@ function App() {
     setAuthLoading(true)
     setAuthError('')
     try {
-      const payload =
-        authMode === 'login'
-          ? await api.login(authEmail, authPassword)
-          : await api.register(authEmail, authPassword)
-      setToken(payload.access_token)
-      setCurrentUser(payload.user)
+      if (authMode === 'login') {
+        const { error } = await supabase.auth.signInWithPassword({
+          email: authEmail,
+          password: authPassword,
+        })
+        if (error) throw error
+        pushToast('Signed in successfully', 'success')
+      } else {
+        const { data, error } = await supabase.auth.signUp({
+          email: authEmail,
+          password: authPassword,
+        })
+        if (error) throw error
+        if (!data.session) {
+          // Email confirmation is enabled on the project — no session yet.
+          pushToast('Check your email to confirm your account, then sign in.', 'neutral')
+          setAuthMode('login')
+        } else {
+          pushToast('Account created', 'success')
+        }
+      }
+      // On success the onAuthStateChange listener sets the token, which triggers the
+      // bootstrap effect to load the profile (api.me) and scenarios.
       setAuthEmail('')
       setAuthPassword('')
-      pushToast(authMode === 'login' ? 'Signed in successfully' : 'Account created', 'success')
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Authentication failed'
       setAuthError(message)

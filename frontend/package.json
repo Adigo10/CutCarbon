@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.110.0",
     "chart.js": "^4.5.1",
     "mermaid": "^11.13.0",
     "react": "^19.2.4",

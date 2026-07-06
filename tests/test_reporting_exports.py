@@ -210,22 +210,9 @@ def test_offset_purchase_requires_owned_scenario(client: TestClient):
 
 # --- Security & de-gimmick regressions -------------------------------------------------
 
-def test_forged_token_with_placeholder_secret_is_rejected(client: TestClient):
-    """A token signed with the committed placeholder secret must NOT authenticate."""
-    from datetime import datetime, timedelta, timezone
-
-    from jose import jwt
-
-    from app.config import PLACEHOLDER_JWT_SECRET
-
-    register_user(client, email="victim@example.com")  # ensures user id 1 exists
-    forged = jwt.encode(
-        {"sub": "1", "exp": datetime.now(timezone.utc) + timedelta(hours=1)},
-        PLACEHOLDER_JWT_SECRET,
-        algorithm="HS256",
-    )
-    resp = client.get("/api/scenarios", headers={"Authorization": f"Bearer {forged}"})
-    assert resp.status_code == 401
+# Forged/bad-signature token rejection is covered by tests/test_auth.py
+# (test_bad_signature_rejected, test_wrong_issuer_rejected, ...) under the Supabase
+# JWKS verifier — the old PLACEHOLDER_JWT_SECRET forgery test was removed with that auth model.
 
 
 def test_csv_export_neutralizes_formula_injection(client: TestClient):

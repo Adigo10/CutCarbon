@@ -1,8 +1,7 @@
 import logging
 import os
-import secrets
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -31,24 +30,40 @@ except ImportError:
             super().__init__(**merged)
 
 
-# The placeholder that ships in source. A JWT secret equal to this (or empty/too
-# short) is treated as "unset" — anyone reading the repo could otherwise forge a
-# token for any user. We never sign with a known/committed value.
-PLACEHOLDER_JWT_SECRET = "change-me-in-production-use-a-long-random-string"
-
-
 class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
 
     TINYFISH_API_KEY: str = ""
 
-    # SQLite locally; swap to postgresql+asyncpg://user:pass@host/db for Postgres
+    # Primary backend is Supabase Postgres, via the transaction pooler (port 6543) as
+    # the least-privilege `cutcarbon_app` role:
+    #   postgresql+asyncpg://cutcarbon_app.<ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres
+    # A sqlite+aiosqlite:// URL still works as a local dev fallback.
     DATABASE_URL: str = "sqlite+aiosqlite:///./cutcarbon.db"
 
-    JWT_SECRET: str = PLACEHOLDER_JWT_SECRET
-    JWT_ALGORITHM: str = "HS256"
-    JWT_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+    # Alembic uses this if set, otherwise falls back to DATABASE_URL. Point it at the
+    # SESSION pooler (port 5432) or the direct connection — migrations need a stable
+    # session and prepared statements, which the transaction pooler (6543) forbids.
+    MIGRATION_DATABASE_URL: str = ""
+
+    # Run `alembic upgrade head` from the app lifespan on startup. Off by default:
+    # prod applies migrations out-of-band; enable only for single-instance dev/demo.
+    RUN_MIGRATIONS_ON_STARTUP: bool = False
+
+    # --- Supabase Auth ---------------------------------------------------------
+    # Base project URL, e.g. https://abcxyz.supabase.co. Used to derive the JWKS
+    # endpoint ({SUPABASE_URL}/auth/v1/.well-known/jwks.json) and the expected
+    # token issuer ({SUPABASE_URL}/auth/v1).
+    SUPABASE_URL: str = ""
+    # Audience Supabase stamps on logged-in user tokens.
+    SUPABASE_JWT_AUD: str = "authenticated"
+    # Optional shared secret for HS256 verification (legacy JWT secret, or a test
+    # secret). Empty = asymmetric-only (RS256/ES256 via JWKS).
+    SUPABASE_JWT_SECRET: str = ""
+    # Override the derived JWKS URL if needed; otherwise built from SUPABASE_URL.
+    SUPABASE_JWKS_URL: str = ""
+    SUPABASE_JWKS_CACHE_TTL: int = 600  # seconds
 
     # Comma-separated emails allowed to trigger TinyFish agent runs (which mutate
     # the global emission-factor file and scrape external sites). Empty = nobody.
@@ -61,33 +76,6 @@ class Settings(BaseSettings):
     APP_PORT: int = 8000
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
-
-    @model_validator(mode="after")
-    def _ensure_strong_jwt_secret(self):
-        """Never run with a missing, placeholder, or weak JWT secret.
-
-        In production set JWT_SECRET (>=32 chars) via the environment. If it is
-        unset/placeholder/too short we generate an EPHEMERAL random secret for
-        this process so token forgery with the known committed value is
-        impossible — tokens simply won't survive a restart. This keeps a
-        demo/dev run working while closing the auth-bypass hole.
-        """
-        weak = (
-            not self.JWT_SECRET
-            or self.JWT_SECRET == PLACEHOLDER_JWT_SECRET
-            or len(self.JWT_SECRET) < 32
-        )
-        if weak:
-            self.JWT_SECRET = secrets.token_urlsafe(64)
-            # Runs at import time, before logging is configured — logging's
-            # lastResort handler still emits WARNING+ to stderr.
-            logger.warning(
-                "JWT_SECRET was unset, the built-in placeholder, or shorter than "
-                "32 chars. Generated an ephemeral random secret for this process "
-                "(tokens will not survive a restart). Set a strong JWT_SECRET in "
-                ".env for production."
-            )
-        return self
 
 
 settings = Settings()

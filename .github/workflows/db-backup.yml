@@ -1,0 +1,31 @@
+name: DB Backup
+
+# Free-tier Supabase has NO automated backups or PITR, so we take our own off-site
+# dumps. Runs daily and on demand. Requires repo secret BACKUP_DATABASE_URL — a libpq
+# URL (NOT the +asyncpg SQLAlchemy scheme) for the direct/session connection as postgres:
+#   postgresql://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # 03:00 UTC daily
+  workflow_dispatch: {}
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: pg_dump (postgres:17 client to match Supabase server)
+        run: |
+          set -euo pipefail
+          mkdir -p backups
+          ts="$(date -u +%Y%m%dT%H%M%SZ)"
+          docker run --rm -i postgres:17 \
+            pg_dump --no-owner --no-privileges --format=plain \
+            "${{ secrets.BACKUP_DATABASE_URL }}" | gzip > "backups/cutcarbon_${ts}.sql.gz"
+          ls -lh backups
+      - name: Upload backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutcarbon-db-backup
+          path: backups/*.sql.gz
+          retention-days: 30

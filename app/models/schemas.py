@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List, Dict, Any
 from enum import Enum
 from uuid import uuid4
@@ -471,33 +471,12 @@ class ScenarioExport(BaseModel):
 
 
 # -- Auth schemas --------------------------------------------------------------
-
-class UserCreate(BaseModel):
-    email: EmailStr
-    # 72 = bcrypt input limit; passlib silently truncates beyond it.
-    password: str = Field(min_length=8, max_length=72)
-
-
-class UserLogin(BaseModel):
-    # Deliberately plain str so pre-existing loosely-formed accounts can still log in.
-    email: str
-    password: str = Field(max_length=72)
-
-
-class Token(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-
+# Registration and login are handled by Supabase Auth on the client (supabase-js);
+# FastAPI only verifies the resulting access token and returns the profile below.
 
 class UserOut(BaseModel):
-    id: int
+    id: str  # Supabase auth UUID (serialized as string)
     email: str
     created_at: str
 
     model_config = {"from_attributes": True}
-
-
-class TokenWithUser(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-    user: UserOut

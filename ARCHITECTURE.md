@@ -25,7 +25,7 @@
 │  ┌──────────────────────────────────────────────────┐   │
 │  │  Routers (Request Handlers)                      │   │
 │  │                                                  │   │
-│  │  ├─ /api/auth      → Register/login/JWT tokens  │   │
+│  │  ├─ /api/auth/me   → Verify Supabase token + me │   │
 │  │  ├─ /api/chat      → OpenAI function calling    │   │
 │  │  ├─ /api/scenarios → CRUD, cloning, recalc-all  │   │
 │  │  ├─ /api/financial → Tax savings + compliance   │   │
@@ -65,7 +65,10 @@
 │  │  │   emission_factors.json is the live source)  │   │
 │  │  └─ Agent run history                           │   │
 │  └──────────────────────────────────────────────────┘   │
-│         (SQLite local / Postgres production)            │
+│    (Supabase Postgres via asyncpg; sqlite dev fallback) │
+│    least-priv role `cutcarbon_app` @ IPv4 txn pooler;   │
+│    RLS on + anon/authenticated grants revoked (no        │
+│    PostgREST access). Ops: docs/DB_OPERATIONS.md         │
 └─────────────────────────────────────────────────────────┘
                         ↕️  HTTPS
 ┌─────────────────────────────────────────────────────────┐
@@ -107,11 +110,11 @@
         └─────────────────────────┘
                       ↓
         ┌─────────────────────────┐
-        │  Check JWT Token        │
-        │  (localStorage)         │
+        │  Check Supabase session │
+        │  (supabase-js)          │
         └─────────────────────────┘
                     ↙   ↘
-              NO TOKEN  TOKEN EXISTS
+             NO SESSION  SESSION EXISTS
                 ↙         ↘
         ┌────────────┐  ┌──────────────┐
         │   LOGIN    │  │  DASHBOARD   │
@@ -493,113 +496,72 @@ Frontend (React SPA):
 │ REGISTRATION                                             │
 └──────────────────────────────────────────────────────────┘
 
-User enters:
-  Email: user@example.com
-  Password: ••••••••
-
-Frontend:
-  POST /auth/register
-  {
-    "email": "user@example.com",
-    "password": "plaintext_password"
-  }
-
-Backend (routers/auth.py):
-  1. Validate payload (valid email, password 8–72 chars)
-  2. Hash password with bcrypt
-  3. Create UserDB record
-  4. Generate JWT token (HS256, expires 7 days by default)
-  5. Return TokenWithUser response
-  (Register/login/token are rate limited to 5/min per IP)
-
-Response:
-{
-  "access_token": "eyJhbGciOiJIUzI1NiIs...",
-  "token_type": "bearer",
-  "user": {
-    "id": 1,
-    "email": "user@example.com",
-    "created_at": "2026-03-28T14:30:00Z"
-  }
-}
-
-Frontend:
-  1. Extract token
-  2. Save to localStorage: cc_token
-  3. Redirect to Dashboard
-
-┌──────────────────────────────────────────────────────────┐
-│ LOGIN                                                    │
-└──────────────────────────────────────────────────────────┘
+Authentication is delegated to Supabase Auth. Supabase owns credentials and mints
+the JWTs; FastAPI only verifies them and keeps a local profile row.
 
 User enters:
   Email: user@example.com
   Password: ••••••••
 
-Frontend:
-  POST /auth/login
-  {
-    "email": "user@example.com",
-    "password": "plaintext_password"
-  }
+Frontend (lib/supabase.ts, supabase-js):
+  supabase.auth.signUp({ email, password })   // or signInWithPassword({...})
 
-Backend:
-  1. Find user by email
-  2. Verify password hash against stored hash
-  3. If match:
-     → Generate JWT token
-     → Return TokenWithUser
-  4. If mismatch:
-     → Return 401 Unauthorized
+Supabase Auth:
+  1. Creates / authenticates the user in auth.users (UUID id)
+  2. Returns a session: access_token (JWT) + refresh_token
+  3. supabase-js persists the session in localStorage and refreshes it silently
+  (If email confirmation is enabled, signUp returns no session until confirmed)
 
 Frontend:
-  1. Save token to localStorage
-  2. Redirect to Dashboard
+  1. onAuthStateChange fires → App.tsx stores session.access_token in `token`
+  2. Calls GET /api/auth/me to load the profile, then renders the workspace
 
 ┌──────────────────────────────────────────────────────────┐
 │ AUTHENTICATED REQUESTS                                   │
 └──────────────────────────────────────────────────────────┘
 
 All API requests include:
-  Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
+  Authorization: Bearer <supabase access_token>
 
-Backend middleware (get_current_user):
-  1. Extract token from header
-  2. Decode JWT (verify signature)
-  3. Extract user_id from payload
-  4. Load UserDB from database
-  5. If valid: proceed with request
-  6. If invalid: return 401 Unauthorized
+Backend (routers/auth.py get_current_user → app/auth/supabase.py):
+  1. Extract token from the Authorization header (401 if missing)
+  2. verify_supabase_token():
+     - read alg/kid from the header
+     - RS256/ES256 → verify against the project JWKS
+       ({SUPABASE_URL}/auth/v1/.well-known/jwks.json, cached)
+     - HS256 → verify against SUPABASE_JWT_SECRET (legacy/test)
+     - check audience ("authenticated"), issuer ({SUPABASE_URL}/auth/v1), exp
+  3. JIT-provision: upsert public.users(id=<sub UUID>, email) and return it
+  4. If verification fails: 401 Unauthorized
 
 Example:
   GET /api/scenarios
-  Headers: {
-    "Authorization": "Bearer eyJ..."
-  }
+  Headers: { "Authorization": "Bearer eyJ..." }
 
 Backend:
-  1. Verify token
-  2. Query: SELECT * FROM scenarios WHERE user_id = ?
+  1. Verify token → current_user (UUID id)
+  2. Query: SELECT * FROM scenarios WHERE user_id = <current_user.id>
   3. Return only this user's scenarios
+
+require_admin: same chain, then checks current_user.email against ADMIN_EMAILS.
 
 ┌──────────────────────────────────────────────────────────┐
 │ SESSION PERSISTENCE                                      │
 └──────────────────────────────────────────────────────────┘
 
 On page reload:
-  1. Frontend checks localStorage for cc_token
-  2. If present: Include in all API requests
-  3. If absent: Redirect to login
+  1. supabase-js rehydrates the session from localStorage
+  2. App.tsx reads it via supabase.auth.getSession() → sets `token`
+  3. If no session: render the auth screen
 
-Token expiry (7 days by default, JWT_EXPIRE_MINUTES):
-  1. Backend includes exp claim in JWT
-  2. Upon expiry: 401 response
-  3. Frontend redirects to login
-  4. User must re-authenticate
+Token refresh:
+  1. supabase-js refreshes the access token before expiry automatically
+  2. onAuthStateChange delivers the new token; App.tsx updates `token`
+  3. A verification failure (e.g. revoked session) → 401 → clearSession + signOut
 
 Swagger access:
-  POST /api/auth/token accepts form-encoded credentials
-  (username = email) so the /docs Authorize button works.
+  Paste a Supabase access token into the /docs "Authorize" dialog
+  (FastAPI no longer exposes a password/token endpoint).
 ```
 
 ---

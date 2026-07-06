@@ -10,14 +10,19 @@ pydantic-settings==2.6.1
 aiofiles==24.1.0
 python-multipart==0.0.12
 sqlalchemy==2.0.36
+# Postgres (Supabase) is the primary backend; asyncpg is the async driver.
+asyncpg==0.30.0
+alembic==1.14.0
+greenlet==3.1.1
+# aiosqlite retained only as a local dev fallback (DATABASE_URL=sqlite+aiosqlite://...).
 aiosqlite==0.20.0
+# python-jose verifies Supabase-issued JWTs (RS256/ES256 via JWKS, HS256 legacy/test).
 python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-bcrypt==4.0.1
 slowapi==0.1.10
 email-validator==2.3.0
 openpyxl==3.1.5
 reportlab==4.4.7
 pytest==7.1.2
-# For PostgreSQL: swap aiosqlite for asyncpg and update DATABASE_URL in .env
-# asyncpg==0.30.0
+# Tests run against real Postgres. Provide TEST_DATABASE_URL, or install Docker so
+# testcontainers can spin up an ephemeral postgres:15.
+testcontainers[postgresql]==4.8.2

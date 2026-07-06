@@ -1,88 +1,78 @@
+import asyncio
+import uuid
+
+import pytest
 from fastapi.testclient import TestClient
 
-from app.rate_limit import limiter
+from app.auth.supabase import TokenError, verify_supabase_token
 
-from helpers import register_user
+from helpers import auth_headers, make_supabase_token, register_user
 
 
-def test_register_login_me_roundtrip(client: TestClient):
+def test_me_provisions_profile_from_token(client: TestClient):
+    """First authenticated request JIT-provisions the profile; /me returns it."""
     headers = register_user(client, email="roundtrip@example.com")
-
-    login = client.post(
-        "/api/auth/login",
-        json={"email": "roundtrip@example.com", "password": "super-secret"},
-    )
-    assert login.status_code == 200
-    body = login.json()
-    assert body["access_token"]
-    assert body["user"]["email"] == "roundtrip@example.com"
-
     me = client.get("/api/auth/me", headers=headers)
     assert me.status_code == 200
-    assert me.json()["email"] == "roundtrip@example.com"
+    body = me.json()
+    assert body["email"] == "roundtrip@example.com"
+    uuid.UUID(body["id"])  # id is the Supabase auth UUID, serialized as a string
 
 
-def test_duplicate_email_rejected(client: TestClient):
-    register_user(client, email="dupe@example.com")
-    response = client.post(
-        "/api/auth/register",
-        json={"email": "dupe@example.com", "password": "super-secret"},
-    )
-    assert response.status_code == 400
+def test_me_provisioning_is_idempotent(client: TestClient):
+    headers = register_user(client, email="idem@example.com")
+    first = client.get("/api/auth/me", headers=headers).json()
+    second = client.get("/api/auth/me", headers=headers).json()
+    assert first["id"] == second["id"]
+    assert first["email"] == second["email"]
 
 
-def test_invalid_email_rejected(client: TestClient):
-    response = client.post(
-        "/api/auth/register",
-        json={"email": "not-an-email", "password": "super-secret"},
-    )
-    assert response.status_code == 422
+def test_missing_token_rejected(client: TestClient):
+    assert client.get("/api/auth/me").status_code == 401
 
 
-def test_short_password_rejected(client: TestClient):
-    response = client.post(
-        "/api/auth/register",
-        json={"email": "short@example.com", "password": "seven77"},
-    )
-    assert response.status_code == 422
+def test_malformed_token_rejected(client: TestClient):
+    resp = client.get("/api/auth/me", headers={"Authorization": "Bearer not.a.jwt"})
+    assert resp.status_code == 401
 
 
-def test_wrong_password_rejected(client: TestClient):
-    register_user(client, email="locked@example.com")
-    response = client.post(
-        "/api/auth/login",
-        json={"email": "locked@example.com", "password": "wrong-password"},
-    )
-    assert response.status_code == 401
+def test_wrong_issuer_rejected(client: TestClient):
+    headers = auth_headers("wrongiss@example.com", issuer="https://evil.example.com/auth/v1")
+    assert client.get("/api/auth/me", headers=headers).status_code == 401
 
 
-def test_form_token_endpoint_works_for_swagger(client: TestClient):
-    register_user(client, email="swagger@example.com")
-    response = client.post(
-        "/api/auth/token",
-        data={"username": "swagger@example.com", "password": "super-secret"},
-    )
-    assert response.status_code == 200
-    token = response.json()["access_token"]
-
-    me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
-    assert me.status_code == 200
+def test_wrong_audience_rejected(client: TestClient):
+    headers = auth_headers("wrongaud@example.com", aud="anon")
+    assert client.get("/api/auth/me", headers=headers).status_code == 401
 
 
-def test_register_rate_limited(client: TestClient):
-    """5/minute per IP on register — the 6th request in a burst gets 429."""
-    limiter.enabled = True
-    try:
-        statuses = [
-            client.post(
-                "/api/auth/register",
-                json={"email": f"burst{i}@example.com", "password": "super-secret"},
-            ).status_code
-            for i in range(6)
-        ]
-    finally:
-        limiter.enabled = False
-        limiter.reset()
+def test_expired_token_rejected(client: TestClient):
+    headers = auth_headers("expired@example.com", expires_in=-10)
+    assert client.get("/api/auth/me", headers=headers).status_code == 401
 
-    assert statuses[-1] == 429
-    assert all(code == 201 for code in statuses[:5])
+
+def test_bad_signature_rejected(client: TestClient):
+    headers = auth_headers("badsig@example.com", secret="a-totally-different-secret-value-1234567890")
+    assert client.get("/api/auth/me", headers=headers).status_code == 401
+
+
+# --- Verifier unit tests (no DB / no network; HS256 path) ---------------------
+
+def test_verifier_accepts_valid_token():
+    claims = asyncio.run(verify_supabase_token(make_supabase_token("verify@example.com")))
+    assert claims["email"] == "verify@example.com"
+    assert claims["sub"]
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"secret": "different-secret-abcdefghijklmnopqrstuvwxyz"},  # bad signature
+        {"issuer": "https://evil.example.com/auth/v1"},            # wrong issuer
+        {"aud": "anon"},                                           # wrong audience
+        {"expires_in": -10},                                       # expired
+    ],
+)
+def test_verifier_rejects_bad_tokens(kwargs):
+    with pytest.raises(TokenError):
+        asyncio.run(verify_supabase_token(make_supabase_token("bad@example.com", **kwargs)))
