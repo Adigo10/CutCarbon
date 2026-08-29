@@ -53,10 +53,13 @@ def test_shared_report_payload_includes_offsets_and_compliance_overrides(client:
     assert report.offset_portfolio.coverage_pct is not None
 
     # Offset coverage is reported as the compliant measured/reduced/residual
-    # construction, never as a neutrality claim.
+    # construction, never as a neutrality claim — and partial coverage (2.5 tCO2e
+    # retired against the full residual) states what is still outstanding.
+    total = report.scenario["emissions"]["total_tco2e"]
     statement = report.offset_portfolio.claim_statement
-    assert "2.500 tCO2e residual compensated outside the value chain" in statement
-    assert statement.endswith("via retired credits from Gold Standard")
+    assert f"2.500 of {total:.3f} tCO2e residual compensated" in statement
+    assert "via retired credits from Gold Standard;" in statement
+    assert statement.endswith(f"{total - 2.5:.3f} tCO2e residual not yet compensated")
     assert find_banned_claims(statement) == []
     assert report.compliance_overrides.region == "eu"
     assert report.compliance_overrides.has_scope3 is False

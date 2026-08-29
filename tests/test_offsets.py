@@ -70,11 +70,15 @@ def test_portfolio_states_compliant_compensation_instead_of_neutrality(client: T
     client.post(f"/api/offsets/{purchase['id']}/retire", headers=headers)
 
     summary = client.get(f"/api/offsets/portfolio?scenario_id={scenario_id}", headers=headers).json()
-    statement = summary["claim_statement"]
-    assert statement.startswith(f"{scenario['emissions']['total_tco2e']:.3f} tCO2e measured, 0.0% reduced, ")
-    assert "3.000 tCO2e residual compensated outside the value chain" in statement
-    assert statement.endswith("via retired credits from Gold Standard")
-    assert find_banned_claims(statement) == []
+    total = scenario["emissions"]["total_tco2e"]
+    # Only 3 tCO2e of the residual are retired — the statement must say so, and say
+    # what is still outstanding, rather than reading as full compensation.
+    assert summary["claim_statement"] == (
+        f"{total:.3f} tCO2e measured, 0.0% reduced, 3.000 of {total:.3f} tCO2e residual "
+        f"compensated outside the value chain via retired credits from Gold Standard; "
+        f"{total - 3.0:.3f} tCO2e residual not yet compensated"
+    )
+    assert find_banned_claims(summary["claim_statement"]) == []
 
     # No scenario in scope means no measured total, so no statement is asserted.
     assert client.get("/api/offsets/portfolio", headers=headers).json()["claim_statement"] == ""

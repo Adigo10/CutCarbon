@@ -17,6 +17,16 @@ So instead of a claim we state a fact — the construction rendered by
     "<total> tCO2e measured, <pct>% reduced, <residual> tCO2e residual
      compensated outside the value chain via <credits>"
 
+When only part of the residual is covered by retired credits the statement names
+both the covered and the outstanding tonnage, so partial coverage can never be
+read as full compensation.
+
+A banned phrase is *redacted*, not paraphrased: it is replaced by
+:data:`CLAIM_REDACTION`, which points the reader at those figures. Substituting a
+readable phrase ("measured, reduced and residual-compensated", "lower-carbon")
+would trade one unsubstantiated claim for another — the rewrite must never assert
+a reduction, a compensation or a comparison that the data does not back.
+
 Scope: this linter is for text the product *generates* (chat replies, export and
 offset narrative, free text saved alongside them). It is deliberately not applied
 to static UI labels or to factual references such as the "Net Zero Carbon Events"
@@ -39,27 +49,29 @@ from typing import Mapping
 
 DEFAULT_CREDIT_DESC = "unspecified credits (registry not recorded)"
 
-# (compiled pattern, compliant replacement). Every pattern is word-boundary
-# anchored and matched case-insensitively, so unrelated words are never touched
-# ("neutralization", "greenhouse", "decarbonization"). Replacements must
-# themselves be clean, which is what makes sanitizing idempotent.
-_CLAIM_RULES: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"\b(?:carbon|climate)[\s-]+neutrality\b", re.I), "compensation of residual emissions"),
-    (re.compile(r"\b(?:carbon|climate)[\s-]+neutral\b", re.I), "measured, reduced and residual-compensated"),
-    (re.compile(r"\b(?:climate[\s-]+positive|carbon[\s-]+negative)\b", re.I), "compensated beyond its residual emissions"),
-    (re.compile(r"\bnet[\s-]+zero\s+events\b", re.I), "events with measured and reduced emissions"),
-    (re.compile(r"\bnet[\s-]+zero\s+event\b", re.I), "event with measured and reduced emissions"),
-    (re.compile(r"\b(?:eco|climate)[\s-]+friendly\b", re.I), "lower-carbon"),
+# What a banned phrase is replaced with. Deliberately not a paraphrase: it asserts
+# nothing about reductions, compensation or comparisons, and it contains no banned
+# phrase itself, which is what makes sanitizing idempotent.
+CLAIM_REDACTION = "[claim removed — see the measured/reduced/compensated figures]"
+
+# Every pattern is word-boundary anchored and matched case-insensitively, so
+# unrelated words are never touched ("neutralization", "greenhouse",
+# "decarbonization").
+_CLAIM_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"\b(?:carbon|climate)[\s-]+neutrality\b", re.I),
+    re.compile(r"\b(?:carbon|climate)[\s-]+neutral\b", re.I),
+    re.compile(r"\b(?:climate[\s-]+positive|carbon[\s-]+negative)\b", re.I),
+    re.compile(r"\bnet[\s-]+zero\s+events?\b", re.I),
+    re.compile(r"\b(?:eco|climate)[\s-]+friendly\b", re.I),
     # (?-i:[A-Z]) stays case-sensitive inside the case-insensitive pattern so the
     # proper-noun exclusion ("Green Events Tool") actually keys off a capital.
-    (re.compile(r"\bgreen\s+events\b(?!\s+(?-i:[A-Z]))", re.I), "lower-carbon events"),
-    (re.compile(r"\bgreen\s+event\b(?!\s+(?-i:[A-Z]))", re.I), "lower-carbon event"),
+    re.compile(r"\bgreen\s+events?\b(?!\s+(?-i:[A-Z]))", re.I),
 ]
 
 
 def _matches(text: str) -> list[tuple[int, str]]:
     """(position, matched phrase) for every banned claim in ``text``."""
-    return [(m.start(), m.group(0)) for pattern, _ in _CLAIM_RULES for m in pattern.finditer(text or "")]
+    return [(m.start(), m.group(0)) for pattern in _CLAIM_PATTERNS for m in pattern.finditer(text or "")]
 
 
 def _dedup_in_order(found: list[tuple[int, str]]) -> list[str]:
@@ -73,25 +85,13 @@ def _dedup_in_order(found: list[tuple[int, str]]) -> list[str]:
     return phrases
 
 
-def _substituter(source: str, replacement: str):
-    """re.sub callback that capitalizes the rewrite only at a sentence start."""
-
-    def _sub(match: re.Match[str]) -> str:
-        before = source[: match.start()].rstrip()
-        if not before or before[-1] in ".!?:\n":
-            return replacement[:1].upper() + replacement[1:]
-        return replacement
-
-    return _sub
-
-
 def find_banned_claims(text: str) -> list[str]:
     """The banned claim phrases in ``text``, as written, in order of appearance."""
     return _dedup_in_order(_matches(text))
 
 
 def sanitize_claim_language(text: str) -> tuple[str, list[str]]:
-    """Rewrite banned claims into compliant wording.
+    """Redact banned claims, leaving :data:`CLAIM_REDACTION` in their place.
 
     Returns the rewritten text plus the banned phrases that were replaced (same
     shape as :func:`find_banned_claims`). Sanitizing already-clean text is a
@@ -101,8 +101,8 @@ def sanitize_claim_language(text: str) -> tuple[str, list[str]]:
         return text, []
 
     replaced = _dedup_in_order(_matches(text))
-    for pattern, replacement in _CLAIM_RULES:
-        text = pattern.sub(_substituter(text, replacement), text)
+    for pattern in _CLAIM_PATTERNS:
+        text = pattern.sub(CLAIM_REDACTION, text)
     return text, replaced
 
 
@@ -119,16 +119,29 @@ def compliant_compensation_statement(
     reduced_pct: float,
     residual_tco2e: float,
     credit_desc: str = DEFAULT_CREDIT_DESC,
+    compensated_tco2e: float | None = None,
 ) -> str:
     """Render the measured / reduced / residual-compensated construction.
 
-    This is what replaces a neutrality claim: no adjective, just the three
-    numbers a reader (or an auditor) needs to judge the compensation themselves.
+    This is what replaces a neutrality claim: no adjective, just the numbers a
+    reader (or an auditor) needs to judge the compensation themselves.
+
+    ``compensated_tco2e`` is how much of the residual retired credits actually
+    cover. When it falls short of the residual, both the covered and the
+    outstanding tonnage are named so partial coverage cannot be read as full
+    compensation; ``None`` means the residual is fully compensated.
     """
+    credits = credit_desc or DEFAULT_CREDIT_DESC
+    prefix = f"{total_tco2e:.3f} tCO2e measured, {reduced_pct:.1f}% reduced, "
+    if compensated_tco2e is None or compensated_tco2e >= residual_tco2e:
+        return (
+            f"{prefix}{residual_tco2e:.3f} tCO2e residual compensated "
+            f"outside the value chain via {credits}"
+        )
     return (
-        f"{total_tco2e:.3f} tCO2e measured, {reduced_pct:.1f}% reduced, "
-        f"{residual_tco2e:.3f} tCO2e residual compensated outside the value chain "
-        f"via {credit_desc or DEFAULT_CREDIT_DESC}"
+        f"{prefix}{compensated_tco2e:.3f} of {residual_tco2e:.3f} tCO2e residual "
+        f"compensated outside the value chain via {credits}; "
+        f"{residual_tco2e - compensated_tco2e:.3f} tCO2e residual not yet compensated"
     )
 
 
@@ -141,8 +154,14 @@ def portfolio_claim_statement(
 
     The reduction is stated as 0% because a scenario carries no reduction
     baseline yet (the NZCE compliance check reports that as a gap) — an
-    undocumented reduction is precisely what must not be claimed.
+    undocumented reduction is precisely what must not be claimed. With no
+    reduction, the residual *is* the measured total; only the retired credits
+    count as compensated, so anything less leaves an outstanding balance.
     """
     return compliant_compensation_statement(
-        total_tco2e, 0.0, retired_tco2e, describe_credit_sources(by_registry)
+        total_tco2e,
+        0.0,
+        total_tco2e,
+        describe_credit_sources(by_registry),
+        compensated_tco2e=retired_tco2e,
     )

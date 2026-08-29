@@ -2,9 +2,11 @@
 import pytest
 
 from app.services.claims import (
+    CLAIM_REDACTION,
     compliant_compensation_statement,
     describe_credit_sources,
     find_banned_claims,
+    portfolio_claim_statement,
     sanitize_claim_language,
 )
 from app.services.data_files import CARBON_OFFSETS
@@ -73,14 +75,16 @@ def test_sanitize_is_idempotent():
     assert replaced == []
 
 
-def test_sanitize_capitalizes_only_at_a_sentence_start():
-    opening, _ = sanitize_claim_language("Carbon neutral by design.")
-    assert opening[0].isupper()
-    assert opening.endswith(" by design.")
-
-    # Mid-sentence a Title-Cased claim must not leave a stray capital behind.
-    middle, _ = sanitize_claim_language("We call it a Carbon Neutral gala.")
-    assert middle == "We call it a measured, reduced and residual-compensated gala."
+def test_rewrites_are_redactions_not_counter_claims():
+    """A rewrite must never assert a reduction, a compensation or a comparison
+    the data does not back — swapping "carbon neutral" for "measured, reduced and
+    residual-compensated" (or "eco-friendly" for "lower-carbon") would just trade
+    one unsubstantiated claim for another."""
+    clean, replaced = sanitize_claim_language(
+        "Our Carbon Neutral, climate positive, eco-friendly gala."
+    )
+    assert clean == f"Our {CLAIM_REDACTION}, {CLAIM_REDACTION}, {CLAIM_REDACTION} gala."
+    assert replaced == ["Carbon Neutral", "climate positive", "eco-friendly"]
 
 
 def test_sanitize_leaves_unrelated_text_untouched():
@@ -107,6 +111,43 @@ def test_compliant_compensation_statement_renders_the_approved_construction():
 def test_compensation_statement_falls_back_when_no_credit_source_given():
     line = compliant_compensation_statement(10.0, 0.0, 0.0, "")
     assert line.endswith("via unspecified credits (registry not recorded)")
+
+
+def test_partial_coverage_names_the_outstanding_residual():
+    line = compliant_compensation_statement(
+        120.5, 0.0, 120.5, "retired credits from Gold Standard", compensated_tco2e=3.0
+    )
+    assert line == (
+        "120.500 tCO2e measured, 0.0% reduced, 3.000 of 120.500 tCO2e residual "
+        "compensated outside the value chain via retired credits from Gold Standard; "
+        "117.500 tCO2e residual not yet compensated"
+    )
+    assert find_banned_claims(line) == []
+
+
+def test_full_coverage_drops_the_outstanding_clause():
+    line = compliant_compensation_statement(
+        10.0, 0.0, 10.0, "retired credits from Verra", compensated_tco2e=10.0
+    )
+    assert line == (
+        "10.000 tCO2e measured, 0.0% reduced, 10.000 tCO2e residual compensated "
+        "outside the value chain via retired credits from Verra"
+    )
+
+
+def test_portfolio_statement_counts_only_retired_credits_as_compensated():
+    # 3 of 120.5 tCO2e retired must never read as the whole residual being covered.
+    partial = portfolio_claim_statement(120.5, 3.0, {"gold_standard": 3.0})
+    assert "3.000 of 120.500 tCO2e residual compensated" in partial
+    assert partial.endswith("117.500 tCO2e residual not yet compensated")
+
+    nothing_retired = portfolio_claim_statement(120.5, 0.0, {})
+    assert "0.000 of 120.500 tCO2e residual compensated" in nothing_retired
+    assert nothing_retired.endswith("120.500 tCO2e residual not yet compensated")
+
+    full = portfolio_claim_statement(10.0, 10.0, {"verra": 10.0})
+    assert "not yet compensated" not in full
+    assert find_banned_claims(partial) == [] and find_banned_claims(full) == []
 
 
 def test_describe_credit_sources():
