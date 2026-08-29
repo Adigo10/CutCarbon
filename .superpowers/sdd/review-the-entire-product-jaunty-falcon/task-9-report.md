@@ -3,7 +3,10 @@
 **Status:** COMPLETE
 **Worktree:** `C:\Users\adity\Projects\CutCarbon\.claude\worktrees\agent-ad05e4dc9507a2a1d`
 **Branch:** `worktree-agent-ad05e4dc9507a2a1d`
-**Commit:** `1669383` — feat(scope): organizational-boundary toggle + Scope 2 dual reporting
+**Commits:**
+- `1669383` feat(scope): organizational-boundary toggle + Scope 2 dual reporting
+- `26102f0` fix(ui): route the flow diagram's venue and equipment edges by the declared boundary
+- `129c9c1` fix(scope): say 'no venue declared' instead of quoting two zero bases
 
 ## Base correction (before any work)
 
@@ -114,16 +117,32 @@ instrument — which is precisely the Part B correction the brief specifies
 
 **Frontend:** `npm run build` (tsc + vite) clean.
 
-**Test runs.** The shared Supabase pooler was saturated by sibling worktrees for most
-of this session (`TooManyConnectionsError` / `EMAXPOOLSREACHED`). Pure (non-DB) suites
-pass consistently: `test_emissions_engine.py`, `test_characterization.py`,
-`test_data_quality.py`, `test_claims.py` → **122 passed, 1 skipped**. Full-suite runs
-recorded below (both cited per protocol):
+**Test runs.** The shared Supabase pooler was saturated by sibling worktrees for the
+whole session (`TooManyConnectionsError` / `EMAXPOOLSREACHED` / `max pools count
+reached`). Every run is cited:
 
-- Run 1 (pre-final-tidy): `1 failed, 191 passed, 21 errors` — the one failure was
-  `test_seeded_scenario_category_totals`, since fixed and characterized above; all 21
-  errors were `TooManyConnectionsError` from the shared pooler.
-- Run 2 (post-commit, after a 5-minute pause): see `FINAL RUN` below.
+| # | Scope | Result |
+|---|---|---|
+| 1 | `test_reporting_exports.py` + `test_scenarios.py` | 12 passed, 14 pooler errors |
+| 2 | **full suite** | **1 failed, 191 passed, 21 pooler errors** — the single failure was `test_seeded_scenario_category_totals`, fixed and characterized above |
+| 3 | exports + scenarios + agents + financial | 42 passed, 19 pooler errors (`…[xlsx]` passed here — the new XLSX Scope-block assertion is green) |
+| 4 | `test_reporting_exports.py` | 7 passed, 11 pooler errors |
+| 5 | full suite (after a 5-min pause, backgrounded) | **abandoned** — sat at 0% CPU for ~30 min blocked acquiring a connection; killed |
+| 6 | `test_reporting_exports.py` + `test_scenarios.py` (after killing #5) | 7 passed, 19 pooler errors |
+| 7 | all non-DB suites, final code state | **122 passed, 1 skipped** |
+
+Three sibling `pytest` processes were confirmed running concurrently against the same
+pooler (`Get-Process python` showed PIDs 9392 / 16240 / 17368, all near-zero CPU).
+**No run at any point produced a non-pooler failure other than the characterization
+value, which is fixed.** Every error was `asyncpg.exceptions.TooManyConnectionsError`
+or `InternalServerError (EMAXPOOLSREACHED)` raised in the session fixture, before any
+test body ran.
+
+The DB-backed tests this change actually touches did pass when they got a connection:
+`test_single_scenario_report_exports_return_expected_files[xlsx]` (run 3) exercises the
+new XLSX Scope block, and the CSV/JSON variants passed in run 2. **Recommendation: the
+controller should re-run `tests/test_reporting_exports.py` and `tests/test_scenarios.py`
+once the sibling worktrees are done, before merging.**
 
 ## Collateral fix
 
