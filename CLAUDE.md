@@ -104,7 +104,7 @@ Supporting modules: `app/rate_limit.py` (slowapi limiter honoring `RATE_LIMIT_EN
 
 - Emission calculations are fully deterministic (no LLM involvement) — the LLM only handles natural language extraction and suggestions
 - Supports "basic" mode (proxy-heavy estimates from attendee count) and "advanced" mode (detailed supplier data)
-- Data quality tracked per scenario ("estimated", "partial", or "verified") plus per-category flags (actual / proxy / not provided / not applicable) recorded in assumptions and rendered in all exports
+- Data quality tracked per scenario as a tier — `modelled` ("Tier 3 — modelled"), `partly_primary` ("Tier 2 — partly primary"), or `primary` ("Tier 1 — primary (evidenced)"). `primary` is an evidence tier the engine never awards: form completeness proves completeness, not provenance. Legacy rows ("estimated"/"partial"/"verified") are mapped forward on read in `scenario_serializer.normalize_data_quality`, so the API and exports never emit the retired words. Per-category flags (actual / proxy / partial / not provided / not applicable) are a separate vocabulary recorded in assumptions and rendered in all exports
 - Digital/virtual is a first-class emissions category (streaming, livestream production, event app, email — NZCE category 9); virtual events no longer get physical travel/venue proxies
 - ROI / payback-period / NPV metrics are deliberately omitted (`roi_months` is always null) — an annualized payback is misleading for a one-off event; likewise no dollar-quantified "compliance value" or voluntary-carbon-market savings line is added to the financial total
 - SBTi is not scored — it is a corporate framework; an informational "Event carbon intensity (vs published event benchmarks)" check is reported instead

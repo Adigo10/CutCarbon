@@ -331,7 +331,7 @@ For virtual and hybrid events, the digital group replaces physical proxies — v
 │  Scope 3 (Indirect): 5,877 tCO2e             │
 │                                               │
 │  Benchmark: Above average (high travel)      │
-│  Data Quality: Estimated (could verify)      │
+│  Data Quality: Tier 3 — modelled             │
 │                                               │
 │  [Edit] [Clone] [Compare] [Get Suggestions]  │
 └──────────────────────────────────────────────┘
@@ -857,13 +857,15 @@ Your events typically cover all three scopes:
 
 Scenarios are marked as:
 
-| Level | Definition | Example |
+| Tier | Definition | Example |
 |-------|-----------|---------|
-| **Estimated** | Derived from proxy data | "500 attendees from USA → assume average 13,600 km flight" |
-| **Partial** | Mix of supplier data + estimates | "Venue energy verified, catering from menu estimates" |
-| **Verified** | Primary data from suppliers | "Actual kWh consumption, invoiced travel, certified organic catering" |
+| **Tier 3 — modelled** | Every category derived from proxy data | "500 attendees from USA → assume average 13,600 km flight" |
+| **Tier 2 — partly primary** | At least one measured supplier input, the rest proxies | "Venue energy from the meter, catering from menu estimates" |
+| **Tier 1 — primary (evidenced)** | Primary supplier data with supporting evidence attached | "Metered kWh, invoiced travel, caterer's certificate on file" |
 
-In addition to the overall level, each emission category carries its own data-quality flag — **actual** (you provided the input), **proxy** (estimated from attendee count), **not provided**, or **not applicable** — recorded in the scenario's assumptions and rendered in every export.
+Tier 1 is **not** awarded for filling in every form: completing the advanced-mode inputs proves completeness, not provenance, so a fully populated scenario still reports Tier 2 until evidence is attached.
+
+In addition to the overall tier, each emission category carries its own data-quality flag — **actual** (you provided the input), **partial** (your inputs cover only part of the headcount), **proxy** (estimated from attendee count), **not provided**, or **not applicable** — recorded in the scenario's assumptions and rendered in every export.
 
 To improve data quality:
 1. Request emissions reports from venue, caterer, transport providers

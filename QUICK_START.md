@@ -125,7 +125,7 @@ Breakdown:
   Waste: 14 tCO2e (1%)
 
 Benchmark: ABOVE AVERAGE (high travel impact)
-Data quality: ESTIMATED (could be improved)
+Data quality: Tier 3 — modelled (could be improved)
 ```
 
 ---
@@ -299,9 +299,10 @@ Scenario C: Greener (vegan + train focus)
 Compare all 3 side-by-side to see trade-offs.
 ```
 
-### Tip 3: Verify Data Quality
-- Basic mode = estimates (fast)
-- Advanced mode = detailed inputs (more accurate)
+### Tip 3: Check Your Data-Quality Tier
+- Basic mode = proxies only, so Tier 3 — modelled (fast)
+- Advanced mode = detailed inputs, so Tier 2 — partly primary (more accurate)
+- Tier 1 — primary (evidenced) is not awarded for filling in forms; it needs supporting evidence attached
 
 To improve quality:
 - Get real energy data from venue
