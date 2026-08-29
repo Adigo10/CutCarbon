@@ -7,6 +7,7 @@ import {
   EVENT_TYPES,
   FINANCIAL_REGIONS,
   GRID_OPTIONS,
+  INTERNAL_CARBON_PRICE_PRESETS,
   START_SUGGESTIONS,
   TRAVEL_CLASS_OPTIONS,
   TRAVEL_MODE_OPTIONS,
@@ -960,6 +961,19 @@ export function FinancialView({
   selectedScenario,
   onCalculate,
 }: FinancialViewProps) {
+  const taxLines = result?.carbon_tax_savings ?? []
+  // Every component that actually makes up total_financial_savings_usd. Only the first
+  // carbon-tax line counts; any others are labelled forward projections.
+  const lineItems = result
+    ? [
+        ...(taxLines[0] ? [{ label: taxLines[0].scheme, value: taxLines[0].savings_usd }] : []),
+        { label: 'Energy cost savings', value: result.energy_cost_savings_usd },
+        { label: 'Catering cost savings', value: result.catering_cost_savings_usd },
+      ].filter((item) => item.value !== 0)
+    : []
+  const internalCarbonValue = result?.internal_carbon_value_usd ?? 0
+  const notes = result?.notes ?? []
+
   return (
     <div className="split-view split-view-forms">
       <Panel className="input-panel">
@@ -1055,6 +1069,43 @@ export function FinancialView({
         </div>
 
         <div className="check-grid">
+          <label className="check-field">
+            <input
+              checked={calc.covered_by_carbon_pricing}
+              onChange={(event) =>
+                setCalc((current) => ({ ...current, covered_by_carbon_pricing: event.target.checked }))
+              }
+              type="checkbox"
+            />
+            <span>My organisation is covered by a carbon pricing scheme</span>
+          </label>
+        </div>
+        {calc.covered_by_carbon_pricing ? (
+          <p className="subtle-copy">
+            Statutory carbon tax / ETS liability avoided will be priced into the total.
+          </p>
+        ) : (
+          <label className="field">
+            <span>Internal carbon price (USD/tCO2e)</span>
+            <select
+              value={calc.internal_carbon_price_usd}
+              onChange={(event) =>
+                setCalc((current) => ({ ...current, internal_carbon_price_usd: Number(event.target.value) }))
+              }
+            >
+              {INTERNAL_CARBON_PRICE_PRESETS.map((price) => (
+                <option key={price} value={price}>
+                  ${price} / tCO2e
+                </option>
+              ))}
+            </select>
+            <span className="subtle-copy">
+              Reference value for decision-making — reported separately, never added to the total.
+            </span>
+          </label>
+        )}
+
+        <div className="check-grid">
           {AVAILABLE_ACTIONS.map((action) => (
             <label key={action.key} className="check-field">
               <input
@@ -1095,22 +1146,96 @@ export function FinancialView({
             <Panel>
               <div className="panel-heading">
                 <div>
-                  <span className="eyebrow">Tax savings</span>
-                  <h3>Jurisdictional savings</h3>
+                  <span className="eyebrow">Breakdown</span>
+                  <h3>What makes up the total</h3>
                 </div>
               </div>
               <div className="stack-list">
-                {result.carbon_tax_savings.map((saving) => (
-                  <article key={saving.scheme} className="stack-row">
-                    <div>
-                      <strong>{saving.scheme}</strong>
-                      <p>{saving.description}</p>
-                    </div>
-                    <strong>{formatCurrency(saving.savings_usd)}</strong>
-                  </article>
-                ))}
+                {lineItems.length ? (
+                  lineItems.map((item) => (
+                    <article key={item.label} className="stack-row">
+                      <div>
+                        <strong>{item.label}</strong>
+                      </div>
+                      <strong>{formatCurrency(item.value)}</strong>
+                    </article>
+                  ))
+                ) : (
+                  <p className="subtle-copy">No cash savings for this configuration.</p>
+                )}
+                <article className="stack-row">
+                  <div>
+                    <strong>Total financial benefit</strong>
+                  </div>
+                  <strong>{formatCurrency(result.total_financial_savings_usd)}</strong>
+                </article>
               </div>
             </Panel>
+            {result.carbon_price_basis === 'internal' ? (
+              <Panel>
+                <div className="panel-heading">
+                  <div>
+                    <span className="eyebrow">Internal carbon price</span>
+                    <h3>Reference value, not a tax liability</h3>
+                  </div>
+                  <Badge tone="cyan">Excluded from total</Badge>
+                </div>
+                <div className="stack-list">
+                  <article className="stack-row">
+                    <div>
+                      <strong>
+                        {formatCurrency(result.internal_carbon_price_usd ?? 0)} / tCO2e ×{' '}
+                        {formatTons(result.total_co2e_reduced)}
+                      </strong>
+                      <p>Shadow price for internal decision-making — no cash or tax effect.</p>
+                    </div>
+                    <strong>{formatCurrency(internalCarbonValue)}</strong>
+                  </article>
+                </div>
+              </Panel>
+            ) : (
+              <Panel>
+                <div className="panel-heading">
+                  <div>
+                    <span className="eyebrow">Tax savings</span>
+                    <h3>Jurisdictional savings</h3>
+                  </div>
+                </div>
+                <div className="stack-list">
+                  {taxLines.length ? (
+                    taxLines.map((saving, index) => (
+                      <article key={saving.scheme} className="stack-row">
+                        <div>
+                          <strong>{saving.scheme}</strong>
+                          <p>{saving.description}</p>
+                          {index > 0 ? <Badge tone="cyan">Projection — not in total</Badge> : null}
+                        </div>
+                        <strong>{formatCurrency(saving.savings_usd)}</strong>
+                      </article>
+                    ))
+                  ) : (
+                    <p className="subtle-copy">No statutory carbon price configured for this region.</p>
+                  )}
+                </div>
+              </Panel>
+            )}
+            {notes.length ? (
+              <Panel>
+                <div className="panel-heading">
+                  <div>
+                    <span className="eyebrow">Basis</span>
+                    <h3>How these numbers were derived</h3>
+                  </div>
+                </div>
+                <div className="stack-list">
+                  {notes.map((note) => (
+                    <p key={note} className="subtle-copy">
+                      {note}
+                    </p>
+                  ))}
+                </div>
+              </Panel>
+            ) : null}
             <Panel>
               <div className="panel-heading">
                 <div>
