@@ -721,7 +721,14 @@ def _scope2_reporting_note(
                 "unsubstantiated and earns no market-based reduction."
             )
 
-    if venue_owned:
+    if venue_energy is None and venue.location_kg == 0.0:
+        # Virtual event with no declared venue: there is no electricity line to
+        # report on either basis, so say that rather than quoting two zeros.
+        note = (
+            "No venue energy is in scope (no venue declared), so neither a "
+            "location-based nor a market-based Scope 2 figure is reported."
+        )
+    elif venue_owned:
         note = (
             "Scope 2 reported on both bases per the GHG Protocol Scope 2 Guidance. "
             f"Location-based {venue.location_kg / 1000:.4f} tCO2e, market-based "
