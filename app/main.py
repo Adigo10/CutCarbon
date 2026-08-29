@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
+from app.config import settings
 from app.models.database import init_db
 from app.rate_limit import limiter
 from app.routers import chat, scenarios, financial, agents, auth, offsets, exports
@@ -18,9 +19,25 @@ IS_VERCEL = os.getenv("VERCEL") == "1"
 API_PREFIX = "" if IS_VERCEL else "/api"
 
 
+def _validate_runtime_config() -> None:
+    if os.getenv("VERCEL") != "1":
+        return
+    if "sqlite" in settings.DATABASE_URL:
+        raise RuntimeError(
+            "DATABASE_URL must point to persistent Postgres on Vercel; "
+            "the SQLite fallback is ephemeral and unsupported"
+        )
+    if settings.RUN_MIGRATIONS_ON_STARTUP:
+        raise RuntimeError(
+            "RUN_MIGRATIONS_ON_STARTUP must be false on Vercel; apply Alembic "
+            "migrations once, before deployment"
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logging.basicConfig(level=logging.INFO)
+    _validate_runtime_config()
     await init_db()
     logger.info("EventCarbon Co-Pilot v2.0 started — http://localhost:8000")
     yield

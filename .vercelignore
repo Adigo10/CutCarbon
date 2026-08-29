@@ -13,5 +13,6 @@ __pycache__/
 frontend/.env
 frontend/dist/
 frontend/node_modules/
+requirements-dev.txt
 tests/
 docs/

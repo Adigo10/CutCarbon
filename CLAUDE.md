@@ -37,6 +37,7 @@ npm run dev
 ## Running Tests
 
 ```bash
+pip install -r requirements-dev.txt
 pytest
 ```
 
