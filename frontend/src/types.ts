@@ -26,7 +26,9 @@ export interface TravelSegment {
   mode: string
   travel_class: string
   attendees: number
+  /** One-way distance for the leg; doubled by the engine when round_trip is true. */
   distance_km: number
+  round_trip?: boolean
   label?: string
 }
 
