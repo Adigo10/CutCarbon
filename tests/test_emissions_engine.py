@@ -466,6 +466,85 @@ class TestOrganizationalBoundary:
         assert scopes.scope2_location_tco2e == 0.0
         assert scopes.scope2_market_tco2e == 0.0
 
+    def _mixed_result(self):
+        """Hired venue, but the organizer owns the production kit — a real combination."""
+        return calculate_scenario(
+            EventScenarioInput(
+                name="mixed",
+                attendees=200,
+                event_days=2,
+                venue_energy=VenueEnergy(grid_region="singapore", control="contracted"),
+                equipment=EquipmentGroup(control="owned_operated", **self._EQUIPMENT),
+            )
+        )
+
+    def test_mixed_boundary_keeps_owned_equipment_in_scope1_and_scope2(self):
+        result = self._mixed_result()
+        scopes = result.emissions.scopes
+        eq = EF["equipment"]
+        expected_scope1 = 12 * eq["generator_diesel_per_hour"]["factor"] / 1000
+        expected_scope2 = (
+            2 * eq["lighting_rig_per_day"]["factor"] + 2 * eq["sound_system_per_day"]["factor"]
+        ) / 1000
+        assert scopes.scope1_tco2e == pytest.approx(expected_scope1, abs=1e-4)
+        assert scopes.scope2_tco2e == pytest.approx(expected_scope2, abs=1e-4)
+        # The venue is contracted, so none of the venue line is in Scope 2.
+        assert scopes.scope2_tco2e < result.emissions.venue_energy_tco2e
+
+    def test_mixed_boundary_note_does_not_deny_the_scope2_it_reports(self):
+        """Regression: the disclosure branched on the venue alone and claimed 'no Scope 2'
+        while owned equipment electricity was sitting in a non-zero Scope 2."""
+        result = self._mixed_result()
+        scopes = result.emissions.scopes
+        reporting = result.assumptions["scope2_reporting"]
+        assert scopes.scope2_tco2e > 0
+        assert "no Scope 2" not in reporting["note"]
+        # The fields must agree with the scope totals, equipment electricity included.
+        assert reporting["location_based_tco2e"] == pytest.approx(scopes.scope2_location_tco2e)
+        assert reporting["market_based_tco2e"] == pytest.approx(scopes.scope2_market_tco2e)
+        # ...and the note must say where that Scope 2 came from, given the venue is not in it.
+        assert "equipment" in reporting["note"]
+        assert "contracted" in reporting["note"]
+
+    def test_virtual_event_with_owned_equipment_still_reports_its_scope2(self):
+        result = calculate_scenario(
+            EventScenarioInput(
+                name="virtual-owned-kit",
+                event_type="virtual_event",
+                attendees=100,
+                event_days=1,
+                equipment=EquipmentGroup(control="owned_operated", lighting_days=2),
+            )
+        )
+        scopes = result.emissions.scopes
+        note = result.assumptions["scope2_reporting"]["note"]
+        assert scopes.scope2_tco2e > 0
+        assert "no venue" in note.lower()
+        # No venue does not mean no Scope 2 — the owned lighting rig is in it.
+        assert "no Scope 2 is reported" not in note
+        assert "equipment" in note
+
+    def test_owned_note_labels_the_venue_line_and_the_scope_total_separately(self):
+        """The prose quoted venue-line figures while the fields carried scope totals."""
+        result = calculate_scenario(
+            EventScenarioInput(
+                name="owned-both",
+                attendees=200,
+                event_days=2,
+                venue_energy=VenueEnergy(grid_region="singapore", control="owned_operated"),
+                equipment=EquipmentGroup(control="owned_operated", **self._EQUIPMENT),
+            )
+        )
+        scopes = result.emissions.scopes
+        reporting = result.assumptions["scope2_reporting"]
+        note = reporting["note"]
+        # Equipment electricity means the scope total exceeds the venue line; both
+        # quantities appear in the note, each named.
+        assert scopes.scope2_location_tco2e > 0
+        assert f"{scopes.scope2_location_tco2e:.4f}" in note
+        assert "venue electricity" in note
+        assert "Scope 2 total" in note
+
     def test_contracted_still_discloses_the_scope2_duality(self):
         result = calculate_scenario(
             EventScenarioInput(

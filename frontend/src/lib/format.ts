@@ -131,12 +131,53 @@ export function selectedScenarioCategoryRows(scenario: Scenario | null) {
     .sort((left, right) => right.value - left.value)
 }
 
+/**
+ * The two Scope 2 bases the GHG Protocol requires side by side.
+ *
+ * The engine only lets the market basis diverge from the location basis when a
+ * contractual instrument backs the renewable claim, and the headline follows the
+ * market basis exactly when it does — so a difference between the two is what
+ * identifies the headline basis. Rows saved before dual reporting carry only the
+ * headline figure, which correctly stands in for both (they recorded no instrument).
+ */
+export function scope2Bases(scenario: Scenario | null) {
+  const scopes = scenario?.emissions.scopes
+  if (!scopes) return null
+  const location = scopes.scope2_location_tco2e ?? scopes.scope2_tco2e
+  const market = scopes.scope2_market_tco2e ?? scopes.scope2_tco2e
+  return { location, market, headlineIsMarket: market !== location }
+}
+
+/** Visible disclosure of both bases for the dashboard scope panel. */
+export function scope2DualCaption(scenario: Scenario | null): string {
+  const bases = scope2Bases(scenario)
+  if (!bases) return ''
+  if (bases.location === 0 && bases.market === 0) {
+    return 'No Scope 2 reported — the venue and equipment are contracted, so their energy sits in Scope 3.'
+  }
+  return (
+    `Scope 2 dual-reported: ${bases.location.toFixed(3)} t location-based · ` +
+    `${bases.market.toFixed(3)} t market-based. The bar shows the ` +
+    `${bases.headlineIsMarket ? 'market' : 'location'}-based headline.`
+  )
+}
+
 export function selectedScenarioScopeRows(scenario: Scenario | null) {
-  if (!scenario?.emissions.scopes) return []
+  const scopes = scenario?.emissions.scopes
+  if (!scopes) return []
+  const bases = scope2Bases(scenario)
   return [
-    { label: 'Scope 1', value: scenario.emissions.scopes.scope1_tco2e, color: '#f97316' },
-    { label: 'Scope 2', value: scenario.emissions.scopes.scope2_tco2e, color: '#facc15' },
-    { label: 'Scope 3', value: scenario.emissions.scopes.scope3_tco2e, color: '#14b8a6' },
+    { label: 'Scope 1', value: scopes.scope1_tco2e, color: '#f97316', note: '' },
+    {
+      // Never an unlabelled "Scope 2": the bar shows one basis, so it says which.
+      label: bases?.headlineIsMarket ? 'Scope 2 (market-based)' : 'Scope 2 (location-based)',
+      value: scopes.scope2_tco2e,
+      color: '#facc15',
+      note: bases?.headlineIsMarket
+        ? `Location-based: ${bases.location.toFixed(3)} t`
+        : 'Location-based equals market-based (no contractual instrument)',
+    },
+    { label: 'Scope 3', value: scopes.scope3_tco2e, color: '#14b8a6', note: '' },
   ]
 }
 
@@ -387,8 +428,14 @@ export function buildFlowDiagram(scenario: Scenario | null): string {
   })
 
   if (scopes) {
+    // The S2 node carries one number, so it names the basis that number is on and
+    // shows the other basis underneath when the two differ.
+    const bases = scope2Bases(scenario)
+    const s2Label = bases?.headlineIsMarket
+      ? `Scope 2 (market-based)\\n${scopes.scope2_tco2e.toFixed(3)} t\\nlocation-based ${bases.location.toFixed(3)} t`
+      : `Scope 2 (location-based = market-based)\\n${scopes.scope2_tco2e.toFixed(3)} t`
     diagram += `  S1["Scope 1\\n${scopes.scope1_tco2e.toFixed(3)} t"]\n`
-    diagram += `  S2["Scope 2\\n${scopes.scope2_tco2e.toFixed(3)} t"]\n`
+    diagram += `  S2["${s2Label}"]\n`
     diagram += `  S3["Scope 3\\n${scopes.scope3_tco2e.toFixed(3)} t"]\n`
   }
 

@@ -53,7 +53,7 @@ def test_seeded_scenario_scope_split_follows_the_boundary(seeded_result):
     # Scope 2 fields are zero, but the electricity line's dual bases stay disclosed.
     reporting = seeded_result.assumptions["scope2_reporting"]
     assert reporting["renewable_instrument"] == "none"
-    assert "1.0050 tCO2e on a location basis" in reporting["note"]
+    assert "1.0050 tCO2e location-based" in reporting["note"]
 
 
 def test_seeded_scenario_travel_coverage_disclosed(seeded_result):

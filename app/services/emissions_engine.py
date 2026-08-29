@@ -688,12 +688,20 @@ def _scope2_reporting_note(
     venue_owned: bool,
     location_kg: float,
     market_kg: float,
+    equipment_kg: float,
 ) -> dict:
     """Dual Scope 2 disclosure (GHG Protocol Scope 2 Guidance), persisted in assumptions.
 
     Doubles as the persistence vehicle for the two figures: ``assumptions`` is JSONB
     and already round-trips through the DB, so stored scenarios rehydrate both bases
     without a schema migration (see scenario_serializer.scope2_dual_bases).
+
+    Two quantities are in play and the prose names both, because they differ whenever
+    owned equipment is present: the *venue electricity line* (the only line an
+    instrument can apply to) and the *Scope 2 total* returned in the fields, which also
+    carries owned/operated equipment electricity. The venue boundary alone does not
+    decide whether Scope 2 exists — a hired venue with an owned lighting rig still
+    reports Scope 2 — so the disclosure keys off the totals actually being reported.
     """
     instrument = getattr(venue_energy, "renewable_instrument", RenewableInstrument.NONE)
     instrument_value = getattr(instrument, "value", instrument) or "none"
@@ -721,29 +729,49 @@ def _scope2_reporting_note(
                 "unsubstantiated and earns no market-based reduction."
             )
 
+    has_scope2 = location_kg > 0 or market_kg > 0
+
+    if has_scope2:
+        parts = ["Scope 2 is reported on both bases per the GHG Protocol Scope 2 Guidance."]
+    else:
+        parts = ["No Scope 2 is reported for this scenario."]
+
+    # 1. The venue electricity line — the only line a contractual instrument touches.
     if venue_energy is None and venue.location_kg == 0.0:
-        # Virtual event with no declared venue: there is no electricity line to
-        # report on either basis, so say that rather than quoting two zeros.
-        note = (
-            "No venue energy is in scope (no venue declared), so neither a "
-            "location-based nor a market-based Scope 2 figure is reported."
-        )
+        parts.append("No venue energy is in scope (no venue declared).")
     elif venue_owned:
-        note = (
-            "Scope 2 reported on both bases per the GHG Protocol Scope 2 Guidance. "
-            f"Location-based {venue.location_kg / 1000:.4f} tCO2e, market-based "
-            f"{venue.market_kg / 1000:.4f} tCO2e for the venue electricity line. "
-            f"The headline total uses the "
-            f"{'market' if venue.instrument_backed else 'location'}-based figure. "
-            + basis_text
+        parts.append(
+            "The venue is owned/operated, so its electricity is Scope 2: the venue "
+            f"electricity line is {venue.location_kg / 1000:.4f} tCO2e location-based "
+            f"and {venue.market_kg / 1000:.4f} tCO2e market-based, and the headline "
+            f"total uses the "
+            f"{'market' if venue.instrument_backed else 'location'}-based figure."
         )
     else:
-        note = (
-            "The venue is contracted, so its electricity is reported as Scope 3 and no "
-            "Scope 2 figures are reported. For disclosure, that electricity line is "
-            f"{venue.location_kg / 1000:.4f} tCO2e on a location basis and "
-            f"{venue.market_kg / 1000:.4f} tCO2e on a market basis. " + basis_text
+        parts.append(
+            "The venue is contracted, so its electricity is reported as Scope 3, not "
+            "Scope 2. For disclosure, that venue electricity line is "
+            f"{venue.location_kg / 1000:.4f} tCO2e location-based and "
+            f"{venue.market_kg / 1000:.4f} tCO2e market-based."
         )
+
+    # 2. Owned equipment electricity, which is in Scope 2 whatever the venue's boundary.
+    if equipment_kg > 0:
+        parts.append(
+            f"Owned/operated equipment electricity adds {equipment_kg / 1000:.4f} tCO2e "
+            "to Scope 2, identically on both bases — no contractual instrument applies "
+            "to it."
+        )
+
+    # 3. The reported totals, which are what the scope2_*_tco2e fields carry.
+    if has_scope2:
+        parts.append(
+            f"Scope 2 total as reported: {location_kg / 1000:.4f} tCO2e location-based, "
+            f"{market_kg / 1000:.4f} tCO2e market-based."
+        )
+
+    parts.append(basis_text)
+    note = " ".join(parts)
 
     return {
         "location_based_tco2e": round(location_kg / 1000, 4),
@@ -866,8 +894,10 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
         # same on both bases and simply adds to each.
         scope2_location_kg += equip_s2
         scope2_market_kg += equip_s2
+        equipment_scope2_kg = equip_s2
     else:
         scope3_total += equip_kg
+        equipment_scope2_kg = 0.0
 
     # Swag (Scope 3)
     swag_kg, sw_notes = _swag_emissions(scenario.swag, attendees)
@@ -893,6 +923,7 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
         venue_owned=venue_owned,
         location_kg=scope2_location_kg,
         market_kg=scope2_market_kg,
+        equipment_kg=equipment_scope2_kg,
     )
 
     total_kg = travel_kg + energy_kg + accom_kg + catering_kg + waste_kg + equip_kg + swag_kg + digital_kg
