@@ -192,6 +192,8 @@ export interface FinancialCalcState {
   meal_switches: number
   attendees: number
   actions: string[]
+  covered_by_carbon_pricing: boolean
+  internal_carbon_price_usd: number
   linked_scenario_id: string | null
   linked_scenario_name: string | null
 }
@@ -214,6 +216,10 @@ export interface FinancialResult {
   co2e_reduction_pct: number
   roi_months?: number | null
   compliance_value_usd: number
+  carbon_price_basis?: 'statutory' | 'internal'
+  internal_carbon_price_usd?: number | null
+  internal_carbon_value_usd?: number
+  notes?: string[]
 }
 
 export interface OffsetProject {

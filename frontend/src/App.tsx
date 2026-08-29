@@ -487,6 +487,8 @@ function App() {
           meal_switches: financialCalc.meal_switches,
           attendees: financialCalc.attendees,
           actions_taken: financialCalc.actions,
+          covered_by_carbon_pricing: financialCalc.covered_by_carbon_pricing,
+          internal_carbon_price_usd: financialCalc.internal_carbon_price_usd,
         },
         token,
       )

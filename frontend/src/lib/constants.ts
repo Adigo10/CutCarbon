@@ -209,6 +209,10 @@ export function createDefaultScenarioDraft(): ScenarioDraft {
   }
 }
 
+// Internal (shadow) carbon price presets in USD/tCO2e, used when the organisation is
+// not covered by a compliance carbon pricing scheme.
+export const INTERNAL_CARBON_PRICE_PRESETS = [25, 50, 100]
+
 export function createDefaultFinancialCalc(): FinancialCalcState {
   return {
     region: 'singapore',
@@ -218,6 +222,8 @@ export function createDefaultFinancialCalc(): FinancialCalcState {
     meal_switches: 0,
     attendees: 0,
     actions: [],
+    covered_by_carbon_pricing: false,
+    internal_carbon_price_usd: 50,
     linked_scenario_id: null,
     linked_scenario_name: null,
   }

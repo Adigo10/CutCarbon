@@ -261,6 +261,7 @@ def test_financial_total_excludes_fabricated_streams():
         baseline_tco2e=100, reduced_tco2e=70, region="singapore",
         energy_kwh_saved=1000, meal_switches=200, attendees=300,
         actions_taken=["ghg_reporting", "renewable_energy"],
+        covered_by_carbon_pricing=True,  # statutory path — otherwise no tax line at all
     )
     res = generate_financial_report(req)
 
