@@ -45,6 +45,36 @@ def reload_factors() -> None:
     EF.update(fresh)
 
 
+def physical_attendee_count(scenario) -> int:
+    """Headcount physically present at the venue.
+
+    Hybrid events net out an explicitly declared remote cohort — those people neither
+    travel to the venue nor occupy a hotel room, a seat at lunch, or floor space. Every
+    other event type uses the full headcount: a conference's streamed audience is
+    *additive* to the room, not overlapping with it, and a virtual event is gated
+    separately in calculate_scenario.
+
+    Single source for the netting, shared by the travel base, the physical-presence
+    proxies and the financial back-calculation, so the categories cannot disagree about
+    how many people were in the building.
+    """
+    if scenario.event_type.value != "hybrid_event":
+        return scenario.attendees
+    declared_remote = scenario.digital.virtual_attendees if scenario.digital else 0
+    return scenario.attendees - min(declared_remote, scenario.attendees)
+
+
+def _netting_note(physical_attendees: int, attendees: int) -> str:
+    """Disclosure clause appended to a proxy note when a remote cohort was netted out."""
+    remote = attendees - physical_attendees
+    if remote <= 0:
+        return ""
+    return (
+        f" (sized for {physical_attendees} of {attendees} attendees; "
+        f"{remote} remote attendees are not physically present)"
+    )
+
+
 def _travel_proxy_kg(attendees: float) -> float:
     """Per-head travel proxy: 70% fly long-haul 2000km economy, 30% local MRT 50km."""
     long_haul = attendees * 0.7 * 2000 * EF["travel"]["long_haul_flight"]["economy"]
@@ -177,23 +207,33 @@ def estimate_venue_kwh(venue_energy, attendees: int, event_days: int) -> float:
     return attendees * _VENUE_M2_PER_ATTENDEE * event_days * intensity
 
 
-def _venue_energy_emissions(venue_energy, attendees: int, event_days: int) -> tuple[float, float, dict]:
-    """Returns venue energy kg CO2e, scope1 kg (generators), notes."""
+def _venue_energy_emissions(
+    venue_energy, attendees: int, event_days: int, physical_attendees: Optional[int] = None
+) -> tuple[float, float, dict]:
+    """Returns venue energy kg CO2e, scope1 kg (generators), notes.
+
+    ``physical_attendees`` sizes the floor-area proxies; a metered kWh reading is an
+    actual and is never netted.
+    """
     notes = {}
     scope1_kg = 0.0
+    on_site = attendees if physical_attendees is None else physical_attendees
 
     if venue_energy is None:
-        proxy_area = attendees * _VENUE_M2_PER_ATTENDEE
+        proxy_area = on_site * _VENUE_M2_PER_ATTENDEE
         proxy_factor = EF["venue_energy"]["proxy_factors"]["conference_centre_per_m2_day"]
         total_kg = proxy_area * event_days * proxy_factor
-        notes["venue"] = f"Proxy: {proxy_area}m2 at {proxy_factor} kg CO2e/m2/day"
+        notes["venue"] = (
+            f"Proxy: {proxy_area}m2 at {proxy_factor} kg CO2e/m2/day"
+            f"{_netting_note(on_site, attendees)}"
+        )
         notes["venue_basis"] = "area_intensity_proxy"
         return total_kg, scope1_kg, notes
 
     grid_key = venue_energy.grid_region.value
     grid_ef = EF["venue_energy"]["grids"].get(grid_key, EF["venue_energy"]["grids"]["global_average"])["factor"]
 
-    kwh = estimate_venue_kwh(venue_energy, attendees, event_days)
+    kwh = estimate_venue_kwh(venue_energy, on_site, event_days)
     intensity = _venue_kwh_intensity()
     if venue_energy.kwh_consumed is not None:
         notes["venue"] = f"Actual kWh: {kwh:.0f}"
@@ -206,6 +246,7 @@ def _venue_energy_emissions(venue_energy, attendees: int, event_days: int) -> tu
             f"Proxy kWh from attendees: {kwh:.0f} "
             f"({_VENUE_M2_PER_ATTENDEE}m2/attendee at {intensity} kWh/m2/day)"
         )
+        notes["venue"] += _netting_note(on_site, attendees)
         notes["venue_basis"] = "attendee_kwh_proxy"
 
     effective_ef = grid_ef * (1 - venue_energy.renewable_pct / 100)
@@ -217,14 +258,20 @@ def _venue_energy_emissions(venue_energy, attendees: int, event_days: int) -> tu
     return total_kg, scope1_kg, notes
 
 
-def _accommodation_emissions(accom, attendees: int, event_days: int) -> tuple[float, dict]:
+def _accommodation_emissions(
+    accom, attendees: int, event_days: int, physical_attendees: Optional[int] = None
+) -> tuple[float, dict]:
     notes = {}
+    on_site = attendees if physical_attendees is None else physical_attendees
 
     if accom is None:
-        room_nights = (attendees * 0.8 / 1.5) * event_days
+        room_nights = (on_site * 0.8 / 1.5) * event_days
         ef = EF["accommodation"]["standard_hotel"]["factor"]
         total_kg = room_nights * ef
-        notes["accommodation"] = f"Proxy: 80% attendees, standard hotel, {room_nights:.0f} room-nights"
+        notes["accommodation"] = (
+            f"Proxy: 80% attendees, standard hotel, {room_nights:.0f} room-nights"
+            f"{_netting_note(on_site, attendees)}"
+        )
         return total_kg, notes
 
     ef_key = accom.accommodation_type.value
@@ -235,15 +282,20 @@ def _accommodation_emissions(accom, attendees: int, event_days: int) -> tuple[fl
     return total_kg, notes
 
 
-def _catering_emissions(catering, attendees: int, event_days: int) -> tuple[float, dict]:
+def _catering_emissions(
+    catering, attendees: int, event_days: int, physical_attendees: Optional[int] = None
+) -> tuple[float, dict]:
     notes = {}
+    on_site = attendees if physical_attendees is None else physical_attendees
 
     if catering is None:
-        meals = attendees * event_days * 2
+        meals = on_site * event_days * 2
         ef = EF["catering"]["mixed_buffet"]["factor"]
         beverage_ef = EF["catering"]["beverages_per_person_day"]["factor"]
-        total_kg = meals * ef + attendees * event_days * beverage_ef
-        notes["catering"] = f"Proxy: {meals} mixed meals + beverages"
+        total_kg = meals * ef + on_site * event_days * beverage_ef
+        notes["catering"] = (
+            f"Proxy: {meals} mixed meals + beverages{_netting_note(on_site, attendees)}"
+        )
         return total_kg, notes
 
     ef_key = catering.catering_type.value
@@ -272,17 +324,23 @@ def _catering_emissions(catering, attendees: int, event_days: int) -> tuple[floa
     return total_kg, notes
 
 
-def _waste_emissions(waste, attendees: int, event_days: int) -> tuple[float, dict]:
+def _waste_emissions(
+    waste, attendees: int, event_days: int, physical_attendees: Optional[int] = None
+) -> tuple[float, dict]:
     notes = {}
+    on_site = attendees if physical_attendees is None else physical_attendees
 
     if waste is None:
         # Printed handouts are a one-off per attendee; general waste accrues per day,
         # matching every other proxy in the engine.
         total_kg = (
-            attendees * 0.5 * EF["materials_waste"]["paper_cardboard"]["factor"]
-            + attendees * 0.3 * event_days * EF["materials_waste"]["general_landfill"]["factor"]
+            on_site * 0.5 * EF["materials_waste"]["paper_cardboard"]["factor"]
+            + on_site * 0.3 * event_days * EF["materials_waste"]["general_landfill"]["factor"]
         )
-        notes["waste"] = "Proxy: 0.5kg printed per attendee + 0.3kg general waste per attendee per day"
+        notes["waste"] = (
+            "Proxy: 0.5kg printed per attendee + 0.3kg general waste per attendee per day"
+            f"{_netting_note(on_site, attendees)}"
+        )
         return total_kg, notes
 
     total_kg = (
@@ -537,13 +595,14 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
     # footprint. Explicitly provided inputs (e.g. a studio venue) are still honored.
     is_virtual = scenario.event_type.value == "virtual_event"
 
-    # Remote attendees never travel to the venue, so they are netted out of the travel
-    # reconciliation base on hybrid events. Only an explicitly declared virtual cohort
-    # counts — the hybrid *digital* proxy (30% of attendees) is itself an assumption and
-    # must not silently shrink the travel base.
-    declared_virtual = scenario.digital.virtual_attendees if scenario.digital else 0
-    is_hybrid = scenario.event_type.value == "hybrid_event"
-    remote_attendees = min(declared_virtual, attendees) if is_hybrid else 0
+    # People actually in the building. On a hybrid event this nets out an explicitly
+    # declared remote cohort; everywhere else it is the full headcount. One base for the
+    # travel reconciliation AND every physical-presence proxy, so the categories cannot
+    # disagree about how many people were on site. Only a *declared* cohort counts — the
+    # hybrid digital proxy (30% of attendees) is itself an assumption and must not
+    # silently shrink any base.
+    physical_attendees = physical_attendee_count(scenario)
+    remote_attendees = attendees - physical_attendees
 
     # Travel (Scope 3)
     if is_virtual and not scenario.travel_segments:
@@ -571,7 +630,9 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
             "venue_basis": "not applicable (virtual event)",
         }
     else:
-        energy_kg, venue_s1_kg, e_notes = _venue_energy_emissions(scenario.venue_energy, attendees, days)
+        energy_kg, venue_s1_kg, e_notes = _venue_energy_emissions(
+            scenario.venue_energy, attendees, days, physical_attendees
+        )
     scope2_total += energy_kg
     scope1_total += venue_s1_kg
 
@@ -579,21 +640,25 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
     if is_virtual and scenario.accommodation is None:
         accom_kg, a_notes = 0.0, {}
     else:
-        accom_kg, a_notes = _accommodation_emissions(scenario.accommodation, attendees, days)
+        accom_kg, a_notes = _accommodation_emissions(
+            scenario.accommodation, attendees, days, physical_attendees
+        )
     scope3_total += accom_kg
 
     # Catering (Scope 3)
     if is_virtual and scenario.catering is None:
         catering_kg, c_notes = 0.0, {}
     else:
-        catering_kg, c_notes = _catering_emissions(scenario.catering, attendees, days)
+        catering_kg, c_notes = _catering_emissions(
+            scenario.catering, attendees, days, physical_attendees
+        )
     scope3_total += catering_kg
 
     # Waste (Scope 3)
     if is_virtual and scenario.waste is None:
         waste_kg, w_notes = 0.0, {}
     else:
-        waste_kg, w_notes = _waste_emissions(scenario.waste, attendees, days)
+        waste_kg, w_notes = _waste_emissions(scenario.waste, attendees, days, physical_attendees)
     scope3_total += waste_kg
 
     # Equipment (Scope 1 generators + Scope 2 electricity + Scope 3 stage/freight).

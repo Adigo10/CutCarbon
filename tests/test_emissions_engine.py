@@ -3,9 +3,12 @@
 import pytest
 
 from app.models.schemas import (
+    AccommodationGroup,
+    CateringGroup,
     DigitalGroup,
     EquipmentGroup,
     EventScenarioInput,
+    SwagGroup,
     TravelClass,
     TravelMode,
     TravelSegment,
@@ -207,11 +210,14 @@ class TestUnallocatedAttendeeReconciliation:
         assert result.emissions.travel_tco2e == pytest.approx(_travel_proxy_kg(500) / 1000, abs=1e-4)
 
     def test_adding_travel_data_never_inflates_a_hybrid_total(self):
-        """Monotonicity guard: the discontinuity this fix removes.
+        """Guards the discontinuity this fix removes: both paths proxy over one base.
 
-        A segment covering N <= (attendees - remote) must not push the travel total above
-        the no-segments proxy for the same event, because both now proxy over the same
-        travelling base.
+        The load-bearing assertion is the identity at the end — the two totals differ by
+        exactly (measured cohort - the proxy it replaced), which holds for any segment
+        weight. The inequality checked first is weaker and specific to this segment: it
+        holds only because a 100-person 800km short-haul cohort is lighter per head than
+        the proxy it displaces. A heavier segment could legitimately exceed the
+        no-segments total without the base being wrong.
         """
         def hybrid(segments):
             return calculate_scenario(
@@ -248,6 +254,121 @@ class TestUnallocatedAttendeeReconciliation:
             )
         )
         assert "100 of 500 attendees" in result.assumptions["travel_coverage"]
+
+
+_PHYSICAL_PRESENCE_FIELDS = (
+    "venue_energy_tco2e",
+    "accommodation_tco2e",
+    "catering_tco2e",
+    "materials_waste_tco2e",
+)
+
+
+class TestHybridPhysicalPresenceNetting:
+    """A hybrid event's physical proxies must size to the people actually on site.
+
+    Netting travel but not venue/accommodation/catering/waste would have the engine
+    simultaneously report 300 people travelling and 500 people eating.
+    """
+
+    def _assert_same(self, left, right, fields=_PHYSICAL_PRESENCE_FIELDS):
+        for field in fields:
+            assert getattr(left.emissions, field) == pytest.approx(
+                getattr(right.emissions, field), abs=1e-4
+            ), field
+
+    def test_hybrid_proxies_size_to_the_on_site_headcount(self):
+        # Identity pin: a 500-person hybrid with 200 declared remote must produce the
+        # same physical proxies as a plain 300-person event.
+        hybrid = calculate_scenario(
+            EventScenarioInput(
+                name="hybrid",
+                attendees=500,
+                event_days=2,
+                event_type="hybrid_event",
+                digital=DigitalGroup(virtual_attendees=200),
+            )
+        )
+        on_site = calculate_scenario(
+            EventScenarioInput(name="on-site", attendees=300, event_days=2)
+        )
+        self._assert_same(hybrid, on_site)
+
+    def test_hybrid_netting_is_disclosed_per_category(self):
+        result = calculate_scenario(
+            EventScenarioInput(
+                name="hybrid-notes",
+                attendees=500,
+                event_days=2,
+                event_type="hybrid_event",
+                digital=DigitalGroup(virtual_attendees=200),
+            )
+        )
+        for key in ("venue", "accommodation", "catering", "waste"):
+            note = result.assumptions[key]
+            assert "300 of 500" in note, f"{key}: {note}"
+            assert "200 remote" in note, f"{key}: {note}"
+
+    def test_hybrid_actuals_are_never_netted(self):
+        supplied = dict(
+            attendees=500,
+            event_days=2,
+            mode="advanced",
+            venue_energy=VenueEnergy(grid_region="singapore", kwh_consumed=5000),
+            accommodation=AccommodationGroup(room_nights=400),
+            catering=CateringGroup(meals=1000),
+            waste=WasteGroup(general_waste_kg=800, recycled_kg=200),
+        )
+        hybrid = calculate_scenario(
+            EventScenarioInput(
+                name="hybrid-actual",
+                event_type="hybrid_event",
+                digital=DigitalGroup(virtual_attendees=200),
+                **supplied,
+            )
+        )
+        conference = calculate_scenario(EventScenarioInput(name="conf-actual", **supplied))
+        self._assert_same(hybrid, conference)
+
+    def test_conference_stream_audience_keeps_full_headcount_proxies(self):
+        # Regression guard: a conference's streamed audience is additive, not overlapping.
+        streamed = calculate_scenario(
+            EventScenarioInput(
+                name="conf-stream",
+                attendees=500,
+                event_days=2,
+                digital=DigitalGroup(virtual_attendees=200),
+            )
+        )
+        plain = calculate_scenario(EventScenarioInput(name="conf", attendees=500, event_days=2))
+        self._assert_same(streamed, plain)
+
+    def test_hybrid_without_declared_cohort_keeps_full_headcount_proxies(self):
+        hybrid = calculate_scenario(
+            EventScenarioInput(
+                name="hybrid-plain", attendees=500, event_days=2, event_type="hybrid_event"
+            )
+        )
+        plain = calculate_scenario(EventScenarioInput(name="conf", attendees=500, event_days=2))
+        self._assert_same(hybrid, plain)
+
+    def test_swag_is_not_netted(self):
+        # Swag is often shipped to remote attendees, so it stays at the full headcount.
+        swag = SwagGroup(tshirts=500, tote_bags=500)
+        hybrid = calculate_scenario(
+            EventScenarioInput(
+                name="hybrid-swag",
+                attendees=500,
+                event_type="hybrid_event",
+                digital=DigitalGroup(virtual_attendees=200),
+                swag=swag,
+            )
+        )
+        plain = calculate_scenario(
+            EventScenarioInput(name="conf-swag", attendees=500, swag=swag)
+        )
+        assert hybrid.emissions.swag_tco2e == pytest.approx(plain.emissions.swag_tco2e, abs=1e-6)
+        assert hybrid.emissions.swag_tco2e > 0
 
 
 class TestVenueKwh:

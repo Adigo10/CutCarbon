@@ -172,7 +172,7 @@ def build_scenario_financial_request(
     grid and renewable share) — never from the requesting region's grid factor.
     """
     from app.models.schemas import EventScenarioInput
-    from app.services.emissions_engine import estimate_venue_kwh
+    from app.services.emissions_engine import estimate_venue_kwh, physical_attendee_count
 
     baseline = scenario_row.total_tco2e or 0.0
     reduced = baseline * (1 - reduction_pct / 100)
@@ -181,8 +181,12 @@ def build_scenario_financial_request(
     venue_kwh = 0.0
     try:
         scenario_input = EventScenarioInput.model_validate(payload)
+        # Same on-site headcount the emissions engine sized the venue with, so the
+        # kWh back-calculation cannot disagree with the venue figure it mirrors.
         venue_kwh = estimate_venue_kwh(
-            scenario_input.venue_energy, scenario_input.attendees, scenario_input.event_days
+            scenario_input.venue_energy,
+            physical_attendee_count(scenario_input),
+            scenario_input.event_days,
         )
     except Exception:
         # Legacy rows without a valid stored payload: back-solve from this row's own
