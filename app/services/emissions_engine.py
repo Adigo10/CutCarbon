@@ -17,6 +17,18 @@ logger = logging.getLogger(__name__)
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
 
+# Semantic version of the calculation methodology itself, independent of the factor
+# catalog version (`EF["version"]`). Recorded in every factors snapshot and in every
+# stored report snapshot so a report can be traced to the exact engine that produced it.
+#
+# BUMP ON EVERY METHODOLOGY CHANGE:
+#   MAJOR — results move for existing inputs (new/removed category, changed scoping,
+#           changed proxy, changed scope allocation).
+#   MINOR — new opt-in inputs or new outputs that leave existing results unchanged.
+#   PATCH — bug fixes with negligible numeric impact, refactors, wording.
+# Changing only emission_factors.json bumps `EF["version"]`, not this.
+ENGINE_VERSION = "2.0.0"
+
 with open(_DATA_DIR / "emission_factors.json", encoding="utf-8") as f:
     EF = json.load(f)
 
@@ -824,8 +836,18 @@ def build_factors_snapshot(scenario: EventScenarioInput) -> dict:
         "catering_type": catering_type,
         "waste_landfill_kg_per_kg": EF["materials_waste"]["general_landfill"]["factor"],
         "ef_version": EF.get("version", "unknown"),
+        "engine_version": ENGINE_VERSION,
         "captured_at": utcnow().isoformat(),
     }
+
+
+def current_versions() -> dict[str, str]:
+    """The factor-catalog and engine versions a fresh calculation would use now.
+
+    Compared against a stored `factors_snapshot` to detect drift (see
+    `scenario_serializer.serialize_scenario`).
+    """
+    return {"ef_version": EF.get("version", "unknown"), "engine_version": ENGINE_VERSION}
 
 
 def get_reduction_suggestions(

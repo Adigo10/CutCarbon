@@ -132,6 +132,7 @@ export interface FactorSnapshot {
   [key: string]: unknown
   captured_at?: string
   ef_version?: string
+  engine_version?: string
   venue_grid_region?: string
   travel_long_haul_economy_kg_per_pkm?: number
   travel_short_haul_economy_kg_per_pkm?: number
@@ -155,6 +156,11 @@ export interface Scenario {
   assumptions: Record<string, unknown>
   input_payload?: ScenarioInputPayload
   factors_snapshot?: FactorSnapshot
+  // Factor/engine drift: the versions a fresh calculation would use right now, and
+  // whether this scenario's stored numbers predate them (recalculation available).
+  current_ef_version?: string
+  current_engine_version?: string
+  factors_stale?: boolean
   benchmark?: BenchmarkComparison | null
   created_at: string
 }

@@ -15,15 +15,39 @@ from app.models.schemas import (
     ScenarioResult,
     ScopeBreakdown,
 )
-from app.services.emissions_engine import build_factors_snapshot, get_benchmark_comparison
+from app.services.emissions_engine import (
+    build_factors_snapshot,
+    current_versions,
+    get_benchmark_comparison,
+)
 
 # Columns that must never be copied when cloning a scenario row.
 _CLONE_EXCLUDED = {"id", "user_id", "created_at", "updated_at"}
 
 
+def _factor_drift(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Compare a stored factors snapshot against what a fresh calculation would use.
+
+    A scenario is "stale" when it was calculated under a different factor catalog or
+    a different engine version — i.e. re-running "Recalculate all" would change it.
+    A scenario with no snapshot at all is not flagged: there is nothing to compare.
+    """
+    current = current_versions()
+    stale = bool(snapshot) and (
+        str(snapshot.get("ef_version") or "") != current["ef_version"]
+        or str(snapshot.get("engine_version") or "") != current["engine_version"]
+    )
+    return {
+        "current_ef_version": current["ef_version"],
+        "current_engine_version": current["engine_version"],
+        "factors_stale": stale,
+    }
+
+
 def serialize_scenario(s: ScenarioDB) -> dict[str, Any]:
     """ScenarioDB row -> the wire/report dict used by the API and all exports."""
     event_type = getattr(s, "event_type", "conference") or "conference"
+    factors_snapshot = getattr(s, "factors_snapshot", None) or {}
     per_attendee_day = (
         round(s.per_attendee_tco2e / max(s.event_days or 1, 1), 4) if s.per_attendee_tco2e else 0
     )
@@ -58,7 +82,8 @@ def serialize_scenario(s: ScenarioDB) -> dict[str, Any]:
         },
         "assumptions": s.assumptions or {},
         "input_payload": s.input_payload or {},
-        "factors_snapshot": getattr(s, "factors_snapshot", None) or {},
+        "factors_snapshot": factors_snapshot,
+        **_factor_drift(factors_snapshot),
         "benchmark": benchmark.model_dump() if benchmark else None,
         "created_at": s.created_at.isoformat() if s.created_at else "",
     }

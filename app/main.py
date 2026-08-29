@@ -53,6 +53,7 @@ app.include_router(financial.router, prefix="/api/financial", tags=["Financial"]
 app.include_router(offsets.router,   prefix="/api/offsets",   tags=["Carbon Offsets"])
 app.include_router(agents.router,    prefix="/api/agents",    tags=["TinyFish Agents"])
 app.include_router(exports.router,   prefix="/api/exports",   tags=["Data Exports"])
+app.include_router(exports.reports_router, prefix="/api",     tags=["Report Snapshots"])
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIST_DIR = BASE_DIR / "frontend" / "dist"

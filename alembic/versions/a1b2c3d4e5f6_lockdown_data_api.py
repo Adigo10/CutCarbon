@@ -12,7 +12,6 @@ from typing import Sequence, Union
 
 from alembic import op
 
-from app.models.database import Base
 from app.models.db_security import lock_down_tables, revoke_default_privileges
 
 # revision identifiers, used by Alembic.
@@ -21,8 +20,24 @@ down_revision: Union[str, None] = "3089f7bc722b"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-# App tables + Alembic's own bookkeeping table (also PostgREST-exposed by default).
-_TABLES = [t.name for t in Base.metadata.sorted_tables] + ["alembic_version"]
+# The tables that exist as of this revision — app tables from 3089f7bc722b plus
+# Alembic's own bookkeeping table (also PostgREST-exposed by default).
+#
+# Deliberately a literal list, NOT `Base.metadata.sorted_tables`: a migration must
+# describe the schema at its own point in history. Reading live model metadata made
+# this step fail on a fresh `alembic upgrade head` as soon as a later revision added
+# a table (ALTER TABLE on a relation that does not exist yet). Tables introduced by
+# later revisions lock themselves down in their own migration.
+_TABLES = [
+    "agent_runs",
+    "emission_factors",
+    "users",
+    "chat_messages",
+    "scenarios",
+    "financial_reports",
+    "offset_purchases",
+    "alembic_version",
+]
 
 
 def upgrade() -> None:
