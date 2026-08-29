@@ -3,6 +3,7 @@ import {
   ACCOMMODATION_OPTIONS,
   APPLIES_LABELS,
   AVAILABLE_ACTIONS,
+  BOUNDARY_CONTROL_OPTIONS,
   CATERING_OPTIONS,
   EMISSION_CATEGORIES,
   EMPLOYEE_BANDS,
@@ -12,6 +13,7 @@ import {
   GRID_OPTIONS,
   INTERNAL_CARBON_PRICE_PRESETS,
   LISTING_STATUSES,
+  RENEWABLE_INSTRUMENT_OPTIONS,
   START_SUGGESTIONS,
   TRAVEL_CLASS_OPTIONS,
   TRAVEL_MODE_OPTIONS,
@@ -444,7 +446,21 @@ export function ScenariosView({
         Number(scenario.emissions[category.key as keyof typeof scenario.emissions] ?? 0),
     })),
     { label: 'Scope 1', digits: 2, value: (scenario) => scenario.emissions.scopes?.scope1_tco2e ?? 0 },
-    { label: 'Scope 2', digits: 2, value: (scenario) => scenario.emissions.scopes?.scope2_tco2e ?? 0 },
+    { label: 'Scope 2 (headline basis)', digits: 2, value: (scenario) => scenario.emissions.scopes?.scope2_tco2e ?? 0 },
+    // GHG Protocol Scope 2 Guidance requires both bases side by side. Rows saved
+    // before dual reporting carry only the headline figure, which stands in for both.
+    {
+      label: 'Scope 2 (location-based)',
+      digits: 2,
+      value: (scenario) =>
+        scenario.emissions.scopes?.scope2_location_tco2e ?? scenario.emissions.scopes?.scope2_tco2e ?? 0,
+    },
+    {
+      label: 'Scope 2 (market-based)',
+      digits: 2,
+      value: (scenario) =>
+        scenario.emissions.scopes?.scope2_market_tco2e ?? scenario.emissions.scopes?.scope2_tco2e ?? 0,
+    },
     { label: 'Scope 3', digits: 2, value: (scenario) => scenario.emissions.scopes?.scope3_tco2e ?? 0 },
   ]
 
@@ -553,6 +569,25 @@ export function ScenariosView({
             </label>
           </div>
 
+          <label className="field">
+            <span>Venue &amp; equipment boundary</span>
+            <select
+              value={draft.venue_control}
+              onChange={(event) => setDraft((current) => ({ ...current, venue_control: event.target.value }))}
+            >
+              {BOUNDARY_CONTROL_OPTIONS.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="subtle-copy">
+            GHG Protocol control approach. A hired venue and its production kit are a purchased
+            service, so they are reported as Scope 3 — the emissions still count in the total,
+            only the scope they land in changes.
+          </p>
+
           <label className="slider-field">
             <span>Renewable energy mix</span>
             <div className="slider-line">
@@ -566,6 +601,27 @@ export function ScenariosView({
               <strong>{draft.renewable_pct}%</strong>
             </div>
           </label>
+
+          <label className="field">
+            <span>Renewable instrument</span>
+            <select
+              value={draft.renewable_instrument}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, renewable_instrument: event.target.value }))
+              }
+            >
+              {RENEWABLE_INSTRUMENT_OPTIONS.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="subtle-copy">
+            Without a retired instrument the renewable share cannot be deducted on the market
+            basis, so it does not reduce the footprint. With one, the remaining grid supply is
+            priced at a residual-mix factor rather than the grid average.
+          </p>
 
           <label className="check-field">
             <input

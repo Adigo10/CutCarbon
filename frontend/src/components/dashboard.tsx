@@ -15,6 +15,7 @@ import {
   labelize,
   scenarioGapToBest,
   scenarioRank,
+  scope2DualCaption,
   selectedScenarioCategoryRows,
   selectedScenarioFactorRows,
   selectedScenarioOpportunityRows,
@@ -98,6 +99,7 @@ export function DashboardView({
   const sortedScenarios = sortScenariosByTotal(scenarios)
   const selectedCategories = selectedScenarioCategoryRows(selectedScenario)
   const selectedScopes = selectedScenarioScopeRows(selectedScenario)
+  const scope2Caption = scope2DualCaption(selectedScenario)
   const selectedOpportunities = selectedScenarioOpportunityRows(selectedScenario)
   const factorRows = selectedScenarioFactorRows(selectedScenario.factors_snapshot)
   const hotspot = topEmissionSource(selectedScenario)
@@ -268,7 +270,15 @@ export function DashboardView({
           responsive: true,
           maintainAspectRatio: false,
           indexAxis: 'y',
-          plugins: { legend: { display: false } },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                // The Scope 2 bar shows one basis; its tooltip carries the other.
+                afterLabel: (item) => selectedScopes[item.dataIndex]?.note ?? '',
+              },
+            },
+          },
           scales: {
             x: {
               ticks: { color: '#647268', font: { size: 11 }, callback: (value) => `${value} t` },
@@ -516,6 +526,7 @@ export function DashboardView({
               <span className="eyebrow">GHG scopes</span>
               <h3>Scope distribution</h3>
             </div>
+            {scope2Caption ? <p>{scope2Caption}</p> : null}
           </div>
           <ChartSurface config={scopeConfig} empty="Scope data not available yet." height={260} />
         </Panel>

@@ -24,7 +24,10 @@ def test_seeded_scenario_category_totals(seeded_result):
     # reconciled with the standard travel proxy instead of travelling for free
     # (was 48.36 when the 80 unallocated attendees contributed nothing).
     assert e.travel_tco2e == pytest.approx(70.2264, abs=0.01)
-    assert e.venue_energy_tco2e == pytest.approx(0.9045, abs=0.001)  # measured kWh, unchanged
+    # Venue: the seeded payload claims 10% renewable but names no contractual
+    # instrument, so that share is no longer deducted (was 0.9045 when an
+    # unsubstantiated percentage still cut the grid factor). 2500 kWh x 0.402.
+    assert e.venue_energy_tco2e == pytest.approx(1.005, abs=0.001)
     assert e.accommodation_tco2e == pytest.approx(2.835, abs=0.001)
     assert e.catering_tco2e == pytest.approx(0.4392, abs=0.001)
     # Waste: the general-waste proxy now scales with the 2 event days like every other
@@ -32,8 +35,25 @@ def test_seeded_scenario_category_totals(seeded_result):
     assert e.materials_waste_tco2e == pytest.approx(0.0968, abs=0.001)
     assert e.equipment_tco2e == 0.0
     assert e.swag_tco2e == 0.0
-    assert e.total_tco2e == pytest.approx(74.5019, abs=0.01)
-    assert e.per_attendee_tco2e == pytest.approx(0.6208, abs=0.001)
+    assert e.total_tco2e == pytest.approx(74.6024, abs=0.01)  # was 74.5019, see venue above
+    assert e.per_attendee_tco2e == pytest.approx(0.6217, abs=0.001)
+
+
+def test_seeded_scenario_scope_split_follows_the_boundary(seeded_result):
+    """The seeded payload declares no boundary, so it defaults to contracted.
+
+    A hired venue's electricity is a purchased service (Scope 3), not the organizer's
+    Scope 2 — the total is unchanged by the routing, only the scope it lands in.
+    """
+    scopes = seeded_result.emissions.scopes
+    assert scopes.scope1_tco2e == 0.0
+    assert scopes.scope2_tco2e == 0.0
+    assert scopes.scope3_tco2e == pytest.approx(seeded_result.emissions.total_tco2e, abs=0.01)
+    assert "contracted" in seeded_result.assumptions["boundary"]
+    # Scope 2 fields are zero, but the electricity line's dual bases stay disclosed.
+    reporting = seeded_result.assumptions["scope2_reporting"]
+    assert reporting["renewable_instrument"] == "none"
+    assert "1.0050 tCO2e location-based" in reporting["note"]
 
 
 def test_seeded_scenario_travel_coverage_disclosed(seeded_result):

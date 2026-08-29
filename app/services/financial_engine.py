@@ -227,7 +227,11 @@ def build_scenario_financial_request(
     energy saving. The headline reduction_pct alone never conjures a line item.
     """
     from app.models.schemas import EventScenarioInput
-    from app.services.emissions_engine import estimate_venue_kwh, physical_attendee_count
+    from app.services.emissions_engine import (
+        estimate_venue_kwh,
+        physical_attendee_count,
+        residual_mix_factor,
+    )
 
     baseline = scenario_row.total_tco2e or 0.0
     reduced = baseline * (1 - reduction_pct / 100)
@@ -249,8 +253,16 @@ def build_scenario_financial_request(
         # region's grid factor.
         snapshot = getattr(scenario_row, "factors_snapshot", None) or {}
         grid_ef = snapshot.get("venue_grid_kg_per_kwh") or 0.0
-        renewable_pct = (payload.get("venue_energy") or {}).get("renewable_pct") or 0.0
-        effective_ef = grid_ef * (1 - renewable_pct / 100)
+        venue_payload = payload.get("venue_energy") or {}
+        renewable_pct = venue_payload.get("renewable_pct") or 0.0
+        instrument = venue_payload.get("renewable_instrument") or "none"
+        # Mirror the engine's Scope 2 rule when back-solving kWh from the stored
+        # emission figure: a renewable share with no contractual instrument behind it
+        # never reduced that figure, so it must not be divided back out here either.
+        if instrument != "none" and renewable_pct > 0:
+            effective_ef = residual_mix_factor(grid_ef) * (1 - renewable_pct / 100)
+        else:
+            effective_ef = grid_ef
         if effective_ef > 0:
             venue_kwh = (scenario_row.venue_energy_tco2e or 0.0) * 1000 / effective_ef
 

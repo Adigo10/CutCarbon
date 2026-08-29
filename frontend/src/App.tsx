@@ -413,6 +413,8 @@ function App() {
       include_alcohol: payload?.catering?.include_alcohol ?? false,
       accommodation_type: payload?.accommodation?.accommodation_type ?? 'standard_hotel',
       renewable_pct: payload?.venue_energy?.renewable_pct ?? 0,
+      venue_control: payload?.venue_energy?.control ?? 'contracted',
+      renewable_instrument: payload?.venue_energy?.renewable_instrument ?? 'none',
       travel_segments: payload?.travel_segments ?? [],
       stage_m2: payload?.equipment?.stage_m2 ?? 0,
       lighting_days: payload?.equipment?.lighting_days ?? 0,

@@ -124,6 +124,8 @@ def test_single_scenario_report_exports_return_expected_files(client: TestClient
         keys = [c["framework_key"] for c in payload["compliance"]["checks"]]
         assert "eu_csrd" in keys and "sgx_issb" not in keys
         assert len(payload["nzce_categories"]) == 9
+        scopes = payload["scope_breakdown"]
+        assert "scope2_location_tco2e" in scopes and "scope2_market_tco2e" in scopes
     elif fmt == "csv":
         content = response.content.decode("utf-8")
         assert "section,key,label,value,unit" in content
@@ -134,6 +136,8 @@ def test_single_scenario_report_exports_return_expected_files(client: TestClient
         assert "nzce,nzce_energy,Energy" in content
         assert "offsets,claim_statement,Claim Statement," in content
         assert "tCO2e residual compensated outside the value chain" in content
+        assert "scopes,scope2_location_tco2e,Scope 2 (location-based)" in content
+        assert "scopes,scope2_market_tco2e,Scope 2 (market-based)" in content
     elif fmt == "xlsx":
         workbook = load_workbook(io.BytesIO(response.content))
         assert "Report Summary" in workbook.sheetnames
@@ -144,6 +148,9 @@ def test_single_scenario_report_exports_return_expected_files(client: TestClient
             isinstance(v, str) and "residual compensated outside the value chain" in v
             for v in offsets_values
         )
+        summary_labels = [row[0] for row in workbook["Report Summary"].iter_rows(values_only=True)]
+        assert "Scope 2 (location-based)" in summary_labels
+        assert "Scope 2 (market-based)" in summary_labels
     else:
         assert response.content.startswith(b"%PDF")
 
