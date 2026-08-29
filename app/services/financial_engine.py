@@ -339,7 +339,7 @@ def generate_financial_report(req: FinancialRequest) -> FinancialResult:
         internal_value = round(internal_price * co2e_reduced, 2)
         notes.append(
             f"Internal carbon price — reference value, not a tax liability: "
-            f"USD {internal_price:,.0f}/tCO2e x {co2e_reduced:.2f} tCO2e = "
+            f"USD {internal_price:,.2f}/tCO2e x {co2e_reduced:.2f} tCO2e = "
             f"USD {internal_value:,.2f}. Excluded from total financial savings."
         )
 

@@ -1085,24 +1085,26 @@ export function FinancialView({
             Statutory carbon tax / ETS liability avoided will be priced into the total.
           </p>
         ) : (
-          <label className="field">
-            <span>Internal carbon price (USD/tCO2e)</span>
-            <select
-              value={calc.internal_carbon_price_usd}
-              onChange={(event) =>
-                setCalc((current) => ({ ...current, internal_carbon_price_usd: Number(event.target.value) }))
-              }
-            >
-              {INTERNAL_CARBON_PRICE_PRESETS.map((price) => (
-                <option key={price} value={price}>
-                  ${price} / tCO2e
-                </option>
-              ))}
-            </select>
-            <span className="subtle-copy">
+          <>
+            <label className="field">
+              <span>Internal carbon price (USD/tCO2e)</span>
+              <select
+                value={calc.internal_carbon_price_usd}
+                onChange={(event) =>
+                  setCalc((current) => ({ ...current, internal_carbon_price_usd: Number(event.target.value) }))
+                }
+              >
+                {INTERNAL_CARBON_PRICE_PRESETS.map((price) => (
+                  <option key={price} value={price}>
+                    ${price} / tCO2e
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="subtle-copy">
               Reference value for decision-making — reported separately, never added to the total.
-            </span>
-          </label>
+            </p>
+          </>
         )}
 
         <div className="check-grid">
