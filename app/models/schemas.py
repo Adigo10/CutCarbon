@@ -119,6 +119,8 @@ class TravelSegment(BaseModel):
     travel_class: TravelClass = TravelClass.ECONOMY
     attendees: int = Field(gt=0, le=1_000_000)
     distance_km: float = Field(ge=0, le=50_000)  # > half Earth's circumference is nonsensical
+    # distance_km is a one-way leg; set round_trip when the same leg is flown/driven back.
+    round_trip: bool = False
     label: str = ""
 
 
@@ -146,7 +148,10 @@ class WasteGroup(BaseModel):
     general_waste_kg: float = Field(default=0.0, ge=0)
     recycled_kg: float = Field(default=0.0, ge=0)
     composted_kg: float = Field(default=0.0, ge=0)
-    printed_materials_per_attendee: bool = True
+    # None = auto: add the printed-materials proxy only when no waste weights were
+    # measured (measured paper is already inside general_waste_kg / recycled_kg).
+    # An explicit True/False from the user always wins.
+    printed_materials_per_attendee: Optional[bool] = None
     exhibition_booths_m2: float = Field(default=0.0, ge=0)
 
 
