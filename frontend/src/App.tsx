@@ -430,6 +430,7 @@ function App() {
       streaming_hours_per_day: payload?.digital?.streaming_hours_per_day ?? 6,
       event_app_users: payload?.digital?.event_app_users ?? 0,
       emails_sent: payload?.digital?.emails_sent ?? 0,
+      exclusions: payload?.exclusions ?? '',
     })
     handleOpenTab('scenarios')
   }

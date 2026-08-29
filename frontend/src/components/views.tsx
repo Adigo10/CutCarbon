@@ -5,6 +5,7 @@ import {
   AVAILABLE_ACTIONS,
   BOUNDARY_CONTROL_OPTIONS,
   CATERING_OPTIONS,
+  DATA_QUALITY_CATEGORIES,
   EMISSION_CATEGORIES,
   EMPLOYEE_BANDS,
   EVENT_TYPES,
@@ -28,10 +29,12 @@ import {
   formatTons,
   labelize,
 } from '../lib/format'
+import { DATA_QUALITY_LABELS } from '../types'
 import type {
   AgentRun,
   AgentStatus,
   AuthMode,
+  CategoryDataQuality,
   ChatMessage,
   ComplianceInput,
   ComplianceReport,
@@ -383,6 +386,123 @@ export function ChatView({
         </Panel>
       </div>
     </div>
+  )
+}
+
+// Per-category provenance flags carry their own reason text ("not applicable
+// (virtual event)"), so tone is matched on the leading word rather than the
+// whole string.
+function categoryFlagTone(flag: string): 'fresh' | 'cyan' | 'amber' | 'neutral' {
+  if (flag.startsWith('actual')) return 'fresh'
+  if (flag.startsWith('partial')) return 'cyan'
+  if (flag.startsWith('proxy')) return 'amber'
+  return 'neutral'
+}
+
+/**
+ * Audit trail for the selected scenario: which categories were measured, which
+ * were modelled, what the engine assumed, and what the organizer declared out of
+ * scope. The dashboard's active-plan ledger states the headline tier; this panel
+ * is the evidence behind it.
+ */
+function ProvenancePanel({ scenario }: { scenario: Scenario }) {
+  const assumptions = scenario.assumptions ?? {}
+  const flags = (assumptions.category_data_quality ?? {}) as CategoryDataQuality
+  const flaggedCategories = DATA_QUALITY_CATEGORIES.filter(([key]) => typeof flags[key] === 'string')
+  // Every other assumption the engine recorded is a human-readable note (travel
+  // coverage, venue basis, netting disclosures) — rendered verbatim, never reworded.
+  const notes = Object.entries(assumptions).filter(
+    (entry): entry is [string, string] =>
+      entry[0] !== 'category_data_quality' && typeof entry[1] === 'string' && entry[1].trim() !== '',
+  )
+  const tier = DATA_QUALITY_LABELS[scenario.emissions.data_quality] ?? DATA_QUALITY_LABELS.modelled
+  const exclusions = scenario.exclusions?.trim()
+
+  return (
+    <Panel>
+      <div className="panel-heading">
+        <div>
+          <span className="eyebrow">Provenance</span>
+          <h3>How this number was built</h3>
+        </div>
+        <Badge tone={scenario.emissions.data_quality === 'modelled' ? 'amber' : 'cyan'}>{tier}</Badge>
+      </div>
+
+      <div className="metric-grid">
+        <div className="mini-metric">
+          <span>Primary-data coverage</span>
+          <strong>
+            {typeof scenario.coverage_pct === 'number' ? `${scenario.coverage_pct}%` : '—'}
+          </strong>
+        </div>
+        <div className="mini-metric">
+          <span>Measured categories</span>
+          <strong>
+            {flaggedCategories.filter(([key]) => flags[key].startsWith('actual')).length} of{' '}
+            {DATA_QUALITY_CATEGORIES.length}
+          </strong>
+        </div>
+      </div>
+      <p className="subtle-copy">
+        Coverage is the share of tCO2e coming from categories with measured inputs, weighted by tonnes —
+        not the share of categories filled in.
+      </p>
+
+      <div className="subpanel provenance-block">
+        <div className="subpanel-header">
+          <div>
+            <span className="eyebrow">Per category</span>
+            <h4>Measured vs modelled</h4>
+          </div>
+        </div>
+        {flaggedCategories.length ? (
+          <ul className="provenance-list">
+            {flaggedCategories.map(([key, label]) => (
+              <li key={key}>
+                <span>{label}</span>
+                <Badge tone={categoryFlagTone(flags[key])}>{flags[key]}</Badge>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="subtle-copy">
+            No per-category disclosure was recorded for this scenario. Run “Recalculate all” to
+            regenerate it.
+          </p>
+        )}
+      </div>
+
+      <div className="subpanel provenance-block">
+        <div className="subpanel-header">
+          <div>
+            <span className="eyebrow">Boundary</span>
+            <h4>Exclusions (user-declared)</h4>
+          </div>
+        </div>
+        <p className={exclusions ? 'provenance-note-body' : 'subtle-copy'}>
+          {exclusions || 'None declared'}
+        </p>
+      </div>
+
+      {notes.length ? (
+        <div className="subpanel provenance-block">
+          <div className="subpanel-header">
+            <div>
+              <span className="eyebrow">Assumptions</span>
+              <h4>What the engine assumed</h4>
+            </div>
+          </div>
+          <dl className="provenance-notes">
+            {notes.map(([key, value]) => (
+              <div key={key}>
+                <dt>{labelize(key)}</dt>
+                <dd>{value}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      ) : null}
+    </Panel>
   )
 }
 
@@ -920,6 +1040,21 @@ export function ScenariosView({
             </div>
           </div>
 
+          <label className="field">
+            <span>Boundary exclusions (optional)</span>
+            <textarea
+              rows={3}
+              maxLength={2000}
+              value={draft.exclusions}
+              onChange={(event) => setDraft((current) => ({ ...current, exclusions: event.target.value }))}
+              placeholder="e.g. Excludes attendee commuting within the host city and pre-event site visits."
+            />
+            <small className="field-hint">
+              What you have deliberately left outside the reporting boundary. Stated verbatim in every
+              exported report; reports say “None declared” if you leave this empty.
+            </small>
+          </label>
+
           <div className="hero-actions">
             <Button tone="primary" busy={scenarioLoading} type="submit">
               {editingScenario ? 'Update scenario' : 'Calculate scenario'}
@@ -1109,6 +1244,8 @@ export function ScenariosView({
             </div>
           </Panel>
         ) : null}
+
+        {selectedScenario ? <ProvenancePanel scenario={selectedScenario} /> : null}
 
         {selectedScenario ? (
           <Panel>

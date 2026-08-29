@@ -101,6 +101,8 @@ export interface ScenarioInputPayload {
   equipment?: EquipmentPayload
   swag?: SwagPayload
   digital?: DigitalPayload
+  /** Free text declaring what the organizer left outside the reporting boundary. */
+  exclusions?: string | null
 }
 
 export interface ScopeBreakdown {
@@ -123,6 +125,15 @@ export const DATA_QUALITY_LABELS: Record<DataQualityTier, string> = {
   partly_primary: 'Tier 2 — partly primary',
   primary: 'Tier 1 — primary (evidenced)',
 }
+
+/**
+ * Per-category provenance flags written by the engine into
+ * `assumptions.category_data_quality`. A separate vocabulary from the
+ * scenario-level tier above: these describe one category's inputs, not the
+ * whole footprint. "not applicable (…)" carries its reason, so the raw string
+ * is rendered rather than matched exactly.
+ */
+export type CategoryDataQuality = Record<string, string>
 
 export interface Emissions {
   travel_tco2e: number
@@ -182,6 +193,10 @@ export interface Scenario {
   current_ef_version?: string
   current_engine_version?: string
   factors_stale?: boolean
+  /** Share of the footprint (%) from categories flagged "actual"; null when there is nothing to apportion. */
+  coverage_pct?: number | null
+  /** User-declared boundary exclusions; null when none were declared. */
+  exclusions?: string | null
   benchmark?: BenchmarkComparison | null
   created_at: string
 }
@@ -467,4 +482,5 @@ export interface ScenarioDraft {
   streaming_hours_per_day: number
   event_app_users: number
   emails_sent: number
+  exclusions: string
 }

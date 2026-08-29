@@ -103,6 +103,55 @@ def scope2_dual_bases(assumptions: Any, scope2_tco2e: float) -> tuple[float, flo
     )
 
 
+# -- Primary-data coverage -----------------------------------------------------
+# The per-category flags the engine writes into assumptions use their own keys;
+# map each onto the emissions field that carries its tonnage.
+_COVERAGE_CATEGORY_FIELDS = {
+    "travel": "travel_tco2e",
+    "venue_energy": "venue_energy_tco2e",
+    "accommodation": "accommodation_tco2e",
+    "catering": "catering_tco2e",
+    "waste": "materials_waste_tco2e",
+    "equipment": "equipment_tco2e",
+    "swag": "swag_tco2e",
+    "digital": "digital_tco2e",
+}
+
+
+def primary_data_coverage_pct(
+    emissions: dict[str, Any], assumptions: dict[str, Any] | None
+) -> float | None:
+    """Share of the footprint (%) that came from measured, category-level inputs.
+
+    Weighted by tCO2e, not by category count, so a measured category that happens
+    to be tiny cannot dress up a proxy-dominated footprint. Only the "actual" flag
+    earns credit: "partial" means part of the category is still proxy data, and
+    "not applicable"/"not provided" categories carry no tonnes, so they neither
+    earn nor dilute coverage.
+
+    Derived at read time from stored columns, so scenarios saved before this
+    existed report a coverage figure without being recalculated. Returns None when
+    there is no footprint to apportion.
+    """
+    total = float(emissions.get("total_tco2e") or 0)
+    if total <= 0:
+        return None
+    flags = (assumptions or {}).get("category_data_quality")
+    if flags is None:
+        # A row written before the per-category disclosure existed: nothing about it
+        # can be claimed as primary data.
+        return 0.0
+    if not isinstance(flags, dict):
+        return None
+    measured = sum(
+        float(emissions.get(field) or 0)
+        for key, field in _COVERAGE_CATEGORY_FIELDS.items()
+        if flags.get(key) == "actual"
+    )
+    # Category totals are stored rounded, so the sum can drift a hair past the total.
+    return round(min(measured / total, 1.0) * 100, 1)
+
+
 def serialize_scenario(s: ScenarioDB) -> dict[str, Any]:
     """ScenarioDB row -> the wire/report dict used by the API and all exports."""
     event_type = getattr(s, "event_type", "conference") or "conference"
@@ -113,40 +162,45 @@ def serialize_scenario(s: ScenarioDB) -> dict[str, Any]:
     benchmark = get_benchmark_comparison(event_type, per_attendee_day, s.per_attendee_tco2e)
     scope2 = getattr(s, "scope2_tco2e", 0) or 0
     scope2_location, scope2_market = scope2_dual_bases(s.assumptions, scope2)
+    assumptions = s.assumptions or {}
+    input_payload = s.input_payload or {}
+    emissions = {
+        "travel_tco2e": s.travel_tco2e,
+        "venue_energy_tco2e": s.venue_energy_tco2e,
+        "accommodation_tco2e": s.accommodation_tco2e,
+        "catering_tco2e": s.catering_tco2e,
+        "materials_waste_tco2e": s.materials_waste_tco2e,
+        "equipment_tco2e": getattr(s, "equipment_tco2e", 0) or 0,
+        "swag_tco2e": getattr(s, "swag_tco2e", 0) or 0,
+        "digital_tco2e": getattr(s, "digital_tco2e", 0) or 0,
+        "total_tco2e": s.total_tco2e,
+        "per_attendee_tco2e": s.per_attendee_tco2e,
+        "per_attendee_day_tco2e": per_attendee_day,
+        "data_quality": normalize_data_quality(s.data_quality),
+        "scopes": {
+            "scope1_tco2e": getattr(s, "scope1_tco2e", 0) or 0,
+            "scope2_tco2e": scope2,
+            "scope3_tco2e": getattr(s, "scope3_tco2e", 0) or 0,
+            "scope2_location_tco2e": scope2_location,
+            "scope2_market_tco2e": scope2_market,
+        },
+    }
     return {
         "scenario_id": s.id,
         "name": s.name,
         "event_name": s.event_name,
-        "location": getattr(s, "location", None) or (s.input_payload or {}).get("location") or "",
+        "location": getattr(s, "location", None) or input_payload.get("location") or "",
         "event_type": event_type,
         "attendees": s.attendees,
         "event_days": s.event_days,
         "mode": getattr(s, "mode", None) or "basic",
-        "emissions": {
-            "travel_tco2e": s.travel_tco2e,
-            "venue_energy_tco2e": s.venue_energy_tco2e,
-            "accommodation_tco2e": s.accommodation_tco2e,
-            "catering_tco2e": s.catering_tco2e,
-            "materials_waste_tco2e": s.materials_waste_tco2e,
-            "equipment_tco2e": getattr(s, "equipment_tco2e", 0) or 0,
-            "swag_tco2e": getattr(s, "swag_tco2e", 0) or 0,
-            "digital_tco2e": getattr(s, "digital_tco2e", 0) or 0,
-            "total_tco2e": s.total_tco2e,
-            "per_attendee_tco2e": s.per_attendee_tco2e,
-            "per_attendee_day_tco2e": per_attendee_day,
-            "data_quality": normalize_data_quality(s.data_quality),
-            "scopes": {
-                "scope1_tco2e": getattr(s, "scope1_tco2e", 0) or 0,
-                "scope2_tco2e": scope2,
-                "scope3_tco2e": getattr(s, "scope3_tco2e", 0) or 0,
-                "scope2_location_tco2e": scope2_location,
-                "scope2_market_tco2e": scope2_market,
-            },
-        },
-        "assumptions": s.assumptions or {},
-        "input_payload": s.input_payload or {},
+        "emissions": emissions,
+        "assumptions": assumptions,
+        "input_payload": input_payload,
         "factors_snapshot": factors_snapshot,
         **_factor_drift(factors_snapshot),
+        "coverage_pct": primary_data_coverage_pct(emissions, assumptions),
+        "exclusions": input_payload.get("exclusions") or None,
         "benchmark": benchmark.model_dump() if benchmark else None,
         "created_at": s.created_at.isoformat() if s.created_at else "",
     }

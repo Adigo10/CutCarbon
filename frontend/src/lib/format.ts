@@ -326,6 +326,11 @@ export function buildScenarioPayload(draft: ScenarioDraft, scenarioCount: number
     }
   }
 
+  const exclusions = draft.exclusions.trim()
+  if (exclusions) {
+    payload.exclusions = exclusions
+  }
+
   return payload
 }
 

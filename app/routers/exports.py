@@ -93,6 +93,11 @@ _REPORT_DISCLAIMER = (
     "Calculations are based on industry-standard emission factors and scenario assumptions. "
     "Actual emissions may vary. For verified reporting, engage an accredited third-party verifier."
 )
+# Boundary disclosure. GHG Protocol / ISO 14064-1 want exclusions stated, so an
+# undeclared boundary is rendered explicitly rather than left blank.
+_EXCLUSIONS_LABEL = "Boundary exclusions (user-declared)"
+_NO_EXCLUSIONS = "None declared"
+_COVERAGE_LABEL = "Primary-Data Coverage"
 _CATEGORY_LABELS = [
     ("travel_tco2e", "Travel"),
     ("venue_energy_tco2e", "Venue Energy"),
@@ -161,6 +166,28 @@ def _scope_rows(scope_breakdown) -> list[tuple[str, str, float]]:
     """(key, label, tCO2e) for every scope line, in reporting order."""
     values = scope_breakdown.model_dump()
     return [(key, label, values[key]) for key, label in _SCOPE_LABELS.items() if key in values]
+
+
+def _exclusions_text(scenario_data: dict[str, Any]) -> str:
+    """User-declared boundary exclusions, resolved for display."""
+    return (scenario_data.get("exclusions") or "").strip() or _NO_EXCLUSIONS
+
+
+def _coverage_text(coverage_pct: Optional[float]) -> str:
+    return "—" if coverage_pct is None else f"{coverage_pct:.1f}%"
+
+
+def methodology_block(report: ScenarioReportPayload) -> list[tuple[str, str]]:
+    """Label/value pairs for the methodology + boundary block of a rendered report.
+
+    One definition shared by the human-readable formats, so the boundary
+    exclusions cannot be stated in one export and quietly dropped from another.
+    """
+    return [
+        ("Methodology", report.methodology),
+        (_EXCLUSIONS_LABEL, report.exclusions),
+        ("Disclaimer", report.disclaimer),
+    ]
 
 
 def _scenario_location(s: ScenarioDB) -> str:
@@ -385,6 +412,8 @@ async def build_scenario_report_payload(
         ),
         nzce_categories=nzce_categories,
         nzce_note=nzce_note,
+        exclusions=_exclusions_text(scenario_data),
+        coverage_pct=scenario_data.get("coverage_pct"),
     )
 
 
@@ -530,6 +559,7 @@ def _scenario_report_csv_bytes(report: ScenarioReportPayload) -> bytes:
         ("metadata", "event_days", "Event Days", scenario["event_days"], "days"),
         ("metadata", "mode", "Mode", scenario.get("mode", ""), ""),
         ("metadata", "data_quality", "Data Quality", data_quality_label(emissions["data_quality"]), ""),
+        ("metadata", "coverage_pct", _COVERAGE_LABEL, report.coverage_pct if report.coverage_pct is not None else "", "pct"),
         ("metadata", "created_at", "Created At", scenario["created_at"], ""),
         ("metadata", "exported_at", "Exported At", report.exported_at, ""),
         ("metadata", "region", "Compliance Region", report.compliance_overrides.region, ""),
@@ -602,6 +632,9 @@ def _scenario_report_csv_bytes(report: ScenarioReportPayload) -> bytes:
         for rec_idx, rec in enumerate(check.recommendations, start=1):
             writer.writerow(("compliance_recommendation", f"{prefix}.recommendation_{rec_idx}", f"{check.framework} recommendation", rec, ""))
 
+    writer.writerow(("methodology", "methodology", "Methodology", report.methodology, ""))
+    writer.writerow(("methodology", "exclusions", _EXCLUSIONS_LABEL, report.exclusions, ""))
+
     for key, value in report.assumptions.items():
         if isinstance(value, dict):
             for subkey, subvalue in value.items():
@@ -650,6 +683,7 @@ def _scenario_report_xlsx(report: ScenarioReportPayload):
         ("Per Attendee tCO2e", emissions["per_attendee_tco2e"]),
         ("Per Attendee Day tCO2e", emissions["per_attendee_day_tco2e"]),
         ("Data Quality", data_quality_label(emissions["data_quality"])),
+        (f"{_COVERAGE_LABEL} %", report.coverage_pct if report.coverage_pct is not None else "—"),
         ("Mandatory Frameworks", ", ".join(report.compliance.mandatory_frameworks) or "none determined"),
         ("Reporting Profile", "complete" if report.compliance.profile_complete else "incomplete"),
         ("Offset Coverage %", report.offset_portfolio.coverage_pct if report.offset_portfolio.coverage_pct is not None else "—"),
@@ -737,6 +771,7 @@ def _scenario_report_xlsx(report: ScenarioReportPayload):
     assumptions_ws = wb.create_sheet("Assumptions")
     assumptions_ws.append(["Key", "Value"])
     _style_header(assumptions_ws)
+    assumptions_ws.append([_EXCLUSIONS_LABEL, report.exclusions])
     if report.assumptions:
         for key, value in report.assumptions.items():
             if isinstance(value, dict):
@@ -930,14 +965,23 @@ def _scenario_report_pdf(report: ScenarioReportPayload, provenance: str = "") ->
                 ["Attendees", scenario["attendees"]],
                 ["Event Days", scenario["event_days"]],
                 ["Data Quality", data_quality_label(emissions["data_quality"])],
+                [_COVERAGE_LABEL, _coverage_text(report.coverage_pct)],
                 ["Compliance Region", report.compliance_overrides.region],
             ],
             [5 * cm, 11 * cm],
         ),
         Spacer(1, 0.35 * cm),
-        Paragraph(f"<b>Methodology:</b> {report.methodology}", styles["BodySmall"]),
-        Spacer(1, 0.15 * cm),
-        Paragraph(f"<b>Disclaimer:</b> {report.disclaimer}", styles["BodySmall"]),
+    ]
+
+    for label, value in methodology_block(report):
+        story.extend(
+            [
+                Paragraph(f"<b>{_pdf_text(label)}:</b> {_pdf_text(value)}", styles["BodySmall"]),
+                Spacer(1, 0.15 * cm),
+            ]
+        )
+
+    story += [
         PageBreak(),
         Paragraph("Emissions by Category", styles["SectionHeading"]),
         Spacer(1, 0.2 * cm),
