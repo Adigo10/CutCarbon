@@ -300,9 +300,13 @@ Compare all 3 side-by-side to see trade-offs.
 ```
 
 ### Tip 3: Check Your Data-Quality Tier
-- Basic mode = proxies only, so Tier 3 — modelled (fast)
-- Advanced mode = detailed inputs, so Tier 2 — partly primary (more accurate)
-- Tier 1 — primary (evidenced) is not awarded for filling in forms; it needs supporting evidence attached
+The tier is driven by your **inputs**, not by which mode you are in. Mode only decides which inputs
+the builder puts in front of you — a basic-mode scenario with one real meter reading reaches Tier 2,
+and an advanced-mode scenario with every form left empty stays at Tier 3.
+
+- **Tier 3 — modelled**: every category came from a proxy (nothing measured entered yet)
+- **Tier 2 — partly primary**: at least one measured input, whatever the mode
+- **Tier 1 — primary (evidenced)**: not awarded for filling in forms — it needs supporting evidence attached
 
 To improve quality:
 - Get real energy data from venue
