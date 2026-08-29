@@ -11,6 +11,7 @@ import app.models.database as database
 from app.models.database import UserDB
 from app.models.schemas import EventScenarioInput, OffsetProjectType, OffsetPurchaseCreate, TravelMode, TravelSegment, VenueEnergy
 from app.routers.exports import build_scenario_report_payload
+from app.services.claims import find_banned_claims
 from app.services.emissions_engine import calculate_scenario
 
 from helpers import create_seeded_scenario, register_user
@@ -50,6 +51,13 @@ def test_shared_report_payload_includes_offsets_and_compliance_overrides(client:
     assert report.scenario["scenario_id"] == scenario_id
     assert report.offset_portfolio.total_retired_tco2e == pytest.approx(2.5)
     assert report.offset_portfolio.coverage_pct is not None
+
+    # Offset coverage is reported as the compliant measured/reduced/residual
+    # construction, never as a neutrality claim.
+    statement = report.offset_portfolio.claim_statement
+    assert "2.500 tCO2e residual compensated outside the value chain" in statement
+    assert statement.endswith("via retired credits from Gold Standard")
+    assert find_banned_claims(statement) == []
     assert report.compliance_overrides.region == "eu"
     assert report.compliance_overrides.has_scope3 is False
     assert "EU CSRD" in report.compliance.mandatory_frameworks
@@ -105,11 +113,18 @@ def test_single_scenario_report_exports_return_expected_files(client: TestClient
         assert "metadata,region,Compliance Region,eu," in content
         assert "compliance,overall_score_pct,Overall Score" in content
         assert "nzce,nzce_energy,Energy" in content
+        assert "offsets,claim_statement,Claim Statement," in content
+        assert "tCO2e residual compensated outside the value chain" in content
     elif fmt == "xlsx":
         workbook = load_workbook(io.BytesIO(response.content))
         assert "Report Summary" in workbook.sheetnames
         assert "Compliance" in workbook.sheetnames
         assert "NZCE Mapping" in workbook.sheetnames
+        offsets_values = [row[1] for row in workbook["Offsets"].iter_rows(values_only=True)]
+        assert any(
+            isinstance(v, str) and "residual compensated outside the value chain" in v
+            for v in offsets_values
+        )
     else:
         assert response.content.startswith(b"%PDF")
 

@@ -184,7 +184,7 @@
   },
   "retirement_guidance": {
     "claim_types": {
-      "carbon_neutral": "Offset 100% of measured emissions. Must follow PAS 2060 or equivalent.",
+      "carbon_neutral": "ISO 14068-1:2023 applies the reduce-remove-offset hierarchy: a neutrality-style claim is only defensible after documented, quantified reductions against a stated baseline, and offsetting is restricted to the residual emissions that cannot yet be reduced. Credits must be verified, additional and permanent, with public retirement evidence. Note that EU Directive 2024/825 (applies 27 Sep 2026) prohibits offset-based neutrality claims to consumers.",
       "climate_positive": "Offset more than 100% of measured emissions (net negative).",
       "contribution_claim": "Fund climate action without claiming neutrality. Increasingly preferred by SBTi.",
       "insetting": "Reduce emissions within your own value chain rather than buying external offsets."

@@ -8,6 +8,7 @@ from sqlalchemy import select
 import app.models.database as database
 from app.models.database import ChatMessageDB
 from app.services import openai_service
+from app.services.claims import find_banned_claims
 
 from helpers import create_scenario, register_user
 
@@ -144,6 +145,37 @@ def test_financial_provider_wired_for_selected_scenario(client: TestClient, monk
         headers=headers,
     )
     assert capture["financial_provider"] is None
+
+
+def test_system_prompt_forbids_offset_based_neutrality_claims():
+    prompt = openai_service.SYSTEM_PROMPT
+    assert "Never claim" in prompt
+    assert "carbon neutral" in prompt.lower()
+    assert "residual" in prompt.lower()
+    assert "outside the value chain" in prompt.lower()
+
+
+def test_assistant_reply_is_claim_sanitized_before_return_and_persist(client: TestClient, monkeypatch):
+    headers = register_user(client, email="greenclaims@example.com")
+    _mock_chat(monkeypatch, reply="Buy these offsets and your event is carbon neutral — a truly eco-friendly gala!")
+    session_id = str(uuid.uuid4())
+
+    response = client.post(
+        "/api/chat",
+        json={
+            "messages": [{"role": "user", "content": "Can we call it carbon neutral?"}],
+            "event_context": {"session_id": session_id},
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200
+    reply = response.json()["reply"]
+    assert find_banned_claims(reply) == []
+    assert reply.startswith("Buy these offsets and your event is ")
+
+    # The stored transcript carries the sanitized wording, not the original claim.
+    persisted = _load_messages(session_id)
+    assert find_banned_claims(persisted[-1].content) == []
 
 
 def test_history_scoped_per_user(client: TestClient, monkeypatch):

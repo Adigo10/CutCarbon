@@ -22,6 +22,7 @@ from app.models.schemas import (
     ScenarioReportPayload,
 )
 from app.routers.auth import get_current_user
+from app.services.claims import portfolio_claim_statement
 from app.services.financial_engine import get_compliance_report
 from app.services.scenario_serializer import serialize_scenario
 from app.utils.time import utcnow
@@ -276,6 +277,9 @@ async def _build_offset_summary_for_scenario(
         by_project_type=by_type,
         by_registry=by_registry,
         coverage_pct=coverage_pct,
+        # Every export states the coverage as measured/reduced/residual-compensated
+        # rather than letting a coverage % imply neutrality (EU 2024/825, ISO 14068-1).
+        claim_statement=portfolio_claim_statement(total_tco2e, total_retired, by_registry),
     )
 
 
@@ -402,6 +406,8 @@ def _scenario_report_csv_bytes(report: ScenarioReportPayload) -> bytes:
                 writer.writerow(("offsets", f"{key}.{subkey}", _labelize(f"{key} {subkey}"), subvalue, "tCO2e"))
         else:
             unit = "usd" if "cost" in key else ("pct" if key.endswith("_pct") else "tCO2e")
+            if isinstance(value, str):
+                unit = ""  # narrative row (claim statement), not a measure
             writer.writerow(("offsets", key, _labelize(key), value, unit))
 
     writer.writerow(("compliance", "overall_score_pct", "Overall Score", report.compliance.overall_score_pct, "pct"))
@@ -795,9 +801,16 @@ def _scenario_report_pdf(report: ScenarioReportPayload) -> bytes:
             Spacer(1, 0.2 * cm),
             _table(
                 [["Metric", "Value"]]
-                + [[_labelize(key), value] for key, value in offset_summary.items() if not isinstance(value, dict)],
+                + [
+                    [_labelize(key), value]
+                    for key, value in offset_summary.items()
+                    if not isinstance(value, dict) and key != "claim_statement"
+                ],
                 [8 * cm, 6 * cm],
             ),
+            Spacer(1, 0.15 * cm),
+            # The coverage figures are summarized as a fact, never as a neutrality claim.
+            Paragraph(_pdf_text(offset_summary["claim_statement"]), styles["BodySmall"]),
             Spacer(1, 0.35 * cm),
             Paragraph("Factor Provenance", styles["SectionHeading"]),
             Spacer(1, 0.2 * cm),

@@ -2,15 +2,19 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime
+import logging
 import uuid
 
 from app.models.database import get_db, ChatMessageDB, ScenarioDB, UserDB
 from app.models.schemas import ChatRequest, ChatResponse
 from app.rate_limit import limiter
 from app.services import openai_service
+from app.services.claims import sanitize_claim_language
 from app.services.financial_engine import build_scenario_financial_request, generate_financial_report
 from app.routers.auth import get_current_user
 from app.utils.time import utcnow
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -95,10 +99,16 @@ async def chat(
     except openai_service.ChatServiceError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
+    # The system prompt forbids offset-based neutrality claims, but the model is not
+    # a guarantee — lint the reply before it is persisted or shown (EU 2024/825).
+    reply, banned = sanitize_claim_language(result["reply"])
+    if banned:
+        logger.warning("sanitized banned green claim(s) in chat reply: %s", banned)
+
     db.add(ChatMessageDB(
         session_id=session_id,
         role="assistant",
-        content=result["reply"],
+        content=reply,
         extracted_data=result.get("extracted_data"),
         created_at=utcnow(),
         user_id=current_user.id,
@@ -106,7 +116,7 @@ async def chat(
     await db.commit()
 
     return ChatResponse(
-        reply=result["reply"],
+        reply=reply,
         extracted_data=result.get("extracted_data"),
         suggestions=result.get("suggestions", []),
         session_id=session_id,

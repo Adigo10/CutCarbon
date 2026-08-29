@@ -408,6 +408,10 @@ class OffsetPortfolioSummary(BaseModel):
     by_project_type: Dict[str, float] = Field(default_factory=dict)
     by_registry: Dict[str, float] = Field(default_factory=dict)
     coverage_pct: Optional[float] = None  # vs a scenario's total emissions
+    # Compliant measured/reduced/residual-compensated wording for this portfolio
+    # (app.services.claims) — coverage % must never be presented as neutrality.
+    # Empty when no scenario is in scope, i.e. there is no measured total to state.
+    claim_statement: str = ""
 
 
 class OffsetRecommendation(BaseModel):

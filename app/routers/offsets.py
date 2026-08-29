@@ -11,6 +11,7 @@ from app.models.schemas import (
     OffsetPurchaseCreate, OffsetPurchaseOut, OffsetPortfolioSummary, OffsetRecommendation
 )
 from app.routers.auth import get_current_user
+from app.services.claims import portfolio_claim_statement, sanitize_claim_language
 from app.services.data_files import CARBON_OFFSETS as OFFSET_DATA
 from app.utils.time import utcnow
 
@@ -64,7 +65,9 @@ async def create_purchase(
         vintage_year=purchase.vintage_year,
         serial_number=purchase.serial_number,
         status="purchased",
-        notes=purchase.notes,
+        # Free text saved here is quoted back in the portfolio UI, so it goes
+        # through the green-claims linter like any other narrative.
+        notes=sanitize_claim_language(purchase.notes)[0] if purchase.notes else None,
         created_at=utcnow(),
     )
     db.add(db_obj)
@@ -162,6 +165,7 @@ async def portfolio_summary(
         by_registry[p.registry] = by_registry.get(p.registry, 0) + p.quantity_tco2e
 
     coverage_pct = None
+    claim_statement = ""
     if scenario_id:
         sr = await db.execute(
             select(ScenarioDB).where(ScenarioDB.id == scenario_id, ScenarioDB.user_id == current_user.id)
@@ -169,6 +173,9 @@ async def portfolio_summary(
         scenario = sr.scalar_one_or_none()
         if scenario and scenario.total_tco2e > 0:
             coverage_pct = round(total_retired / scenario.total_tco2e * 100, 1)
+            claim_statement = portfolio_claim_statement(
+                scenario.total_tco2e, total_retired, by_registry
+            )
 
     return OffsetPortfolioSummary(
         total_purchased_tco2e=round(total_purchased, 3),
@@ -177,6 +184,7 @@ async def portfolio_summary(
         by_project_type=by_type,
         by_registry=by_registry,
         coverage_pct=coverage_pct,
+        claim_statement=claim_statement,
     )
 
 
@@ -233,7 +241,9 @@ async def recommend_offsets(
         recommendations.append(OffsetRecommendation(
             project_type=proj_key,
             label=proj["label"],
-            description=proj["description"],
+            # Catalog copy is refreshed from external sources — lint it before it
+            # is presented as a recommendation.
+            description=sanitize_claim_language(proj["description"])[0],
             avg_price_usd=price,
             recommended_qty_tco2e=scaled_qty,
             estimated_cost_usd=round(scaled_qty * price, 2),

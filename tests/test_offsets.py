@@ -1,6 +1,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from app.services.claims import find_banned_claims
+
 from helpers import create_scenario, register_user
 
 
@@ -58,6 +60,42 @@ def test_portfolio_summary_math(client: TestClient):
     assert summary["total_retired_tco2e"] == pytest.approx(3.0)
     assert summary["total_cost_usd"] == pytest.approx(3 * 10 + 2 * 20)
     assert summary["coverage_pct"] is not None
+
+
+def test_portfolio_states_compliant_compensation_instead_of_neutrality(client: TestClient):
+    headers = register_user(client, email="claim-portfolio@example.com")
+    scenario = create_scenario(client, headers)
+    scenario_id = scenario["scenario_id"]
+    purchase = _purchase(client, headers, scenario_id=scenario_id, qty=3.0)
+    client.post(f"/api/offsets/{purchase['id']}/retire", headers=headers)
+
+    summary = client.get(f"/api/offsets/portfolio?scenario_id={scenario_id}", headers=headers).json()
+    statement = summary["claim_statement"]
+    assert statement.startswith(f"{scenario['emissions']['total_tco2e']:.3f} tCO2e measured, 0.0% reduced, ")
+    assert "3.000 tCO2e residual compensated outside the value chain" in statement
+    assert statement.endswith("via retired credits from Gold Standard")
+    assert find_banned_claims(statement) == []
+
+    # No scenario in scope means no measured total, so no statement is asserted.
+    assert client.get("/api/offsets/portfolio", headers=headers).json()["claim_statement"] == ""
+
+
+def test_purchase_notes_are_claim_sanitized_on_save(client: TestClient):
+    headers = register_user(client, email="claim-notes@example.com")
+    response = client.post(
+        "/api/offsets",
+        json={
+            "project_type": "renewable_energy",
+            "registry": "gold_standard",
+            "quantity_tco2e": 1.0,
+            "price_per_tco2e_usd": 10.0,
+            "vintage_year": 2025,
+            "notes": "These make the summit carbon neutral.",
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert find_banned_claims(response.json()["notes"]) == []
 
 
 def test_recommendations_full_coverage_without_budget(client: TestClient):
