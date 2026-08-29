@@ -229,6 +229,55 @@ export function createDefaultFinancialCalc(): FinancialCalcState {
   }
 }
 
+// Reporting-profile option lists. Values mirror app/data/frameworks.json — the size
+// bands are cut at the thresholds the scope tests use (1,000 employees for CSRD;
+// 450m and 1bn turnover for CSRD, SB 253 and the SGX tiers).
+export const EMPLOYEE_BANDS = [
+  ['', 'Not specified'],
+  ['lt_50', 'Fewer than 50'],
+  ['50_249', '50 to 249'],
+  ['250_1000', '250 to 1,000'],
+  ['gt_1000', 'More than 1,000'],
+]
+
+export const TURNOVER_BANDS = [
+  ['', 'Not specified'],
+  ['lt_50m', 'Up to 50m'],
+  ['50m_450m', '50m to 450m'],
+  ['450m_1b', '450m to 1bn'],
+  ['gt_1b', 'More than 1bn'],
+]
+
+export const LISTING_STATUSES = [
+  ['', 'Not specified'],
+  ['none', 'Not listed'],
+  ['listed', 'Listed (non-STI)'],
+  ['sti_constituent', 'STI constituent (SGX)'],
+  ['asrs_group1', 'ASRS Group 1 (AU)'],
+  ['asrs_group2', 'ASRS Group 2 (AU)'],
+]
+
+/** Chip tone + label for each `applies` value. Ordered most- to least-binding. */
+export const APPLIES_LABELS: Record<string, string> = {
+  mandatory: 'Mandatory',
+  not_in_force: 'Not yet in force',
+  enjoined: 'Enjoined',
+  voluntary: 'Voluntary',
+  out_of_scope: 'Out of scope',
+  informational: 'Informational',
+}
+
+export const FRAMEWORK_STATUS_LABELS: Record<string, string> = {
+  in_force: 'In force',
+  proposed: 'Proposed',
+  enjoined: 'Enjoined',
+  voluntary_initiative: 'Voluntary initiative',
+  draft_standard: 'Draft standard',
+  methodology: 'Methodology',
+  management_system_standard: 'Management-system standard',
+  benchmark: 'Benchmark',
+}
+
 export function createDefaultComplianceInput(): ComplianceInput {
   return {
     region: 'singapore',
@@ -237,6 +286,15 @@ export function createDefaultComplianceInput(): ComplianceInput {
     event_days: 2,
     has_scope3: true,
     has_ghg_report: false,
+    // Nothing is assumed about the reporting entity: an empty profile yields
+    // informational-only framework rows, never an asserted obligation.
+    profile: {
+      employee_band: '',
+      annual_turnover_band: '',
+      listing_status: '',
+      reporting_fy: null,
+      does_business_in_california: false,
+    },
   }
 }
 

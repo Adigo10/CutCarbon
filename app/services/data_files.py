@@ -17,3 +17,6 @@ def _load(name: str) -> dict:
 
 TAX_DATA = _load("tax_incentives.json")
 CARBON_OFFSETS = _load("carbon_offsets.json")
+# Reporting-framework scoping data: what each framework IS (status, as-of date,
+# first reporting year) plus the parameters its scope test needs.
+FRAMEWORKS_DATA = _load("frameworks.json")

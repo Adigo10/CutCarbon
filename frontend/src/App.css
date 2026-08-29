@@ -1221,6 +1221,36 @@ input[type='range'] {
   font-size: 0.8rem;
 }
 
+.framework-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  justify-content: flex-end;
+}
+
+.framework-meta {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  letter-spacing: 0.01em;
+}
+
+/* The reason a framework does or does not bind carries the substance of the
+   scoping decision, so it reads as body copy rather than as a footnote. */
+.framework-reason {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.83rem;
+  line-height: 1.5;
+}
+
+.muted-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
 .download-card {
   display: grid;
   gap: 0.45rem;

@@ -63,7 +63,12 @@ def test_shared_report_payload_includes_offsets_and_compliance_overrides(client:
     assert find_banned_claims(statement) == []
     assert report.compliance_overrides.region == "eu"
     assert report.compliance_overrides.has_scope3 is False
-    assert "EU CSRD" in report.compliance.mandatory_frameworks
+    # Exports carry no reporting profile, so CSRD is surfaced for the region but no
+    # obligation is asserted — a report must never claim an entity is in scope.
+    csrd = next(c for c in report.compliance.checks if c.framework_key == "eu_csrd")
+    assert csrd.applies == "informational"
+    assert report.compliance.mandatory_frameworks == []
+    assert report.compliance.profile_complete is False
     assert report.categories
 
     # NZCE mapping: all 9 methodology categories present, totals conserved.
@@ -111,13 +116,18 @@ def test_single_scenario_report_exports_return_expected_files(client: TestClient
         payload = response.json()
         assert payload["compliance_overrides"]["region"] == "eu"
         assert payload["compliance_overrides"]["has_scope3"] is False
-        assert "EU CSRD" in payload["compliance"]["mandatory_frameworks"]
+        assert "overall_score_pct" not in payload["compliance"]
+        assert payload["compliance"]["mandatory_frameworks"] == []
+        keys = [c["framework_key"] for c in payload["compliance"]["checks"]]
+        assert "eu_csrd" in keys and "sgx_issb" not in keys
         assert len(payload["nzce_categories"]) == 9
     elif fmt == "csv":
         content = response.content.decode("utf-8")
         assert "section,key,label,value,unit" in content
         assert "metadata,region,Compliance Region,eu," in content
-        assert "compliance,overall_score_pct,Overall Score" in content
+        assert "compliance,overall_score_pct" not in content
+        assert "compliance,profile_complete,Reporting Profile Complete,False,boolean" in content
+        assert "compliance_check,check_1.applies," in content
         assert "nzce,nzce_energy,Energy" in content
         assert "offsets,claim_statement,Claim Statement," in content
         assert "tCO2e residual compensated outside the value chain" in content
@@ -251,6 +261,50 @@ def test_csv_export_neutralizes_formula_injection(client: TestClient):
     body = csv_resp.text
     # The dangerous name is stored as literal text (prefixed with a quote), never a bare formula.
     assert "'=1+1" in body
+
+
+def test_compliance_route_scopes_obligations_from_the_reporting_profile(client: TestClient):
+    headers = register_user(client, email="scoping@example.com")
+    body = {
+        "total_tco2e": 50, "has_scope3": True, "has_ghg_report": True,
+        "region": "singapore", "event_days": 2, "attendees": 300,
+    }
+
+    # Without a profile the route asserts no obligation at all.
+    bare = client.post("/api/financial/compliance", json=body, headers=headers)
+    assert bare.status_code == 200
+    assert "overall_score_pct" not in bare.json()
+    assert bare.json()["mandatory_frameworks"] == []
+    assert bare.json()["profile_complete"] is False
+    sgx = next(c for c in bare.json()["checks"] if c["framework_key"] == "sgx_issb")
+    assert sgx["applies"] == "informational"
+
+    # With an STI-constituent profile reporting FY2026, SGX Scope 3 is mandatory.
+    scoped = client.post(
+        "/api/financial/compliance",
+        json={**body, "reporting_profile": {
+            "employee_band": "gt_1000", "annual_turnover_band": "gt_1b",
+            "listing_status": "sti_constituent", "reporting_fy": 2026,
+        }},
+        headers=headers,
+    )
+    assert scoped.status_code == 200
+    payload = scoped.json()
+    assert payload["profile_complete"] is True
+    sgx = next(c for c in payload["checks"] if c["framework_key"] == "sgx_issb")
+    assert sgx["applies"] == "mandatory"
+    assert sgx["scope3_required"] is True
+    assert sgx["framework"] in payload["mandatory_frameworks"]
+
+
+def test_compliance_route_rejects_unknown_profile_bands(client: TestClient):
+    headers = register_user(client, email="badband@example.com")
+    response = client.post(
+        "/api/financial/compliance",
+        json={"total_tco2e": 10, "region": "eu", "reporting_profile": {"employee_band": "loads"}},
+        headers=headers,
+    )
+    assert response.status_code == 422
 
 
 def test_financial_total_excludes_fabricated_streams():

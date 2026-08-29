@@ -1,11 +1,19 @@
 """Unit tests for the financial engine (no DB, no HTTP)."""
 
 from types import SimpleNamespace
+from typing import get_args
 
 import pytest
 
-from app.models.schemas import FinancialRequest
+from app.models.schemas import (
+    EmployeeBand,
+    FinancialRequest,
+    ListingStatus,
+    ReportingProfile,
+    TurnoverBand,
+)
 from app.services import emissions_engine
+from app.services.data_files import FRAMEWORKS_DATA
 from app.services.financial_engine import (
     build_scenario_financial_request,
     calculate_carbon_tax_savings,
@@ -14,6 +22,15 @@ from app.services.financial_engine import (
     get_compliance_report,
 )
 from app.services.regions import normalize_region
+
+# An SGX-listed STI constituent reporting FY2026 — the tier for which both ISSB
+# climate disclosure and Scope 3 are mandatory.
+PROFILE_STI_2026 = ReportingProfile(
+    employee_band="gt_1000",
+    annual_turnover_band="gt_1b",
+    listing_status="sti_constituent",
+    reporting_fy=2026,
+)
 
 
 class TestRegions:
@@ -214,32 +231,314 @@ class TestActionDerivedSavingsInputs:
         assert req.meal_switches > 0
 
 
-class TestComplianceReport:
-    def test_nzce_check_present_everywhere(self):
+def _check(report, key):
+    """The check for ``key``, or None when the framework is not in the region."""
+    return next((c for c in report.checks if c.framework_key == key), None)
+
+
+class TestFrameworksData:
+    def test_every_framework_is_well_formed(self):
+        assert FRAMEWORKS_DATA["frameworks"]
+        keys = set()
+        for fw in FRAMEWORKS_DATA["frameworks"]:
+            for field in ("key", "name", "status", "as_of", "scope_rule", "regions", "note"):
+                assert fw.get(field), f"{fw.get('key')} missing {field}"
+            assert fw["key"] not in keys
+            keys.add(fw["key"])
+            assert fw["status"] in FRAMEWORKS_DATA["statuses"]
+        assert {
+            "eu_csrd", "sgx_issb", "uk_srs", "au_asrs", "ca_sb253", "ca_sb261",
+            "ghg_protocol", "nzce", "iso_20121_2024",
+        } <= keys
+
+    def test_schema_band_literals_match_the_data_file(self):
+        assert set(get_args(EmployeeBand)) == set(FRAMEWORKS_DATA["employee_bands"])
+        assert set(get_args(TurnoverBand)) == set(FRAMEWORKS_DATA["turnover_bands"])
+        assert set(get_args(ListingStatus)) == set(FRAMEWORKS_DATA["listing_statuses"])
+
+    def test_size_bands_do_not_straddle_the_encoded_thresholds(self):
+        # Every band must sit unambiguously above or below each threshold the
+        # scope tests use, otherwise a scope decision would be undecidable.
+        for bands, thresholds in (
+            (FRAMEWORKS_DATA["employee_bands"], [1000]),
+            (FRAMEWORKS_DATA["turnover_bands"], [450_000_000, 1_000_000_000]),
+        ):
+            for name, band in bands.items():
+                for threshold in thresholds:
+                    above = band["min"] > threshold
+                    below = band["max"] is not None and band["max"] <= threshold
+                    assert above or below, f"{name} straddles {threshold}"
+
+
+class TestObligationScoping:
+    def test_overall_score_pct_is_gone(self):
         report = get_compliance_report(50, True, True, "australia", 2, 100)
-        frameworks = [c.framework for c in report.checks]
-        assert any("Net Zero Carbon Events" in f for f in frameworks)
-        assert "Net Zero Carbon Events (NZCE) Measurement Methodology" not in report.mandatory_frameworks
+        assert "overall_score_pct" not in report.model_dump()
+        assert not hasattr(report, "overall_score_pct")
 
-    def test_regional_regimes(self):
-        sg = get_compliance_report(50, True, True, "singapore", 2, 100)
-        assert any("SGX" in c.framework for c in sg.checks)
-        assert "SGX Sustainability Reporting (Scope 1+2)" in sg.mandatory_frameworks
+    def test_missing_profile_reports_everything_as_informational(self):
+        for region in ("singapore", "EU", "uk", "australia", "usa"):
+            report = get_compliance_report(50, True, True, region, 2, 100)
+            assert report.profile_complete is False
+            assert "profile incomplete" in report.profile_note.lower()
+            assert report.mandatory_frameworks == []
+            regulated = [c for c in report.checks if c.status in ("in_force", "proposed")]
+            assert regulated, f"no regulated framework surfaced for {region}"
+            for check in regulated:
+                assert check.applies in ("informational", "enjoined", "voluntary")
+                assert check.applies != "mandatory"
+                assert check.reason
+                assert check.as_of
 
-        eu = get_compliance_report(50, True, True, "EU", 2, 100)
-        assert any("CSRD" in c.framework for c in eu.checks)
+    def test_voluntary_frameworks_never_need_a_profile(self):
+        report = get_compliance_report(50, True, True, "australia", 2, 100)
+        for key in ("ghg_protocol", "nzce", "iso_20121_2024"):
+            check = _check(report, key)
+            assert check is not None
+            assert check.applies == "voluntary"
+        assert _check(report, "nzce").framework not in report.mandatory_frameworks
+
+    def test_region_filters_which_regimes_are_shown(self):
+        sg = get_compliance_report(50, True, True, "singapore", 2, 100, PROFILE_STI_2026)
+        assert _check(sg, "sgx_issb") is not None
+        assert _check(sg, "eu_csrd") is None
+        assert _check(sg, "ca_sb253") is None
 
         au = get_compliance_report(50, True, True, "australia", 2, 100)
-        assert not any("SGX" in c.framework or "CSRD" in c.framework for c in au.checks)
+        assert _check(au, "au_asrs") is not None
+        assert _check(au, "sgx_issb") is None
+
+
+class TestEuCsrdScope:
+    def test_small_agency_is_out_of_scope(self):
+        # 40-person agency: below both post-Omnibus I thresholds.
+        profile = ReportingProfile(
+            employee_band="lt_50", annual_turnover_band="lt_50m",
+            listing_status="none", reporting_fy=2027,
+        )
+        check = _check(get_compliance_report(50, True, True, "EU", 2, 100, profile), "eu_csrd")
+        assert check.applies == "out_of_scope"
+        assert check.status == "in_force"
+        assert "1,000" in check.reason and "450" in check.reason
+
+    def test_large_undertaking_is_mandatory_from_fy2027(self):
+        base = dict(employee_band="gt_1000", annual_turnover_band="gt_1b", listing_status="listed")
+        early = _check(
+            get_compliance_report(50, True, True, "EU", 2, 100, ReportingProfile(reporting_fy=2026, **base)),
+            "eu_csrd",
+        )
+        assert early.applies == "not_in_force"
+        assert early.first_reporting_fy == 2027
+
+        live = _check(
+            get_compliance_report(50, True, True, "EU", 2, 100, ReportingProfile(reporting_fy=2027, **base)),
+            "eu_csrd",
+        )
+        assert live.applies == "mandatory"
+        assert live.scope3_required is True
+        assert live.framework in get_compliance_report(
+            50, True, True, "EU", 2, 100, ReportingProfile(reporting_fy=2027, **base)
+        ).mandatory_frameworks
+
+    def test_missing_size_bands_stay_informational(self):
+        profile = ReportingProfile(reporting_fy=2027, listing_status="listed")
+        check = _check(get_compliance_report(50, True, True, "EU", 2, 100, profile), "eu_csrd")
+        assert check.applies == "informational"
+
+
+class TestSgxScope:
+    def test_sti_constituent_scope3_mandatory_from_fy2026(self):
+        fy2025 = _check(
+            get_compliance_report(
+                50, True, True, "singapore", 2, 100,
+                ReportingProfile(listing_status="sti_constituent", reporting_fy=2025),
+            ),
+            "sgx_issb",
+        )
+        assert fy2025.applies == "mandatory"
+        assert fy2025.scope3_required is False
+
+        fy2026 = _check(
+            get_compliance_report(50, True, True, "singapore", 2, 100, PROFILE_STI_2026), "sgx_issb"
+        )
+        assert fy2026.applies == "mandatory"
+        assert fy2026.scope3_required is True
+
+    def test_listed_non_sti_scope3_is_voluntary(self):
+        check = _check(
+            get_compliance_report(
+                50, True, True, "singapore", 2, 100,
+                ReportingProfile(listing_status="listed", annual_turnover_band="gt_1b", reporting_fy=2028),
+            ),
+            "sgx_issb",
+        )
+        assert check.applies == "mandatory"
+        assert check.scope3_required is False
+        assert "voluntary" in check.reason.lower()
+
+    def test_smaller_listed_issuer_waits_for_fy2030(self):
+        smaller = dict(listing_status="listed", annual_turnover_band="450m_1b")
+        assert _check(
+            get_compliance_report(50, True, True, "singapore", 2, 100, ReportingProfile(reporting_fy=2028, **smaller)),
+            "sgx_issb",
+        ).applies == "not_in_force"
+        assert _check(
+            get_compliance_report(50, True, True, "singapore", 2, 100, ReportingProfile(reporting_fy=2030, **smaller)),
+            "sgx_issb",
+        ).applies == "mandatory"
+
+    def test_small_non_listed_company_is_out_of_scope(self):
+        check = _check(
+            get_compliance_report(
+                50, True, True, "singapore", 2, 100,
+                ReportingProfile(listing_status="none", annual_turnover_band="lt_50m", reporting_fy=2030),
+            ),
+            "sgx_issb",
+        )
+        assert check.applies == "out_of_scope"
+
+
+class TestUkSrsScope:
+    def test_uk_srs_is_never_mandatory(self):
+        profiles = [
+            None,
+            ReportingProfile(reporting_fy=2027, employee_band="gt_1000",
+                             annual_turnover_band="gt_1b", listing_status="listed"),
+            ReportingProfile(reporting_fy=2030, employee_band="gt_1000",
+                             annual_turnover_band="gt_1b", listing_status="listed"),
+        ]
+        for profile in profiles:
+            check = _check(get_compliance_report(50, True, True, "uk", 2, 100, profile), "uk_srs")
+            assert check.status == "proposed"
+            assert check.applies == "voluntary"
+            assert check.applies != "mandatory"
+            assert "1 January 2027" in check.reason
+
+
+class TestAuAsrsScope:
+    def test_group2_first_period_excludes_scope3(self):
+        def scope(fy):
+            return _check(
+                get_compliance_report(
+                    50, True, True, "australia", 2, 100,
+                    ReportingProfile(listing_status="asrs_group2", reporting_fy=fy),
+                ),
+                "au_asrs",
+            )
+
+        assert scope(2025).applies == "not_in_force"
+        first = scope(2026)
+        assert first.applies == "mandatory"
+        assert first.scope3_required is False
+        assert "first reporting period" in first.reason.lower()
+        assert scope(2027).scope3_required is True
+
+    def test_unspecified_group_stays_informational(self):
+        check = _check(
+            get_compliance_report(
+                50, True, True, "australia", 2, 100, ReportingProfile(reporting_fy=2027, listing_status="none")
+            ),
+            "au_asrs",
+        )
+        assert check.applies == "informational"
+
+
+class TestCaliforniaScope:
+    def test_sb253_needs_a_california_nexus_and_the_revenue_threshold(self):
+        no_nexus = _check(
+            get_compliance_report(
+                50, True, True, "usa", 2, 100,
+                ReportingProfile(annual_turnover_band="gt_1b", reporting_fy=2026,
+                                 does_business_in_california=False),
+            ),
+            "ca_sb253",
+        )
+        assert no_nexus.applies == "out_of_scope"
+
+        too_small = _check(
+            get_compliance_report(
+                50, True, True, "usa", 2, 100,
+                ReportingProfile(annual_turnover_band="450m_1b", reporting_fy=2026,
+                                 does_business_in_california=True),
+            ),
+            "ca_sb253",
+        )
+        assert too_small.applies == "out_of_scope"
+
+    def test_sb253_scope3_starts_with_fy2026(self):
+        def scope(fy):
+            return _check(
+                get_compliance_report(
+                    50, True, True, "usa", 2, 100,
+                    ReportingProfile(annual_turnover_band="gt_1b", reporting_fy=fy,
+                                     does_business_in_california=True),
+                ),
+                "ca_sb253",
+            )
+
+        assert scope(2024).applies == "not_in_force"
+        fy2025 = scope(2025)
+        assert fy2025.applies == "mandatory"
+        assert fy2025.scope3_required is False
+        assert "10 November 2026" in fy2025.reason
+        assert scope(2026).scope3_required is True
+
+    def test_sb261_is_never_mandatory_while_enjoined(self):
+        profiles = [
+            None,
+            ReportingProfile(annual_turnover_band="gt_1b", reporting_fy=2030,
+                             does_business_in_california=True),
+        ]
+        for profile in profiles:
+            check = _check(get_compliance_report(50, True, True, "usa", 2, 100, profile), "ca_sb261")
+            assert check.status == "enjoined"
+            assert check.applies == "enjoined"
+            assert check.applies != "mandatory"
+            assert "Ninth Circuit" in check.reason
+            assert check.framework not in get_compliance_report(
+                50, True, True, "usa", 2, 100, profile
+            ).mandatory_frameworks
+
+
+class TestIso20121Checklist:
+    def test_iso_is_a_clause_checklist_not_a_score(self):
+        check = _check(get_compliance_report(50, True, True, "australia", 2, 100), "iso_20121_2024")
+        assert check.score_pct is None
+        assert check.applies == "voluntary"
+        clauses = [item.clause for item in check.clause_checklist]
+        for clause in ("6.3", "7.3", "9.3.4"):
+            assert clause in clauses
+        joined = " ".join(f"{i.clause} {i.requirement}" for i in check.clause_checklist).lower()
+        assert "climate change" in joined
+        assert "legacy" in joined
+        assert "annex d" in joined
+        assert all(item.evidence_status == "not_evidenced" for item in check.clause_checklist)
+        assert any("31 March 2027" in text for text in [check.reason, *check.recommendations])
+
+
+class TestRetainedQualitativeChecks:
+    def test_ghg_protocol_gaps_still_track_the_inventory(self):
+        weak = _check(get_compliance_report(50, False, False, "australia", 2, 100), "ghg_protocol")
+        assert weak.score_pct == 20
+        assert any("Scope 3" in gap for gap in weak.gaps)
+        strong = _check(get_compliance_report(50, True, True, "australia", 2, 100), "ghg_protocol")
+        assert strong.score_pct == 100
+        assert strong.gaps == []
+        assert "draft" in strong.reason.lower()  # the 95% completeness revision is DRAFT only
 
     def test_intensity_branches(self):
-        low = get_compliance_report(1, True, True, "australia", 2, 100)
-        intensity_low = next(c for c in low.checks if "intensity" in c.framework)
-        assert intensity_low.status == "compliant"
+        low = _check(get_compliance_report(1, True, True, "australia", 2, 100), "event_carbon_intensity")
+        assert low.readiness == "compliant"
+        assert low.applies == "informational"
 
-        high = get_compliance_report(500, True, True, "australia", 1, 100)
-        intensity_high = next(c for c in high.checks if "intensity" in c.framework)
-        assert intensity_high.status == "partial"
+        high = _check(get_compliance_report(500, True, True, "australia", 1, 100), "event_carbon_intensity")
+        assert high.readiness == "partial"
+
+    def test_nzce_keeps_its_gaps_and_recommendations(self):
+        check = _check(get_compliance_report(50, True, True, "australia", 2, 100), "nzce")
+        assert check.status == "voluntary_initiative"
+        assert check.gaps and check.recommendations
+        assert any("two years" in rec for rec in check.recommendations)
 
 
 def test_headline_total_composition():
