@@ -1,4 +1,5 @@
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -13,6 +14,8 @@ from app.rate_limit import limiter
 from app.routers import chat, scenarios, financial, agents, auth, offsets, exports
 
 logger = logging.getLogger(__name__)
+IS_VERCEL = os.getenv("VERCEL") == "1"
+API_PREFIX = "" if IS_VERCEL else "/api"
 
 
 @asynccontextmanager
@@ -46,14 +49,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth.router,      prefix="/api/auth",      tags=["Auth"])
-app.include_router(chat.router,      prefix="/api/chat",      tags=["Chat"])
-app.include_router(scenarios.router, prefix="/api/scenarios", tags=["Scenarios"])
-app.include_router(financial.router, prefix="/api/financial", tags=["Financial"])
-app.include_router(offsets.router,   prefix="/api/offsets",   tags=["Carbon Offsets"])
-app.include_router(agents.router,    prefix="/api/agents",    tags=["TinyFish Agents"])
-app.include_router(exports.router,   prefix="/api/exports",   tags=["Data Exports"])
-app.include_router(exports.reports_router, prefix="/api",     tags=["Report Snapshots"])
+app.include_router(auth.router,      prefix=f"{API_PREFIX}/auth",      tags=["Auth"])
+app.include_router(chat.router,      prefix=f"{API_PREFIX}/chat",      tags=["Chat"])
+app.include_router(scenarios.router, prefix=f"{API_PREFIX}/scenarios", tags=["Scenarios"])
+app.include_router(financial.router, prefix=f"{API_PREFIX}/financial", tags=["Financial"])
+app.include_router(offsets.router,   prefix=f"{API_PREFIX}/offsets",   tags=["Carbon Offsets"])
+app.include_router(agents.router,    prefix=f"{API_PREFIX}/agents",    tags=["TinyFish Agents"])
+app.include_router(exports.router,   prefix=f"{API_PREFIX}/exports",   tags=["Data Exports"])
+app.include_router(exports.reports_router, prefix=API_PREFIX,           tags=["Report Snapshots"])
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIST_DIR = BASE_DIR / "frontend" / "dist"
@@ -64,7 +67,9 @@ async def health():
     return {"status": "ok", "service": "EventCarbon Co-Pilot", "version": "2.0.0"}
 
 
-if (FRONTEND_DIST_DIR / "index.html").exists():
+if IS_VERCEL:
+    logger.info("Vercel serves the frontend as a separate Vite service")
+elif (FRONTEND_DIST_DIR / "index.html").exists():
     app.mount("/", StaticFiles(directory=str(FRONTEND_DIST_DIR), html=True), name="frontend")
 else:
     logger.error(

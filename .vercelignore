@@ -1,0 +1,17 @@
+.carbon_venv/
+.claude/
+.git/
+.pytest_cache/
+.superpowers/
+.vscode/
+__pycache__/
+*.py[cod]
+*.db
+*.sqlite
+*.sqlite3
+.env
+frontend/.env
+frontend/dist/
+frontend/node_modules/
+tests/
+docs/

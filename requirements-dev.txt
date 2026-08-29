@@ -1,0 +1,4 @@
+-r requirements.txt
+
+pytest==7.1.2
+testcontainers[postgresql]==4.8.2

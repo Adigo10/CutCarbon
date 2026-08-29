@@ -1,4 +1,6 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
+import os
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from sqlalchemy import select, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,6 +11,18 @@ from app.routers.auth import get_current_user, require_admin
 from app.utils.time import utcnow
 
 router = APIRouter()
+
+
+def _require_durable_worker() -> None:
+    """Reject refreshes that cannot persist their generated factor catalog."""
+    if os.getenv("VERCEL") == "1":
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Factor refresh requires a durable writable worker and is unavailable "
+                "on Vercel Functions. Existing factors remain available."
+            ),
+        )
 
 
 # Agent runs scrape ~10 external sites and rewrite the emission-factor file that
@@ -23,6 +37,7 @@ async def trigger_agents(
     current_user: UserDB = Depends(require_admin),
 ):
     """Trigger all TinyFish web agents to refresh emission factor data (admin only)."""
+    _require_durable_worker()
     background_tasks.add_task(run_and_update, force)
     return {
         "status": "agents_dispatched",
@@ -41,6 +56,7 @@ async def trigger_agents_sync(
     current_user: UserDB = Depends(require_admin),
 ):
     """Synchronously run all agents and return results (admin only; may be slow)."""
+    _require_durable_worker()
     result = await run_and_update(force=force)
     return result
 

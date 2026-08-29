@@ -1,0 +1,17 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "experimentalServices": {
+    "frontend": {
+      "entrypoint": "frontend",
+      "routePrefix": "/",
+      "framework": "vite"
+    },
+    "backend": {
+      "entrypoint": "index.py",
+      "routePrefix": "/api",
+      "maxDuration": 300,
+      "includeFiles": "app/data/**",
+      "excludeFiles": "{tests/**,docs/**,.claude/**,.github/**,frontend/**,alembic/**,**/__pycache__/**,**/*.pyc,cutcarbon.db}"
+    }
+  }
+}

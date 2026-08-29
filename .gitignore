@@ -7,4 +7,6 @@ __pycache__/
 # Local databases — never commit (contains user password hashes & data)
 *.db
 *.sqlite
-*.sqlite3.claude/worktrees/
+*.sqlite3
+.claude/worktrees/
+.vercel/
