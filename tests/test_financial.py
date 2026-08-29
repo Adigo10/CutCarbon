@@ -98,14 +98,120 @@ class TestScenarioFinancialRequest:
 
     def test_legacy_row_backsolves_from_own_snapshot(self):
         row = self._row(input_payload={"attendees": -1})  # invalid -> snapshot path
-        req = build_scenario_financial_request(row, "eu", 30.0, [])
+        req = build_scenario_financial_request(row, "eu", 30.0, ["renewable_energy"])
         # 1 tCO2e * 1000 / 0.412 kg/kWh -> kWh, then x 30%
         assert req.energy_kwh_saved == pytest.approx(1000 / 0.412 * 0.30, rel=1e-3)
 
     def test_unusable_legacy_row_reports_zero_not_fabrication(self):
         row = self._row(input_payload={"attendees": -1}, factors_snapshot={})
-        req = build_scenario_financial_request(row, "eu", 30.0, [])
+        req = build_scenario_financial_request(row, "eu", 30.0, ["renewable_energy"])
         assert req.energy_kwh_saved == 0
+
+
+class TestCarbonPriceBasis:
+    """Statutory carbon pricing only applies to covered entities; everyone else gets
+    an internal carbon price kept out of the headline total."""
+
+    def _req(self, **overrides):
+        base = dict(
+            baseline_tco2e=100, reduced_tco2e=70, region="singapore",
+            energy_kwh_saved=0, meal_switches=0, attendees=300, actions_taken=[],
+        )
+        base.update(overrides)
+        return FinancialRequest(**base)
+
+    def test_default_is_internal_basis_with_no_statutory_saving(self):
+        res = generate_financial_report(self._req())
+        assert res.carbon_price_basis == "internal"
+        assert res.carbon_tax_savings == []
+        assert res.total_financial_savings_usd == pytest.approx(0.0)
+
+    def test_default_internal_price_is_50_usd(self):
+        res = generate_financial_report(self._req())
+        assert res.internal_carbon_price_usd == pytest.approx(50.0)
+        assert res.internal_carbon_value_usd == pytest.approx(30 * 50)
+
+    @pytest.mark.parametrize("preset", [25.0, 50.0, 100.0])
+    def test_preset_internal_prices_honoured(self, preset):
+        res = generate_financial_report(self._req(internal_carbon_price_usd=preset))
+        assert res.internal_carbon_value_usd == pytest.approx(30 * preset)
+
+    def test_internal_value_excluded_from_headline_total(self):
+        res = generate_financial_report(self._req(energy_kwh_saved=1000, meal_switches=200))
+        assert res.internal_carbon_value_usd > 0
+        assert res.total_financial_savings_usd == pytest.approx(
+            round(res.energy_cost_savings_usd + res.catering_cost_savings_usd, 2)
+        )
+
+    def test_notes_explain_why_and_label_reference_value(self):
+        res = generate_financial_report(self._req())
+        joined = " ".join(res.notes)
+        assert "not a tax liability" in joined
+        assert "25,000" in joined  # the Singapore coverage threshold is quoted
+
+    def test_covered_entity_keeps_statutory_computation(self):
+        res = generate_financial_report(self._req(covered_by_carbon_pricing=True))
+        assert res.carbon_price_basis == "statutory"
+        assert res.carbon_tax_savings
+        assert res.internal_carbon_value_usd == 0.0
+        assert res.internal_carbon_price_usd is None
+        assert res.total_financial_savings_usd == pytest.approx(
+            res.carbon_tax_savings[0].savings_usd
+        )
+
+
+class TestRegionMismatchNote:
+    def _report(self, region):
+        return generate_financial_report(FinancialRequest(
+            baseline_tco2e=100, reduced_tco2e=70, region=region,
+        ))
+
+    def test_unrecognized_region_is_surfaced(self):
+        res = self._report("Marina Bay Sands, Singapore")
+        note = next(n for n in res.notes if "not recognized" in n)
+        assert "Marina Bay Sands, Singapore" in note
+
+    def test_explicit_global_is_not_flagged(self):
+        assert not any("not recognized" in n for n in self._report("global").notes)
+
+    def test_known_region_is_not_flagged(self):
+        assert not any("not recognized" in n for n in self._report("EU").notes)
+
+
+class TestActionDerivedSavingsInputs:
+    """Each savings line is fed only by the actions that actually produce it."""
+
+    def _row(self):
+        return SimpleNamespace(
+            id="row1", total_tco2e=50.0, venue_energy_tco2e=1.0, attendees=100, event_days=2,
+            input_payload={
+                "name": "Row", "attendees": 100, "event_days": 2,
+                "venue_energy": {"grid_region": "singapore", "kwh_consumed": 2500, "renewable_pct": 10},
+            },
+            factors_snapshot={"venue_grid_kg_per_kwh": 0.412},
+        )
+
+    def test_renewables_only_books_no_meal_switches(self):
+        req = build_scenario_financial_request(self._row(), "singapore", 30.0, ["renewable_energy"])
+        assert req.energy_kwh_saved > 0
+        assert req.meal_switches == 0
+
+    def test_catering_only_books_no_energy_savings(self):
+        req = build_scenario_financial_request(self._row(), "singapore", 30.0, ["vegetarian_menu"])
+        assert req.energy_kwh_saved == 0
+        assert req.meal_switches > 0
+
+    def test_irrelevant_actions_book_neither(self):
+        req = build_scenario_financial_request(self._row(), "singapore", 30.0, ["ghg_reporting"])
+        assert req.energy_kwh_saved == 0
+        assert req.meal_switches == 0
+
+    def test_data_file_action_keys_are_accepted_directly(self):
+        req = build_scenario_financial_request(
+            self._row(), "singapore", 30.0, ["led_lighting_upgrade", "switch_to_vegan_meal"]
+        )
+        assert req.energy_kwh_saved > 0
+        assert req.meal_switches > 0
 
 
 class TestComplianceReport:
@@ -137,10 +243,11 @@ class TestComplianceReport:
 
 
 def test_headline_total_composition():
+    # Statutory carbon pricing only enters the headline for a covered entity.
     req = FinancialRequest(
         baseline_tco2e=100, reduced_tco2e=70, region="singapore",
         energy_kwh_saved=1000, meal_switches=200, attendees=300,
-        actions_taken=["renewable_energy"],
+        actions_taken=["renewable_energy"], covered_by_carbon_pricing=True,
     )
     res = generate_financial_report(req)
     primary = res.carbon_tax_savings[0].savings_usd

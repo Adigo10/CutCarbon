@@ -321,6 +321,12 @@ class FinancialRequest(BaseModel):
     meal_switches: int = Field(default=0, ge=0)
     attendees: int = Field(default=0, ge=0)
     actions_taken: List[str] = Field(default_factory=list)
+    # Statutory carbon pricing (SG CPA, EU/UK ETS, ...) only bites on covered entities
+    # — e.g. Singapore's scheme covers facilities emitting >= 25,000 tCO2e/year. Default
+    # off: an event organizer is normally NOT a covered entity.
+    covered_by_carbon_pricing: bool = False
+    # Shadow price used when not covered (UI presets 25/50/100; defaults to 50).
+    internal_carbon_price_usd: Optional[float] = Field(default=None, ge=0)
 
 
 class TaxSaving(BaseModel):
@@ -341,6 +347,15 @@ class FinancialResult(BaseModel):
     co2e_reduction_pct: float
     roi_months: Optional[float] = None
     compliance_value_usd: float = 0.0
+    # "statutory" = a compliance carbon price the entity actually owes; "internal" = a
+    # shadow price for decision-making only.
+    carbon_price_basis: str = "statutory"
+    internal_carbon_price_usd: Optional[float] = None
+    # Internal carbon price x tonnes reduced — a reference value, deliberately EXCLUDED
+    # from total_financial_savings_usd.
+    internal_carbon_value_usd: float = 0.0
+    # Human-readable caveats (pricing basis, unrecognized region, ...).
+    notes: List[str] = Field(default_factory=list)
 
 
 # -- Compliance models ---------------------------------------------------------

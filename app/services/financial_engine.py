@@ -23,6 +23,56 @@ ELECTRICITY_RATES_USD = {
     k: v for k, v in _ELEC_BLOCK.items() if isinstance(v, (int, float))
 } or {"global": 0.18}
 
+# Shadow price used when the entity is not covered by a compliance carbon scheme.
+# The UI offers 25 / 50 / 100 USD/tCO2e presets; this is the fallback.
+DEFAULT_INTERNAL_CARBON_PRICE_USD = 50.0
+
+
+# -- Reduction actions -> which savings line they feed -------------------------
+# Derived from the fields tax_incentives.json records against each action, so adding
+# an action to the data file automatically routes it to the right line.
+_ACTION_SAVINGS = TAX_DATA.get("reduction_action_savings", {})
+
+# UI / chat action keys -> the canonical reduction_action_savings key they mean.
+_ACTION_ALIASES = {
+    "renewable_energy": "renewable_energy_venue",
+    "led_lighting": "led_lighting_upgrade",
+    "vegetarian_menu": "switch_to_vegetarian_meal",
+    "vegan_menu": "switch_to_vegan_meal",
+    "local_seasonal": "local_seasonal_catering",
+    "zero_waste": "zero_waste_catering",
+    "hybrid_event": "virtual_attendance_option",
+    "rail_travel": "rail_instead_of_short_haul",
+    "local_venue": "local_venue_selection",
+    "carbon_offset": "carbon_offset_purchase",
+    "carbon_removal": "carbon_removal_purchase",
+}
+
+
+def _actions_recording(*fields: str) -> set:
+    """Canonical action keys whose data-file entry records any of these fields."""
+    return {
+        key for key, data in _ACTION_SAVINGS.items()
+        if isinstance(data, dict) and any(f in data for f in fields)
+    }
+
+
+# Actions that cut venue electricity (feed energy_kwh_saved) and actions that swap
+# meals (feed meal_switches). Anything else feeds neither.
+ENERGY_ACTIONS = _actions_recording("co2e_saved_per_kwh_kg", "co2e_saved_pct_energy")
+MEAL_ACTIONS = _actions_recording("co2e_saved_per_meal_kg")
+
+
+def canonical_actions(actions: List[str]) -> set:
+    """Normalize UI/chat action keys onto the tax_incentives.json action vocabulary."""
+    resolved = set()
+    for action in actions or []:
+        key = (action or "").strip().lower()
+        if not key:
+            continue
+        resolved.add(_ACTION_ALIASES.get(key, key))
+    return resolved
+
 
 def _live_carbon_prices() -> dict:
     """Live carbon prices fetched by the TinyFish agents (carbon_tax_live), if any."""
@@ -170,6 +220,10 @@ def build_scenario_financial_request(
 
     Energy kWh saved is derived from the scenario's own venue-energy input (its
     grid and renewable share) — never from the requesting region's grid factor.
+
+    Each savings input is fed only by the actions that actually produce it: a
+    renewables-only plan books no catering saving, and a menu-only plan books no
+    energy saving. The headline reduction_pct alone never conjures a line item.
     """
     from app.models.schemas import EventScenarioInput
     from app.services.emissions_engine import estimate_venue_kwh
@@ -195,15 +249,44 @@ def build_scenario_financial_request(
         if effective_ef > 0:
             venue_kwh = (scenario_row.venue_energy_tco2e or 0.0) * 1000 / effective_ef
 
+    resolved_actions = canonical_actions(actions_taken)
+    meals_served = (scenario_row.attendees or 0) * (scenario_row.event_days or 1) * 2
+
     return FinancialRequest(
         scenario_id=scenario_row.id,
         baseline_tco2e=baseline,
         reduced_tco2e=reduced,
         region=region,
-        energy_kwh_saved=venue_kwh * (reduction_pct / 100),
-        meal_switches=int((scenario_row.attendees or 0) * (scenario_row.event_days or 1) * 2 * (reduction_pct / 100)),
+        energy_kwh_saved=(
+            venue_kwh * (reduction_pct / 100) if resolved_actions & ENERGY_ACTIONS else 0.0
+        ),
+        meal_switches=(
+            int(meals_served * (reduction_pct / 100)) if resolved_actions & MEAL_ACTIONS else 0
+        ),
         attendees=scenario_row.attendees or 0,
         actions_taken=actions_taken,
+    )
+
+
+def _carbon_pricing_scope(region_key: str) -> str:
+    """The 'who is covered' text the data file records for a region's scheme, if any."""
+    rate_key = CARBON_TAX_KEYS.get(region_key)
+    rate_data = TAX_DATA["carbon_tax_rates"].get(rate_key) if rate_key else None
+    return (rate_data or {}).get("scope", "")
+
+
+def _region_note(raw_region: str) -> str:
+    """Note when the requested region resolved to 'global' (no regional pricing)."""
+    raw = (raw_region or "").strip()
+    if not raw:
+        return (
+            "No region provided — no regional carbon pricing or electricity rate was "
+            "applied; global average rates used."
+        )
+    return (
+        f"Region '{raw}' not recognized — no regional carbon pricing applied; "
+        "global average electricity rates used. Pick a supported region "
+        "(Singapore, EU, UK, Australia, USA, Canada, Japan) for jurisdictional figures."
     )
 
 
@@ -212,8 +295,53 @@ def generate_financial_report(req: FinancialRequest) -> FinancialResult:
     co2e_reduced = max(0.0, req.baseline_tco2e - req.reduced_tco2e)
     reduction_pct = (co2e_reduced / req.baseline_tco2e * 100) if req.baseline_tco2e > 0 else 0
 
-    # Carbon tax savings
-    tax_savings = calculate_carbon_tax_savings(co2e_reduced, req.region)
+    notes: List[str] = []
+
+    # Region mismatch: "Marina Bay Sands, Singapore" silently resolves to "global",
+    # which zeroes regional pricing. Say so instead of returning a bare zero.
+    region_key = normalize_region(req.region)
+    if region_key == "global" and (req.region or "").strip().lower().replace(" ", "_") != "global":
+        notes.append(_region_note(req.region))
+
+    # Carbon pricing: statutory only for covered entities; otherwise an internal
+    # (shadow) carbon price, reported separately from the headline total.
+    internal_price = None
+    internal_value = 0.0
+    if req.covered_by_carbon_pricing:
+        carbon_price_basis = "statutory"
+        tax_savings = calculate_carbon_tax_savings(co2e_reduced, req.region)
+        if not tax_savings:
+            notes.append(
+                "No statutory carbon price is configured for this region — "
+                "carbon tax/ETS savings are 0."
+            )
+    else:
+        carbon_price_basis = "internal"
+        tax_savings = []
+        scope = _carbon_pricing_scope(region_key)
+        reason = (
+            "Carbon tax/ETS savings are 0: this entity is not marked as covered by a "
+            "compliance carbon pricing scheme."
+        )
+        if scope:
+            reason += f" Scheme coverage: {scope}."
+        reason += (
+            " Tick 'covered by a carbon pricing scheme' if the organisation has a "
+            "statutory liability."
+        )
+        notes.append(reason)
+
+        internal_price = (
+            req.internal_carbon_price_usd
+            if req.internal_carbon_price_usd is not None
+            else DEFAULT_INTERNAL_CARBON_PRICE_USD
+        )
+        internal_value = round(internal_price * co2e_reduced, 2)
+        notes.append(
+            f"Internal carbon price — reference value, not a tax liability: "
+            f"USD {internal_price:,.0f}/tCO2e x {co2e_reduced:.2f} tCO2e = "
+            f"USD {internal_value:,.2f}. Excluded from total financial savings."
+        )
 
     # Energy cost savings
     energy_savings = calculate_energy_savings(req.energy_kwh_saved, req.region)
@@ -245,6 +373,10 @@ def generate_financial_report(req: FinancialRequest) -> FinancialResult:
         # so we omit the misleading metric rather than divide a one-time figure by 12.
         roi_months=None,
         compliance_value_usd=0.0,
+        carbon_price_basis=carbon_price_basis,
+        internal_carbon_price_usd=internal_price,
+        internal_carbon_value_usd=internal_value,
+        notes=notes,
     )
 
 
