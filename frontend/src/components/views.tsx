@@ -53,6 +53,7 @@ interface AuthViewProps {
   onEmailChange: (value: string) => void
   onPasswordChange: (value: string) => void
   onSubmit: () => void
+  onForgotPassword: () => void
 }
 
 export function AuthView({
@@ -65,7 +66,9 @@ export function AuthView({
   onEmailChange,
   onPasswordChange,
   onSubmit,
+  onForgotPassword,
 }: AuthViewProps) {
+  const isLogin = mode === 'login'
   return (
     <div className="auth-shell">
       <div className="auth-poster">
@@ -94,14 +97,18 @@ export function AuthView({
         <div className="auth-panel-head">
           <img className="app-logo" src="/favicon.svg" alt="CutCarbon logo" />
           <div>
-            <strong>Welcome back</strong>
-            <p>Use your workspace credentials to access your carbon workspace.</p>
+            <strong>{isLogin ? 'Welcome back' : 'Create your workspace'}</strong>
+            <p>
+              {isLogin
+                ? 'Use your workspace credentials to access your carbon workspace.'
+                : 'Register with a work email and password to start modelling event emissions.'}
+            </p>
           </div>
         </div>
         <div className="toggle-row">
           <button
             type="button"
-            className={mode === 'login' ? 'toggle-pill is-active' : 'toggle-pill'}
+            className={isLogin ? 'toggle-pill is-active' : 'toggle-pill'}
             onClick={() => onModeChange('login')}
           >
             Sign in
@@ -114,23 +121,47 @@ export function AuthView({
             Register
           </button>
         </div>
-        <label className="field">
-          <span>Email</span>
-          <input value={email} onChange={(event) => onEmailChange(event.target.value)} placeholder="you@example.com" />
-        </label>
-        <label className="field">
-          <span>Password</span>
-          <input
-            value={password}
-            onChange={(event) => onPasswordChange(event.target.value)}
-            placeholder="••••••••"
-            type="password"
-          />
-        </label>
-        {error ? <p className="field-error">{error}</p> : null}
-        <Button tone="primary" busy={busy} onClick={onSubmit}>
-          {mode === 'login' ? 'Enter workspace' : 'Create account'}
-        </Button>
+        <form
+          className="auth-form"
+          onSubmit={(event) => {
+            event.preventDefault()
+            onSubmit()
+          }}
+        >
+          <label className="field">
+            <span>Email</span>
+            <input
+              value={email}
+              onChange={(event) => onEmailChange(event.target.value)}
+              placeholder="you@example.com"
+              type="email"
+              name="email"
+              autoComplete="email"
+              required
+            />
+          </label>
+          <label className="field">
+            <span>Password</span>
+            <input
+              value={password}
+              onChange={(event) => onPasswordChange(event.target.value)}
+              placeholder="••••••••"
+              type="password"
+              name="password"
+              autoComplete={isLogin ? 'current-password' : 'new-password'}
+              required
+            />
+          </label>
+          {isLogin ? (
+            <button type="button" className="auth-link" onClick={onForgotPassword}>
+              Forgot password?
+            </button>
+          ) : null}
+          {error ? <p className="field-error">{error}</p> : null}
+          <Button tone="primary" busy={busy} type="submit">
+            {isLogin ? 'Enter workspace' : 'Create account'}
+          </Button>
+        </form>
       </Panel>
     </div>
   )
@@ -1608,6 +1639,7 @@ interface DataViewProps {
   agentStatus: AgentStatus[]
   agentHistory: AgentRun[]
   agentsRunning: boolean
+  isAdmin: boolean
   onDownload: (path: string, filename: string, auth?: boolean) => void
   onDownloadReport: (format: ScenarioReportFormat) => void
   onRefreshStatus: () => void
@@ -1619,6 +1651,7 @@ export function DataView({
   agentStatus,
   agentHistory,
   agentsRunning,
+  isAdmin,
   onDownload,
   onDownloadReport,
   onRefreshStatus,
@@ -1683,9 +1716,12 @@ export function DataView({
               <Button tone="soft" onClick={onRefreshStatus}>
                 Refresh
               </Button>
-              <Button tone="primary" busy={agentsRunning} onClick={onForceRefresh}>
-                Force re-fetch
-              </Button>
+              {/* Agent runs are admin-only server-side (ADMIN_EMAILS allowlist). */}
+              {isAdmin ? (
+                <Button tone="primary" busy={agentsRunning} onClick={onForceRefresh}>
+                  Force re-fetch
+                </Button>
+              ) : null}
             </div>
           </div>
           {agentStatus.length ? (

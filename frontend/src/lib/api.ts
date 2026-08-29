@@ -34,6 +34,24 @@ function buildPath(path: string): string {
   return `${API_ROOT}${path}`
 }
 
+interface ValidationIssue {
+  loc?: Array<string | number>
+  msg?: string
+}
+
+/** Render FastAPI's 422 `detail` array as "field: message; field: message". */
+function formatValidationDetail(issues: ValidationIssue[]): string {
+  return issues
+    .map((issue) => {
+      // loc looks like ["body", "venue_energy", "kwh_consumed"] — the first segment
+      // names the request part, which is noise for a toast.
+      const path = (issue.loc ?? []).slice(1).join('.')
+      const message = issue.msg ?? 'Invalid value'
+      return path ? `${path}: ${message}` : message
+    })
+    .join('; ')
+}
+
 function authHeaders(token?: string | null): Headers {
   const headers = new Headers()
   headers.set('Accept', 'application/json')
@@ -64,8 +82,12 @@ async function request<T>(path: string, init?: RequestInit, token?: string | nul
 
     try {
       if (contentType.includes('application/json')) {
-        const payload = (await response.json()) as { detail?: string }
-        detail = payload.detail ?? JSON.stringify(payload)
+        const payload = (await response.json()) as { detail?: string | ValidationIssue[] }
+        if (Array.isArray(payload.detail)) {
+          detail = formatValidationDetail(payload.detail) || JSON.stringify(payload)
+        } else {
+          detail = payload.detail ?? JSON.stringify(payload)
+        }
       } else {
         detail = (await response.text()) || detail
       }
@@ -246,7 +268,9 @@ export const api = {
   },
 
   runAgentsSync(token: string) {
-    return request<Record<string, unknown>>('/api/agents/run/sync?force=true', undefined, token)
+    return request<Record<string, unknown>>('/api/agents/run/sync?force=true', {
+      method: 'POST',
+    }, token)
   },
 
   runAgentsForce(token: string) {
