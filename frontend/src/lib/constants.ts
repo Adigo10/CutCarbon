@@ -125,6 +125,22 @@ export const ACCOMMODATION_OPTIONS = [
   ['no_accommodation', 'No Accommodation'],
 ]
 
+// GHG Protocol control approach. Contracted is the default: organizers hire venues
+// and production kit rather than operate them, which makes those emissions Scope 3.
+export const BOUNDARY_CONTROL_OPTIONS = [
+  ['contracted', 'Contracted / hired (Scope 3)'],
+  ['owned_operated', 'Owned or operated by us (Scope 1 & 2)'],
+]
+
+// Contractual instrument backing a renewable-electricity claim. Without one, the
+// renewable share cannot be deducted on the market basis.
+export const RENEWABLE_INSTRUMENT_OPTIONS = [
+  ['none', 'No instrument (claim not deductible)'],
+  ['rec', 'RECs / GOs retired in our name'],
+  ['ppa', 'Power purchase agreement (PPA)'],
+  ['green_tariff', 'Supplier green tariff'],
+]
+
 export const TSHIRT_OPTIONS = [
   ['cotton', 'Cotton'],
   ['organic', 'Organic'],
@@ -191,6 +207,8 @@ export function createDefaultScenarioDraft(): ScenarioDraft {
     include_alcohol: false,
     accommodation_type: 'standard_hotel',
     renewable_pct: 0,
+    venue_control: 'contracted',
+    renewable_instrument: 'none',
     travel_segments: [],
     stage_m2: 0,
     lighting_days: 0,

@@ -62,6 +62,24 @@ def data_quality_label(value: Any) -> str:
     return _DATA_QUALITY_LABELS[normalize_data_quality(value)]
 
 
+def scope2_dual_bases(assumptions: Any, scope2_tco2e: float) -> tuple[float, float]:
+    """Stored assumptions -> the (location-based, market-based) Scope 2 pair.
+
+    The engine writes both figures into ``assumptions["scope2_reporting"]`` (a JSONB
+    column that already round-trips), so no dedicated columns are needed. Rows written
+    before dual reporting carry only the headline figure; with no contractual
+    instrument on record the two bases coincide, so both fall back to it.
+    """
+    reporting = (assumptions or {}).get("scope2_reporting") or {}
+    headline = float(scope2_tco2e or 0)
+    location = reporting.get("location_based_tco2e")
+    market = reporting.get("market_based_tco2e")
+    return (
+        float(location) if isinstance(location, (int, float)) else headline,
+        float(market) if isinstance(market, (int, float)) else headline,
+    )
+
+
 def serialize_scenario(s: ScenarioDB) -> dict[str, Any]:
     """ScenarioDB row -> the wire/report dict used by the API and all exports."""
     event_type = getattr(s, "event_type", "conference") or "conference"
@@ -69,6 +87,8 @@ def serialize_scenario(s: ScenarioDB) -> dict[str, Any]:
         round(s.per_attendee_tco2e / max(s.event_days or 1, 1), 4) if s.per_attendee_tco2e else 0
     )
     benchmark = get_benchmark_comparison(event_type, per_attendee_day, s.per_attendee_tco2e)
+    scope2 = getattr(s, "scope2_tco2e", 0) or 0
+    scope2_location, scope2_market = scope2_dual_bases(s.assumptions, scope2)
     return {
         "scenario_id": s.id,
         "name": s.name,
@@ -93,8 +113,10 @@ def serialize_scenario(s: ScenarioDB) -> dict[str, Any]:
             "data_quality": normalize_data_quality(s.data_quality),
             "scopes": {
                 "scope1_tco2e": getattr(s, "scope1_tco2e", 0) or 0,
-                "scope2_tco2e": getattr(s, "scope2_tco2e", 0) or 0,
+                "scope2_tco2e": scope2,
                 "scope3_tco2e": getattr(s, "scope3_tco2e", 0) or 0,
+                "scope2_location_tco2e": scope2_location,
+                "scope2_market_tco2e": scope2_market,
             },
         },
         "assumptions": s.assumptions or {},
@@ -140,6 +162,9 @@ def result_to_column_values(result: ScenarioResult, payload: EventScenarioInput)
 def db_row_to_result(s: ScenarioDB) -> ScenarioResult:
     """Rehydrate a stored row into a ScenarioResult (for engine functions that
     operate on results, e.g. reduction suggestions)."""
+    scope2_location, scope2_market = scope2_dual_bases(
+        s.assumptions, getattr(s, "scope2_tco2e", 0) or 0
+    )
     return ScenarioResult(
         scenario_id=s.id,
         name=s.name,
@@ -163,6 +188,8 @@ def db_row_to_result(s: ScenarioDB) -> ScenarioResult:
                 scope1_tco2e=getattr(s, "scope1_tco2e", 0) or 0,
                 scope2_tco2e=getattr(s, "scope2_tco2e", 0) or 0,
                 scope3_tco2e=getattr(s, "scope3_tco2e", 0) or 0,
+                scope2_location_tco2e=scope2_location,
+                scope2_market_tco2e=scope2_market,
             ),
         ),
     )

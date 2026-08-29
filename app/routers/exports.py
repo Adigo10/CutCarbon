@@ -24,7 +24,11 @@ from app.models.schemas import (
 from app.routers.auth import get_current_user
 from app.services.claims import portfolio_claim_statement
 from app.services.financial_engine import get_compliance_report
-from app.services.scenario_serializer import data_quality_label, serialize_scenario
+from app.services.scenario_serializer import (
+    data_quality_label,
+    scope2_dual_bases,
+    serialize_scenario,
+)
 from app.utils.time import utcnow
 
 router = APIRouter()
@@ -119,6 +123,24 @@ def _style_header(ws, row=1):
 
 def _labelize(value: str) -> str:
     return value.replace("_", " ").replace("/", " / ").title()
+
+
+# GHG Protocol Scope 2 Guidance requires both bases to appear side by side, so the
+# scope rows carry explicit labels rather than title-cased field names. Ordered:
+# headline first, then the dual pair, then Scope 3.
+_SCOPE_LABELS = {
+    "scope1_tco2e": "Scope 1",
+    "scope2_tco2e": "Scope 2 (headline basis)",
+    "scope2_location_tco2e": "Scope 2 (location-based)",
+    "scope2_market_tco2e": "Scope 2 (market-based)",
+    "scope3_tco2e": "Scope 3",
+}
+
+
+def _scope_rows(scope_breakdown) -> list[tuple[str, str, float]]:
+    """(key, label, tCO2e) for every scope line, in reporting order."""
+    values = scope_breakdown.model_dump()
+    return [(key, label, values[key]) for key, label in _SCOPE_LABELS.items() if key in values]
 
 
 def _scenario_location(s: ScenarioDB) -> str:
@@ -392,8 +414,8 @@ def _scenario_report_csv_bytes(report: ScenarioReportPayload) -> bytes:
     if report.nzce_note:
         writer.writerow(("nzce", "note", "NZCE Mapping Note", report.nzce_note, ""))
 
-    for key, value in report.scope_breakdown.model_dump().items():
-        writer.writerow(("scopes", key, _labelize(key), value, "tCO2e"))
+    for key, label, value in _scope_rows(report.scope_breakdown):
+        writer.writerow(("scopes", key, label, value, "tCO2e"))
 
     benchmark = report.benchmark.model_dump() if report.benchmark else {}
     for key, value in benchmark.items():
@@ -476,6 +498,12 @@ def _scenario_report_xlsx(report: ScenarioReportPayload):
         ("Overall Compliance Score", report.compliance.overall_score_pct),
         ("Offset Coverage %", report.offset_portfolio.coverage_pct if report.offset_portfolio.coverage_pct is not None else "—"),
     ]:
+        summary_ws.append([label, value])
+
+    summary_ws.append([])
+    summary_ws.append(["Scope", "tCO2e"])
+    _style_header(summary_ws, summary_ws.max_row)
+    for _key, label, value in _scope_rows(report.scope_breakdown):
         summary_ws.append([label, value])
 
     summary_ws.append([])
@@ -749,7 +777,7 @@ def _scenario_report_pdf(report: ScenarioReportPayload) -> bytes:
         Spacer(1, 0.2 * cm),
         _table(
             [["Scope", "tCO2e"]]
-            + [[_labelize(key), f"{value:.4f}"] for key, value in report.scope_breakdown.model_dump().items()],
+            + [[label, f"{value:.4f}"] for _key, label, value in _scope_rows(report.scope_breakdown)],
             [8 * cm, 3 * cm],
         ),
         Spacer(1, 0.35 * cm),
@@ -887,12 +915,14 @@ def _build_scenarios_workbook(rows):
         "Catering tCO2e", "Materials & Waste tCO2e",
         "Equipment tCO2e", "Swag tCO2e", "Digital tCO2e",
         "Total tCO2e", "Per Attendee tCO2e",
-        "Scope 1", "Scope 2", "Scope 3",
+        "Scope 1", "Scope 2 (headline basis)",
+        "Scope 2 (location-based)", "Scope 2 (market-based)", "Scope 3",
         "Data Quality", "Created At",
     ]
     ws.append(headers)
     _style_header(ws)
     for s in rows:
+        scope2_location, scope2_market = scope2_dual_bases(s.assumptions, s.scope2_tco2e or 0)
         ws.append([
             s.id, s.name, _scenario_location(s),
             s.event_type, s.attendees, s.event_days, s.mode,
@@ -908,6 +938,8 @@ def _build_scenarios_workbook(rows):
             round(s.per_attendee_tco2e or 0, 4),
             round(s.scope1_tco2e or 0, 4),
             round(s.scope2_tco2e or 0, 4),
+            round(scope2_location, 4),
+            round(scope2_market, 4),
             round(s.scope3_tco2e or 0, 4),
             data_quality_label(s.data_quality),
             s.created_at.strftime("%Y-%m-%d %H:%M") if s.created_at else "",

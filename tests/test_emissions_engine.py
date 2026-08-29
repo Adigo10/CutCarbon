@@ -414,6 +414,131 @@ class TestVenueProxyReconciliation:
         assert basis(VenueEnergy(grid_region="singapore", kwh_consumed=1000)) == "measured_kwh"
 
 
+class TestOrganizationalBoundary:
+    """GHG Protocol control approach: a contracted venue is not the organizer's Scope 1/2."""
+
+    _EQUIPMENT = dict(stage_m2=40, lighting_days=2, sound_system_days=2, generator_hours=12)
+
+    def _result(self, control):
+        return calculate_scenario(
+            EventScenarioInput(
+                name="boundary",
+                attendees=200,
+                event_days=2,
+                venue_energy=VenueEnergy(grid_region="singapore", control=control),
+                equipment=EquipmentGroup(control=control, **self._EQUIPMENT),
+            )
+        )
+
+    def test_contracted_is_the_default(self):
+        assert VenueEnergy().control.value == "contracted"
+        assert EquipmentGroup().control.value == "contracted"
+
+    def test_contracted_routes_venue_and_equipment_to_scope3(self):
+        result = self._result("contracted")
+        scopes = result.emissions.scopes
+        assert scopes.scope1_tco2e == pytest.approx(0.0, abs=1e-6)
+        assert scopes.scope2_tco2e == pytest.approx(0.0, abs=1e-6)
+        assert scopes.scope3_tco2e == pytest.approx(result.emissions.total_tco2e, abs=1e-3)
+        assert "contracted" in result.assumptions["boundary"]
+
+    def test_owned_operated_keeps_scope1_and_scope2(self):
+        result = self._result("owned_operated")
+        scopes = result.emissions.scopes
+        eq = EF["equipment"]
+        expected_scope1 = 12 * eq["generator_diesel_per_hour"]["factor"] / 1000
+        assert scopes.scope1_tco2e == pytest.approx(expected_scope1, abs=1e-4)
+        assert scopes.scope2_tco2e > result.emissions.venue_energy_tco2e - 1e-9
+        assert scopes.scope2_tco2e > 0
+        assert "owned/operated" in result.assumptions["boundary"]
+
+    def test_routing_alone_does_not_change_the_total(self):
+        contracted = self._result("contracted")
+        owned = self._result("owned_operated")
+        assert contracted.emissions.total_tco2e == pytest.approx(owned.emissions.total_tco2e, abs=1e-6)
+        for field in ("venue_energy_tco2e", "equipment_tco2e"):
+            assert getattr(contracted.emissions, field) == pytest.approx(
+                getattr(owned.emissions, field), abs=1e-6
+            )
+
+    def test_contracted_scenario_reports_no_scope2_figures(self):
+        scopes = self._result("contracted").emissions.scopes
+        assert scopes.scope2_location_tco2e == 0.0
+        assert scopes.scope2_market_tco2e == 0.0
+
+    def test_contracted_still_discloses_the_scope2_duality(self):
+        result = calculate_scenario(
+            EventScenarioInput(
+                name="boundary",
+                attendees=200,
+                event_days=2,
+                venue_energy=VenueEnergy(
+                    grid_region="singapore", renewable_pct=100, renewable_instrument="rec"
+                ),
+            )
+        )
+        note = result.assumptions["scope2_reporting"]["note"]
+        assert "location" in note and "market" in note
+        assert result.emissions.scopes.scope2_location_tco2e == 0.0
+
+
+class TestScope2DualReporting:
+    """Both a location-based and a market-based Scope 2 figure, per GHG Protocol Scope 2 Guidance."""
+
+    def _result(self, **venue_kwargs):
+        return calculate_scenario(
+            EventScenarioInput(
+                name="s2",
+                attendees=200,
+                event_days=2,
+                venue_energy=VenueEnergy(
+                    grid_region="singapore", control="owned_operated", **venue_kwargs
+                ),
+            )
+        )
+
+    def test_no_renewable_claim_makes_both_bases_equal(self):
+        scopes = self._result().emissions.scopes
+        assert scopes.scope2_location_tco2e == pytest.approx(scopes.scope2_market_tco2e, abs=1e-6)
+        assert scopes.scope2_location_tco2e > 0
+
+    def test_instrument_none_earns_no_market_based_reduction(self):
+        claimed = self._result(renewable_pct=100, renewable_instrument="none")
+        unclaimed = self._result()
+        scopes = claimed.emissions.scopes
+        assert scopes.scope2_market_tco2e == pytest.approx(scopes.scope2_location_tco2e, abs=1e-6)
+        # An unsubstantiated renewable share must not shrink the footprint at all.
+        assert claimed.emissions.venue_energy_tco2e == pytest.approx(
+            unclaimed.emissions.venue_energy_tco2e, abs=1e-6
+        )
+        assert claimed.assumptions["scope2_reporting"]["headline_basis"] == "location_based"
+
+    def test_rec_backed_claim_lowers_the_market_basis(self):
+        result = self._result(renewable_pct=100, renewable_instrument="rec")
+        scopes = result.emissions.scopes
+        assert scopes.scope2_market_tco2e < scopes.scope2_location_tco2e
+        assert scopes.scope2_market_tco2e == pytest.approx(0.0, abs=1e-6)
+        assert scopes.scope2_tco2e == pytest.approx(scopes.scope2_market_tco2e, abs=1e-6)
+        assert result.assumptions["scope2_reporting"]["headline_basis"] == "market_based"
+
+    def test_residual_mix_prices_the_unclaimed_remainder(self):
+        result = self._result(renewable_pct=60, renewable_instrument="ppa")
+        scopes = result.emissions.scopes
+        grid_ef = EF["venue_energy"]["grids"]["singapore"]["factor"]
+        uplift = EF["venue_energy"]["residual_mix"]["global_uplift_on_location_factor"]["factor"]
+        kwh = estimate_venue_kwh(VenueEnergy(grid_region="singapore"), 200, 2)
+        expected_market = kwh * 0.4 * grid_ef * uplift / 1000
+        assert scopes.scope2_market_tco2e == pytest.approx(expected_market, abs=1e-4)
+        # The remainder is priced ABOVE the grid average — the residual mix is dirtier
+        # than the published grid factor once the clean output is contractually claimed.
+        assert expected_market > kwh * 0.4 * grid_ef / 1000
+
+    def test_residual_mix_factor_is_documented(self):
+        entry = EF["venue_energy"]["residual_mix"]["global_uplift_on_location_factor"]
+        assert entry["source"] and entry["methodology"] and entry["limitations"]
+        assert entry["factor"] > 1.0
+
+
 class TestEquipmentDoubleCountGuard:
     """A venue meter reading already covers the equipment plugged into it."""
 
@@ -427,15 +552,29 @@ class TestEquipmentDoubleCountGuard:
         freight_tonne_km=100,
     )
 
-    def _result(self, venue_energy):
+    def _result(self, venue_energy, control="contracted"):
         return calculate_scenario(
             EventScenarioInput(
                 name="eq",
                 attendees=200,
                 event_days=3,
                 venue_energy=venue_energy,
-                equipment=EquipmentGroup(**self._EQUIPMENT),
+                equipment=EquipmentGroup(control=control, **self._EQUIPMENT),
             )
+        )
+
+    def _owned(self, **venue_kwargs):
+        """The same scenario on an owned/operated boundary, where Scope 2 exists.
+
+        The double-count guard is a *quantity* rule (a metered venue supply already
+        contains the equipment load), but two of the assertions below read it off the
+        Scope 2 figure. Under the default contracted boundary the venue and equipment
+        lines are Scope 3, so that figure is 0 by design and would no longer witness
+        the guard — these cases pin the boundary that keeps Scope 2 populated.
+        """
+        return self._result(
+            VenueEnergy(grid_region="singapore", control="owned_operated", **venue_kwargs),
+            control="owned_operated",
         )
 
     def test_metered_venue_kwh_lowers_equipment_total(self):
@@ -455,12 +594,12 @@ class TestEquipmentDoubleCountGuard:
         assert "metered venue supply" in result.assumptions["equipment_electricity"]
 
     def test_metered_equipment_contributes_no_scope2(self):
-        result = self._result(VenueEnergy(grid_region="singapore", kwh_consumed=50000))
+        result = self._owned(kwh_consumed=50000)
         venue_scope2 = result.emissions.venue_energy_tco2e
         assert result.emissions.scopes.scope2_tco2e == pytest.approx(venue_scope2, abs=1e-4)
 
     def test_unmetered_venue_still_counts_equipment_electricity(self):
-        result = self._result(VenueEnergy(grid_region="singapore"))
+        result = self._owned()
         assert "metered venue supply" not in result.assumptions.get("equipment_electricity", "")
         assert result.emissions.scopes.scope2_tco2e > result.emissions.venue_energy_tco2e
 

@@ -244,6 +244,16 @@
         "scope": 2
       }
     },
+    "residual_mix": {
+      "global_uplift_on_location_factor": {
+        "factor": 1.43,
+        "unit": "ratio",
+        "source": "Derived in-repo from IEA/Ember global electricity statistics 2023 (renewables were approximately 30% of global generation). No published per-region residual mix is bundled with this repository.",
+        "methodology": "A residual mix prices the generation left after contractually claimed (instrument-backed) output is removed: residual_EF = grid_emissions / untracked_generation. Approximating the claimed share by the renewable share of generation R = 0.30 gives residual_EF = location_EF / (1 - R) = location_EF x 1.43. Stored as a ratio and applied to the selected grid region's own location factor, so regional differences in grid intensity are preserved.",
+        "limitations": "An upper-bound approximation. (a) Not all renewable output is sold with tracking instruments, so real residual mixes sit below this. (b) A single global uplift overstates the residual mix in grids with little low-carbon generation (e.g. Singapore, UAE) and understates it in grids whose low-carbon output is heavily exported as guarantees of origin (e.g. France, the Nordics). Replace with the AIB European Residual Mix (EU/EEA) or the Green-e Residual Mix (US) once a per-region value is sourced.",
+        "scope": 2
+      }
+    },
     "scope": 2
   },
   "accommodation": {

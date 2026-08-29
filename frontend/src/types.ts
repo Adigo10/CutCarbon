@@ -36,6 +36,10 @@ export interface TravelSegment {
 export interface VenueEnergyPayload {
   grid_region: string
   renewable_pct: number
+  /** GHG Protocol control approach: 'owned_operated' | 'contracted'. */
+  control: string
+  /** Instrument backing renewable_pct: 'rec' | 'ppa' | 'green_tariff' | 'none'. */
+  renewable_instrument: string
 }
 
 export interface AccommodationPayload {
@@ -59,6 +63,8 @@ export interface EquipmentPayload {
   projectors: number
   generator_hours: number
   freight_tonne_km: number
+  /** GHG Protocol control approach: 'owned_operated' | 'contracted'. */
+  control: string
 }
 
 export interface SwagPayload {
@@ -99,8 +105,12 @@ export interface ScenarioInputPayload {
 
 export interface ScopeBreakdown {
   scope1_tco2e: number
+  /** Whichever basis the headline total was built on (see scope2_reporting in assumptions). */
   scope2_tco2e: number
   scope3_tco2e: number
+  /** GHG Protocol Scope 2 Guidance requires both bases; absent on pre-dual-reporting rows. */
+  scope2_location_tco2e?: number
+  scope2_market_tco2e?: number
 }
 
 // Data-quality tiers, coarsest first. `primary` is an evidence tier — the backend
@@ -378,6 +388,9 @@ export interface ScenarioDraft {
   include_alcohol: boolean
   accommodation_type: string
   renewable_pct: number
+  /** Organizational boundary for the venue and its equipment. */
+  venue_control: string
+  renewable_instrument: string
   travel_segments: TravelSegment[]
   stage_m2: number
   lighting_days: number

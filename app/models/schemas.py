@@ -76,6 +76,33 @@ class GridRegion(str, Enum):
     GLOBAL = "global_average"
 
 
+class BoundaryControl(str, Enum):
+    """Organizational boundary under the GHG Protocol control approach.
+
+    ``contracted`` (the default) means the organizer does not hold operational
+    control of the asset — a hired convention centre, a rented lighting rig, a
+    contractor's generator. Those emissions are still the organizer's to report,
+    but as Scope 3 (purchased services), not Scope 1/2.
+    """
+
+    OWNED_OPERATED = "owned_operated"
+    CONTRACTED = "contracted"
+
+
+class RenewableInstrument(str, Enum):
+    """Contractual instrument backing a renewable-electricity claim (Scope 2 market basis).
+
+    ``none`` means no instrument was retired in the organizer's name, so the
+    renewable share cannot be claimed on the market basis (GHG Protocol Scope 2
+    Guidance, Scope 2 Quality Criteria).
+    """
+
+    REC = "rec"
+    PPA = "ppa"
+    GREEN_TARIFF = "green_tariff"
+    NONE = "none"
+
+
 class ScenarioMode(str, Enum):
     BASIC = "basic"
     ADVANCED = "advanced"
@@ -129,6 +156,12 @@ class VenueEnergy(BaseModel):
     kwh_consumed: Optional[float] = Field(default=None, ge=0)
     venue_area_m2: Optional[float] = Field(default=None, ge=0)
     renewable_pct: float = Field(default=0.0, ge=0, le=100)
+    # Operational control over the venue. Default contracted: event organizers
+    # almost always hire the space rather than operate it.
+    control: BoundaryControl = BoundaryControl.CONTRACTED
+    # The instrument backing renewable_pct. Absent/none = the share is not
+    # contractually claimed, so it earns no market-based reduction.
+    renewable_instrument: RenewableInstrument = RenewableInstrument.NONE
 
 
 class AccommodationGroup(BaseModel):
@@ -163,6 +196,9 @@ class EquipmentGroup(BaseModel):
     projectors: int = Field(default=0, ge=0)
     generator_hours: float = Field(default=0.0, ge=0)
     freight_tonne_km: float = Field(default=0.0, ge=0)
+    # Operational control over the equipment (incl. any generator). Default
+    # contracted: rigs and gensets normally belong to the AV/production supplier.
+    control: BoundaryControl = BoundaryControl.CONTRACTED
 
 
 class SwagGroup(BaseModel):
@@ -215,8 +251,14 @@ class EventScenarioInput(BaseModel):
 
 class ScopeBreakdown(BaseModel):
     scope1_tco2e: float = 0.0  # Direct (generators, owned vehicles)
-    scope2_tco2e: float = 0.0  # Purchased energy (venue electricity)
+    scope2_tco2e: float = 0.0  # Purchased energy (venue electricity) — headline basis
     scope3_tco2e: float = 0.0  # All other indirect (travel, catering, waste, accommodation)
+    # GHG Protocol Scope 2 Guidance requires BOTH bases to be disclosed. The
+    # location basis prices every kWh at the grid factor; the market basis honors
+    # contractual instruments and prices the remainder at the residual mix.
+    # scope2_tco2e carries whichever basis the headline total was built on.
+    scope2_location_tco2e: float = 0.0
+    scope2_market_tco2e: float = 0.0
 
 
 class EmissionBreakdown(BaseModel):

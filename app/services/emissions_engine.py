@@ -5,12 +5,13 @@ Implements GHG Protocol Scope 1/2/3 methodology for events.
 import json
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import NamedTuple, Optional
 from datetime import datetime
 
 from app.models.schemas import (
     EventScenarioInput, ScenarioResult, EmissionBreakdown, ScopeBreakdown,
-    BenchmarkComparison, TravelMode, TravelClass, GridRegion, ScenarioMode
+    BenchmarkComparison, BoundaryControl, RenewableInstrument, TravelMode,
+    TravelClass, GridRegion, ScenarioMode
 )
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,18 @@ def _netting_note(physical_attendees: int, attendees: int) -> str:
         f" (sized for {physical_attendees} of {attendees} attendees; "
         f"{remote} remote attendees are not physically present)"
     )
+
+
+def _holds_control(group) -> bool:
+    """True when the organizer holds operational control of ``group``'s asset.
+
+    Absent input (no venue/equipment block at all) falls back to the schema default,
+    ``contracted`` — an organizer who never declared a boundary hired the space.
+    """
+    if group is None:
+        return False
+    control = getattr(group, "control", BoundaryControl.CONTRACTED)
+    return getattr(control, "value", control) == BoundaryControl.OWNED_OPERATED.value
 
 
 def _travel_proxy_kg(attendees: float) -> float:
@@ -207,10 +220,53 @@ def estimate_venue_kwh(venue_energy, attendees: int, event_days: int) -> float:
     return attendees * _VENUE_M2_PER_ATTENDEE * event_days * intensity
 
 
+def _residual_mix_uplift() -> float:
+    """Ratio between a grid's residual mix and its published location factor.
+
+    Sourced (not a code constant) so the derivation and its documented limitations
+    travel with the number in emission_factors.json.
+    """
+    return (
+        EF["venue_energy"]
+        .get("residual_mix", {})
+        .get("global_uplift_on_location_factor", {})
+        .get("factor", 1.43)
+    )
+
+
+def residual_mix_factor(grid_ef: float) -> float:
+    """Residual-mix emission factor (kg CO2e/kWh) for a grid whose location factor is ``grid_ef``.
+
+    Under the GHG Protocol Scope 2 Guidance, a market-based figure may only zero out
+    the share of electricity backed by a contractual instrument; the *remainder* must
+    be priced at the residual mix — what is left of the grid once everyone else's
+    instrument-backed clean output has been claimed — not at the (cleaner) published
+    grid average.
+    """
+    return grid_ef * _residual_mix_uplift()
+
+
+class VenueEnergyResult(NamedTuple):
+    """Venue electricity outcome, carrying both Scope 2 reporting bases.
+
+    ``total_kg`` is the headline figure (market basis when an instrument backs the
+    renewable claim, location basis otherwise). ``location_kg``/``market_kg`` are the
+    dual-reporting pair; on the proxy path (no venue input) they both equal the total,
+    because a kg CO2e/m2/day proxy carries no renewable claim to substantiate.
+    """
+
+    total_kg: float
+    scope1_kg: float
+    location_kg: float
+    market_kg: float
+    instrument_backed: bool
+    notes: dict
+
+
 def _venue_energy_emissions(
     venue_energy, attendees: int, event_days: int, physical_attendees: Optional[int] = None
-) -> tuple[float, float, dict]:
-    """Returns venue energy kg CO2e, scope1 kg (generators), notes.
+) -> VenueEnergyResult:
+    """Venue electricity emissions with both Scope 2 bases.
 
     ``physical_attendees`` sizes the floor-area proxies; a metered kWh reading is an
     actual and is never netted.
@@ -228,7 +284,7 @@ def _venue_energy_emissions(
             f"{_netting_note(on_site, attendees)}"
         )
         notes["venue_basis"] = "area_intensity_proxy"
-        return total_kg, scope1_kg, notes
+        return VenueEnergyResult(total_kg, scope1_kg, total_kg, total_kg, False, notes)
 
     grid_key = venue_energy.grid_region.value
     grid_ef = EF["venue_energy"]["grids"].get(grid_key, EF["venue_energy"]["grids"]["global_average"])["factor"]
@@ -249,13 +305,38 @@ def _venue_energy_emissions(
         notes["venue"] += _netting_note(on_site, attendees)
         notes["venue_basis"] = "attendee_kwh_proxy"
 
-    effective_ef = grid_ef * (1 - venue_energy.renewable_pct / 100)
-    total_kg = kwh * effective_ef
+    renewable_pct = venue_energy.renewable_pct
+    instrument = getattr(venue_energy, "renewable_instrument", RenewableInstrument.NONE)
+    instrument_value = getattr(instrument, "value", instrument) or "none"
 
-    if venue_energy.renewable_pct > 0:
-        notes["venue"] += f" ({venue_energy.renewable_pct}% renewable, grid: {grid_key})"
+    # Location basis: every kWh at the published grid factor, no renewable discount.
+    location_kg = kwh * grid_ef
 
-    return total_kg, scope1_kg, notes
+    # Market basis: only an instrument-backed share may be zeroed, and only the
+    # remainder is repriced at the residual mix. A renewable percentage with no
+    # instrument behind it is an unsubstantiated claim and earns nothing.
+    instrument_backed = instrument_value != "none" and renewable_pct > 0
+    if instrument_backed:
+        market_kg = kwh * (1 - renewable_pct / 100) * residual_mix_factor(grid_ef)
+    else:
+        market_kg = location_kg
+
+    total_kg = market_kg if instrument_backed else location_kg
+
+    if renewable_pct > 0:
+        if instrument_backed:
+            notes["venue"] += (
+                f" ({renewable_pct}% renewable via {instrument_value}, grid: {grid_key})"
+            )
+        else:
+            notes["venue"] += (
+                f" ({renewable_pct}% renewable claimed with no contractual instrument, "
+                f"so not deducted; grid: {grid_key})"
+            )
+
+    return VenueEnergyResult(
+        total_kg, scope1_kg, location_kg, market_kg, instrument_backed, notes
+    )
 
 
 def _accommodation_emissions(
@@ -579,6 +660,93 @@ def get_benchmark_comparison(
     )
 
 
+def _boundary_note(venue_owned: bool, equipment_owned: bool) -> str:
+    """Disclosure of the organizational boundary each energy line was routed under."""
+    parts = []
+    if venue_owned:
+        parts.append("venue electricity as Scope 2 (operational control held: owned/operated)")
+    else:
+        parts.append("venue electricity as Scope 3 (operational control not held: contracted)")
+    if equipment_owned:
+        parts.append(
+            "equipment generator fuel as Scope 1 and equipment electricity as Scope 2 "
+            "(operational control held: owned/operated)"
+        )
+    else:
+        parts.append("equipment, including generator fuel, as Scope 3 (contracted)")
+    return (
+        "GHG Protocol control approach — reporting "
+        + "; ".join(parts)
+        + ". The emissions are counted in the total either way; only the scope they land in changes."
+    )
+
+
+def _scope2_reporting_note(
+    venue_energy,
+    venue: VenueEnergyResult,
+    *,
+    venue_owned: bool,
+    location_kg: float,
+    market_kg: float,
+) -> dict:
+    """Dual Scope 2 disclosure (GHG Protocol Scope 2 Guidance), persisted in assumptions.
+
+    Doubles as the persistence vehicle for the two figures: ``assumptions`` is JSONB
+    and already round-trips through the DB, so stored scenarios rehydrate both bases
+    without a schema migration (see scenario_serializer.scope2_dual_bases).
+    """
+    instrument = getattr(venue_energy, "renewable_instrument", RenewableInstrument.NONE)
+    instrument_value = getattr(instrument, "value", instrument) or "none"
+    renewable_pct = getattr(venue_energy, "renewable_pct", 0.0) or 0.0
+    grid_key = (
+        venue_energy.grid_region.value if venue_energy is not None else "not applicable"
+    )
+
+    if venue.instrument_backed:
+        uplift = _residual_mix_uplift()
+        basis_text = (
+            f"{renewable_pct:g}% of venue electricity is backed by a "
+            f"'{instrument_value}' instrument and is zeroed on the market basis; the "
+            f"unclaimed remainder is priced at the residual mix ({uplift}x the "
+            f"{grid_key} grid factor), not at the grid average."
+        )
+    else:
+        basis_text = (
+            "No contractual instrument was recorded, so the market basis equals the "
+            "location basis."
+        )
+        if renewable_pct > 0:
+            basis_text += (
+                f" The {renewable_pct:g}% renewable share claimed for this venue is "
+                "unsubstantiated and earns no market-based reduction."
+            )
+
+    if venue_owned:
+        note = (
+            "Scope 2 reported on both bases per the GHG Protocol Scope 2 Guidance. "
+            f"Location-based {venue.location_kg / 1000:.4f} tCO2e, market-based "
+            f"{venue.market_kg / 1000:.4f} tCO2e for the venue electricity line. "
+            f"The headline total uses the "
+            f"{'market' if venue.instrument_backed else 'location'}-based figure. "
+            + basis_text
+        )
+    else:
+        note = (
+            "The venue is contracted, so its electricity is reported as Scope 3 and no "
+            "Scope 2 figures are reported. For disclosure, that electricity line is "
+            f"{venue.location_kg / 1000:.4f} tCO2e on a location basis and "
+            f"{venue.market_kg / 1000:.4f} tCO2e on a market basis. " + basis_text
+        )
+
+    return {
+        "location_based_tco2e": round(location_kg / 1000, 4),
+        "market_based_tco2e": round(market_kg / 1000, 4),
+        "headline_basis": "market_based" if venue.instrument_backed else "location_based",
+        "renewable_instrument": instrument_value,
+        "note": note,
+    }
+
+
 def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
     """Main entry point: calculate all emissions for a scenario."""
     attendees = scenario.attendees
@@ -623,18 +791,32 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
             )
     scope3_total += travel_kg
 
-    # Venue energy (Scope 2, with potential Scope 1 from generators)
+    # Venue energy. Scope 2 (purchased electricity) only when the organizer holds
+    # operational control of the venue; a hired venue is a purchased service (Scope 3).
     if is_virtual and scenario.venue_energy is None:
-        energy_kg, venue_s1_kg, e_notes = 0.0, 0.0, {
-            "venue": "Virtual event: no physical venue assumed",
-            "venue_basis": "not applicable (virtual event)",
-        }
+        venue = VenueEnergyResult(
+            0.0, 0.0, 0.0, 0.0, False,
+            {
+                "venue": "Virtual event: no physical venue assumed",
+                "venue_basis": "not applicable (virtual event)",
+            },
+        )
     else:
-        energy_kg, venue_s1_kg, e_notes = _venue_energy_emissions(
+        venue = _venue_energy_emissions(
             scenario.venue_energy, attendees, days, physical_attendees
         )
-    scope2_total += energy_kg
-    scope1_total += venue_s1_kg
+    energy_kg, venue_s1_kg, e_notes = venue.total_kg, venue.scope1_kg, venue.notes
+
+    venue_owned = _holds_control(scenario.venue_energy)
+    if venue_owned:
+        scope2_total += energy_kg
+        scope1_total += venue_s1_kg
+        scope2_location_kg = venue.location_kg
+        scope2_market_kg = venue.market_kg
+    else:
+        scope3_total += energy_kg + venue_s1_kg
+        scope2_location_kg = 0.0
+        scope2_market_kg = 0.0
 
     # Accommodation (Scope 3)
     if is_virtual and scenario.accommodation is None:
@@ -661,15 +843,24 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
         waste_kg, w_notes = _waste_emissions(scenario.waste, attendees, days, physical_attendees)
     scope3_total += waste_kg
 
-    # Equipment (Scope 1 generators + Scope 2 electricity + Scope 3 stage/freight).
+    # Equipment (Scope 1 generators + Scope 2 electricity + Scope 3 stage/freight
+    # when owned/operated; wholly Scope 3 when the rig and genset are contracted).
     # A venue meter reading already covers the equipment on the venue supply.
     venue_metered = scenario.venue_energy is not None and scenario.venue_energy.kwh_consumed is not None
     equip_kg, equip_s1, equip_s2, equip_s3, eq_notes = _equipment_emissions(
         scenario.equipment, days, venue_metered=venue_metered
     )
-    scope1_total += equip_s1
-    scope2_total += equip_s2
-    scope3_total += equip_s3
+    equipment_owned = _holds_control(scenario.equipment)
+    if equipment_owned:
+        scope1_total += equip_s1
+        scope2_total += equip_s2
+        scope3_total += equip_s3
+        # Equipment electricity carries no contractual instrument, so it prices the
+        # same on both bases and simply adds to each.
+        scope2_location_kg += equip_s2
+        scope2_market_kg += equip_s2
+    else:
+        scope3_total += equip_kg
 
     # Swag (Scope 3)
     swag_kg, sw_notes = _swag_emissions(scenario.swag, attendees)
@@ -687,6 +878,15 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
     assumptions.update(eq_notes)
     assumptions.update(sw_notes)
     assumptions.update(d_notes)
+
+    assumptions["boundary"] = _boundary_note(venue_owned, equipment_owned)
+    assumptions["scope2_reporting"] = _scope2_reporting_note(
+        scenario.venue_energy,
+        venue,
+        venue_owned=venue_owned,
+        location_kg=scope2_location_kg,
+        market_kg=scope2_market_kg,
+    )
 
     total_kg = travel_kg + energy_kg + accom_kg + catering_kg + waste_kg + equip_kg + swag_kg + digital_kg
     total_tco2e = total_kg / 1000
@@ -758,6 +958,8 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
         scope1_tco2e=round(scope1_total / 1000, 4),
         scope2_tco2e=round(scope2_total / 1000, 4),
         scope3_tco2e=round(scope3_total / 1000, 4),
+        scope2_location_tco2e=round(scope2_location_kg / 1000, 4),
+        scope2_market_tco2e=round(scope2_market_kg / 1000, 4),
     )
 
     emissions = EmissionBreakdown(
@@ -817,6 +1019,9 @@ def build_factors_snapshot(scenario: EventScenarioInput) -> dict:
         "travel_car_petrol_kg_per_pkm": EF["travel"]["car_petrol"]["factor"],
         "venue_grid_kg_per_kwh": grid_ef,
         "venue_grid_region": grid_key,
+        # Prices the unclaimed remainder on the Scope 2 market basis; recorded even
+        # when unused so a reader can see what a market-based claim would have cost.
+        "venue_residual_mix_kg_per_kwh": round(residual_mix_factor(grid_ef), 4),
         "accommodation_kg_per_room_night": accom_ef,
         "accommodation_type": accom_type,
         "catering_kg_per_meal": catering_ef,

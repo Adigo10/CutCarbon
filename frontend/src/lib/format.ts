@@ -220,6 +220,8 @@ export function buildScenarioPayload(draft: ScenarioDraft, scenarioCount: number
     venue_energy: {
       grid_region: draft.venue_grid,
       renewable_pct: draft.renewable_pct,
+      control: draft.venue_control,
+      renewable_instrument: draft.renewable_instrument,
     },
     catering: {
       catering_type: draft.catering_type,
@@ -248,6 +250,9 @@ export function buildScenarioPayload(draft: ScenarioDraft, scenarioCount: number
       projectors: 0,
       generator_hours: draft.generator_hours,
       freight_tonne_km: 0,
+      // The venue boundary governs the kit plugged into it: an organizer who hires
+      // the room hires the rig and the genset with it.
+      control: draft.venue_control,
     }
   }
 
