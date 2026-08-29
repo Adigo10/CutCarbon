@@ -260,6 +260,11 @@ class ScenarioDetail(BaseModel):
     assumptions: Dict[str, Any] = Field(default_factory=dict)
     input_payload: Dict[str, Any] = Field(default_factory=dict)
     factors_snapshot: Dict[str, Any] = Field(default_factory=dict)
+    # Factor/engine drift: what a fresh calculation would use right now, and whether
+    # this scenario's stored numbers predate it (i.e. "Recalculate all" is available).
+    current_ef_version: str = ""
+    current_engine_version: str = ""
+    factors_stale: bool = False
     created_at: str = ""
 
 
@@ -480,6 +485,24 @@ class ScenarioReportPayload(BaseModel):
     # Events (NZCE) Measurement Methodology categories.
     nzce_categories: List[ScenarioReportMetric] = Field(default_factory=list)
     nzce_note: str = ""
+
+
+class ReportSnapshotSummary(BaseModel):
+    """Metadata row for one immutable, already-exported report package."""
+
+    id: str
+    scenario_id: Optional[str] = None
+    created_at: str = ""
+    format: str
+    ef_version: str = ""
+    engine_version: str = ""
+    sha256: str
+
+
+class ReportSnapshotDetail(ReportSnapshotSummary):
+    """A stored report package plus the metadata needed to verify it."""
+
+    payload: Dict[str, Any] = Field(default_factory=dict)
 
 
 # -- Export models -------------------------------------------------------------

@@ -3,8 +3,10 @@ Data export router — download raw or processed data as Excel (.xlsx), JSON, CS
 """
 import asyncio
 import csv
+import hashlib
 import io
 import json
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -14,9 +16,18 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.database import AgentRunDB, OffsetPurchaseDB, ScenarioDB, UserDB, get_db
+from app.models.database import (
+    AgentRunDB,
+    OffsetPurchaseDB,
+    ReportSnapshotDB,
+    ScenarioDB,
+    UserDB,
+    get_db,
+)
 from app.models.schemas import (
     OffsetPortfolioSummary,
+    ReportSnapshotDetail,
+    ReportSnapshotSummary,
     ScenarioComplianceOverrides,
     ScenarioReportMetric,
     ScenarioReportPayload,
@@ -29,7 +40,15 @@ from app.utils.time import utcnow
 
 router = APIRouter()
 
+# Report-snapshot read API. Mounted at /api (not /api/exports) because these are
+# retrieval endpoints for already-issued reports, not new downloads.
+reports_router = APIRouter()
+
 _DATA_DIR = Path(__file__).parent.parent / "data"
+
+# Recorded when a scenario carries no provenance for a version (e.g. it was calculated
+# before engine versioning existed). Never substitute the running version for it.
+_UNKNOWN_VERSION = "unknown"
 
 # CSV/Excel formula-injection mitigation. A string cell beginning with any of these
 # is interpreted as a formula (or DDE payload) by Excel/LibreOffice/Sheets when the
@@ -334,6 +353,110 @@ async def build_scenario_report_payload(
     )
 
 
+def canonical_payload_json(payload: dict[str, Any]) -> str:
+    """The one canonical serialization a report digest is computed over.
+
+    Keys sorted and separators tightened so the digest depends only on the *content*
+    of the report, not on dict ordering or whitespace — which is what makes a stored
+    snapshot re-verifiable after a JSONB round-trip.
+    """
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
+
+
+def payload_sha256(payload: dict[str, Any]) -> str:
+    """Hex sha256 of the canonical JSON of a report payload."""
+    return hashlib.sha256(canonical_payload_json(payload).encode("utf-8")).hexdigest()
+
+
+def _version_label(name: str, value: str) -> str:
+    """`engine v2.0.0` for a recorded version, `engine unknown` when it was never captured."""
+    if value == _UNKNOWN_VERSION:
+        return f"{name} {_UNKNOWN_VERSION}"
+    return f"{name} v{value}"
+
+
+def _provenance_footer_text(ef_version: str, engine_version: str, sha256: str) -> str:
+    """The integrity line printed in the PDF footer. Empty when nothing is known."""
+    parts = []
+    if ef_version:
+        parts.append(_version_label("factors", ef_version))
+    if engine_version:
+        parts.append(_version_label("engine", engine_version))
+    if sha256:
+        parts.append(f"sha256 {sha256[:12]}")
+    if not parts:
+        return ""
+    return "Report integrity — " + " · ".join(parts)
+
+
+async def _record_report_snapshot(
+    scenario_id: str,
+    report: ScenarioReportPayload,
+    export_format: str,
+    db: AsyncSession,
+    current_user: UserDB,
+) -> ReportSnapshotDB:
+    """Persist an immutable copy of the report package that is about to be delivered.
+
+    Called once per single-scenario export. `mode="json"` guarantees the stored dict
+    is exactly what a client receives, so `payload_sha256(stored) == stored.sha256`
+    stays true for the life of the row.
+    """
+    payload = report.model_dump(mode="json")
+    factors = report.factor_snapshot or {}
+    snapshot = ReportSnapshotDB(
+        user_id=current_user.id,
+        scenario_id=scenario_id,
+        format=export_format,
+        payload=payload,
+        # Both fall back to "unknown", never to the *running* versions: a report is
+        # rendered from stored columns without recalculating, so a scenario computed
+        # before engine versioning existed must not be stamped with today's engine.
+        # This also matches `_factor_drift`, which treats a snapshot with no
+        # engine_version as stale rather than current.
+        ef_version=str(factors.get("ef_version") or _UNKNOWN_VERSION),
+        engine_version=str(factors.get("engine_version") or _UNKNOWN_VERSION),
+        sha256=payload_sha256(payload),
+    )
+    db.add(snapshot)
+    await db.commit()
+    return snapshot
+
+
+async def _report_with_snapshot(
+    scenario_id: str,
+    export_format: str,
+    db: AsyncSession,
+    current_user: UserDB,
+    region: str,
+    has_scope3: bool,
+    has_ghg_report: bool,
+) -> tuple[ScenarioReportPayload, ReportSnapshotDB]:
+    """Build a scenario report package and record the snapshot it is issued under."""
+    report = await build_scenario_report_payload(
+        scenario_id=scenario_id,
+        db=db,
+        current_user=current_user,
+        region=region,
+        has_scope3=has_scope3,
+        has_ghg_report=has_ghg_report,
+    )
+    snapshot = await _record_report_snapshot(
+        scenario_id=scenario_id,
+        report=report,
+        export_format=export_format,
+        db=db,
+        current_user=current_user,
+    )
+    return report, snapshot
+
+
+def _snapshot_provenance(snapshot: ReportSnapshotDB) -> str:
+    return _provenance_footer_text(
+        snapshot.ef_version or "", snapshot.engine_version or "", snapshot.sha256 or ""
+    )
+
+
 def _scenario_report_filename(prefix: str, scenario_id: str, extension: str) -> str:
     stamp = utcnow().strftime("%Y%m%d")
     return f"{prefix}_{scenario_id}_{stamp}.{extension}"
@@ -558,7 +681,7 @@ def _scenario_report_xlsx(report: ScenarioReportPayload):
     return wb
 
 
-def _scenario_report_pdf(report: ScenarioReportPayload) -> bytes:
+def _scenario_report_pdf(report: ScenarioReportPayload, provenance: str = "") -> bytes:
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -627,12 +750,18 @@ def _scenario_report_pdf(report: ScenarioReportPayload) -> bytes:
         c.line(left, 1.55 * cm, right, 1.55 * cm)
         c.setFillColor(muted)
         c.setFont("Helvetica", 7.5)
-        c.drawString(left, 1.15 * cm, f"© {copyright_year} CutCarbon · EventCarbon Co-Pilot. All rights reserved.")
+        c.drawString(left, 1.25 * cm, f"© {copyright_year} CutCarbon · EventCarbon Co-Pilot. All rights reserved.")
         c.drawString(
-            left, 0.78 * cm,
+            left, 0.90 * cm,
             "Confidential — prepared for the event organizer and its auditors. Not a third-party verification statement.",
         )
-        c.drawRightString(right, 1.15 * cm, f"Page {page_num} of {total_pages}")
+        # Traceability line: which factor catalog and engine produced these numbers,
+        # and the digest of the stored snapshot this PDF was issued from.
+        if provenance:
+            c.setFont("Helvetica", 7)
+            c.drawString(left, 0.55 * cm, provenance)
+        c.setFont("Helvetica", 7.5)
+        c.drawRightString(right, 1.25 * cm, f"Page {page_num} of {total_pages}")
         c.restoreState()
 
     class _ReportCanvas(pdfcanvas.Canvas):
@@ -955,16 +1084,18 @@ async def export_scenario_json(
     db: AsyncSession = Depends(get_db),
     current_user: UserDB = Depends(get_current_user),
 ):
-    report = await build_scenario_report_payload(
+    _report, snapshot = await _report_with_snapshot(
         scenario_id=scenario_id,
+        export_format="json",
         db=db,
         current_user=current_user,
         region=region,
         has_scope3=has_scope3,
         has_ghg_report=has_ghg_report,
     )
+    # Serve the exact dict that was hashed, so the delivered file matches snapshot.sha256.
     return JSONResponse(
-        content=report.model_dump(),
+        content=snapshot.payload,
         headers={"Content-Disposition": f'attachment; filename="{_scenario_report_filename("cutcarbon_report", scenario_id, "json")}"'},
     )
 
@@ -978,8 +1109,9 @@ async def export_scenario_csv(
     db: AsyncSession = Depends(get_db),
     current_user: UserDB = Depends(get_current_user),
 ):
-    report = await build_scenario_report_payload(
+    report, _snapshot = await _report_with_snapshot(
         scenario_id=scenario_id,
+        export_format="csv",
         db=db,
         current_user=current_user,
         region=region,
@@ -1002,8 +1134,9 @@ async def export_scenario_xlsx(
     db: AsyncSession = Depends(get_db),
     current_user: UserDB = Depends(get_current_user),
 ):
-    report = await build_scenario_report_payload(
+    report, _snapshot = await _report_with_snapshot(
         scenario_id=scenario_id,
+        export_format="xlsx",
         db=db,
         current_user=current_user,
         region=region,
@@ -1023,19 +1156,85 @@ async def export_scenario_pdf(
     db: AsyncSession = Depends(get_db),
     current_user: UserDB = Depends(get_current_user),
 ):
-    report = await build_scenario_report_payload(
+    report, snapshot = await _report_with_snapshot(
         scenario_id=scenario_id,
+        export_format="pdf",
         db=db,
         current_user=current_user,
         region=region,
         has_scope3=has_scope3,
         has_ghg_report=has_ghg_report,
     )
-    content = await asyncio.to_thread(_scenario_report_pdf, report)
+    provenance = _snapshot_provenance(snapshot)
+    content = await asyncio.to_thread(_scenario_report_pdf, report, provenance)
     return _pdf_response(
         content,
         _scenario_report_filename("cutcarbon_report", scenario_id, "pdf"),
     )
+
+
+def _snapshot_summary_fields(row: ReportSnapshotDB) -> dict[str, Any]:
+    return {
+        "id": str(row.id),
+        "scenario_id": row.scenario_id,
+        "created_at": row.created_at.isoformat() if row.created_at else "",
+        "format": row.format,
+        "ef_version": row.ef_version or "",
+        "engine_version": row.engine_version or "",
+        "sha256": row.sha256,
+    }
+
+
+@reports_router.get(
+    "/scenarios/{scenario_id}/reports",
+    response_model=list[ReportSnapshotSummary],
+    summary="List the immutable report snapshots issued for a scenario",
+)
+async def list_scenario_report_snapshots(
+    scenario_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user),
+):
+    # 404s for a scenario the caller does not own, before any snapshot is revealed.
+    await _get_scenario_or_404(scenario_id, db, current_user)
+    rows = (
+        await db.execute(
+            select(ReportSnapshotDB)
+            .where(
+                ReportSnapshotDB.user_id == current_user.id,
+                ReportSnapshotDB.scenario_id == scenario_id,
+            )
+            .order_by(desc(ReportSnapshotDB.created_at))
+        )
+    ).scalars().all()
+    return [_snapshot_summary_fields(row) for row in rows]
+
+
+@reports_router.get(
+    "/reports/{snapshot_id}",
+    response_model=ReportSnapshotDetail,
+    summary="Retrieve a stored report snapshot payload",
+)
+async def get_report_snapshot(
+    snapshot_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: UserDB = Depends(get_current_user),
+):
+    try:
+        uuid.UUID(snapshot_id)
+    except ValueError:
+        # Not a well-formed id — indistinguishable from "not yours" to the caller.
+        raise HTTPException(status_code=404, detail="Report snapshot not found")
+
+    row = await db.scalar(
+        select(ReportSnapshotDB).where(
+            ReportSnapshotDB.id == snapshot_id,
+            ReportSnapshotDB.user_id == current_user.id,
+        )
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Report snapshot not found")
+    return {**_snapshot_summary_fields(row), "payload": row.payload or {}}
 
 
 def _build_factor_workbook():

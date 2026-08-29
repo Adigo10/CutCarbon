@@ -240,6 +240,36 @@ class OffsetPurchaseDB(Base):
     created_at = Column(DateTime, default=utcnow, index=True)
 
 
+class ReportSnapshotDB(Base):
+    """Append-only, immutable copy of a report package as it was exported.
+
+    Written once per single-scenario export (JSON/CSV/XLSX/PDF) and never updated:
+    it is the evidence that a specific set of numbers was handed to an auditor on a
+    specific date, under a specific factor catalog (`ef_version`) and calculation
+    methodology (`engine_version`). `sha256` is the digest of the canonical JSON of
+    `payload`, so tampering with a stored row is detectable.
+
+    `scenario_id` is ON DELETE SET NULL (not CASCADE): deleting the working scenario
+    must not erase the audit trail of what was already reported. Deleting the *user*
+    still cascades, so account erasure stays complete.
+    """
+
+    __tablename__ = "report_snapshots"
+    __table_args__ = (
+        Index("ix_report_snapshots_user_scenario_created", "user_id", "scenario_id", "created_at"),
+    )
+
+    id = _uuid_col(primary_key=True, default=lambda: str(uuid4()))
+    user_id = _uuid_col(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    scenario_id = Column(String, ForeignKey("scenarios.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at = Column(DateTime, default=utcnow, index=True)
+    ef_version = Column(String, nullable=False, default="unknown")
+    engine_version = Column(String, nullable=False, default="unknown")
+    format = Column(String, nullable=False)  # json | csv | xlsx | pdf
+    payload = _json_col(nullable=False, default=dict)
+    sha256 = Column(String(64), nullable=False, index=True)
+
+
 class AgentRunDB(Base):
     __tablename__ = "agent_runs"
 

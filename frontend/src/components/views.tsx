@@ -902,6 +902,15 @@ export function ScenariosView({
                         <p>
                           {scenario.location} · {labelize(scenario.event_type)} · {scenario.attendees} attendees
                         </p>
+                        {scenario.factors_stale ? (
+                          <Badge
+                            tone="amber"
+                            style={{ marginTop: '0.4rem' }}
+                            title={`Calculated with emission factors v${scenario.factors_snapshot?.ef_version ?? '?'} / engine v${scenario.factors_snapshot?.engine_version ?? '?'}; current is v${scenario.current_ef_version ?? '?'} / engine v${scenario.current_engine_version ?? '?'}. Run "Recalculate all" to refresh.`}
+                          >
+                            factors v{scenario.factors_snapshot?.ef_version ?? '?'} — recalc available
+                          </Badge>
+                        ) : null}
                       </div>
                       <div className="scenario-card-metric">
                         <strong>{formatTons(scenario.emissions.total_tco2e)}</strong>

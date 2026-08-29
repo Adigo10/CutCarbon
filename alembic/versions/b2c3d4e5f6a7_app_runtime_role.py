@@ -17,8 +17,6 @@ from typing import Sequence, Union
 
 from alembic import op
 
-from app.models.database import Base
-
 # revision identifiers, used by Alembic.
 revision: str = "b2c3d4e5f6a7"
 down_revision: Union[str, None] = "a1b2c3d4e5f6"
@@ -26,7 +24,18 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 _APP_ROLE = "cutcarbon_app"
-_TABLES = [t.name for t in Base.metadata.sorted_tables]
+# The app tables that exist as of this revision. Literal, not `Base.metadata` — see
+# the note in a1b2c3d4e5f6. The ALTER DEFAULT PRIVILEGES grant below still covers
+# tables created by later migrations; each of those also creates its own RLS policy.
+_TABLES = [
+    "agent_runs",
+    "emission_factors",
+    "users",
+    "chat_messages",
+    "scenarios",
+    "financial_reports",
+    "offset_purchases",
+]
 
 
 def upgrade() -> None:
