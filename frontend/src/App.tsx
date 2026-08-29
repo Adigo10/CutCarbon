@@ -645,6 +645,7 @@ function App() {
     if (!token) return
     setComplianceLoading(true)
     try {
+      const profile = complianceInput.profile
       const report = await api.checkCompliance(
         {
           total_tco2e: complianceInput.total_tco2e,
@@ -653,11 +654,26 @@ function App() {
           region: complianceInput.region,
           event_days: complianceInput.event_days,
           attendees: complianceInput.attendees,
+          // Unselected bands are sent as null, so the backend reports the
+          // frameworks that need them as informational instead of guessing.
+          reporting_profile: {
+            employee_band: profile.employee_band || null,
+            annual_turnover_band: profile.annual_turnover_band || null,
+            listing_status: profile.listing_status || null,
+            reporting_fy: profile.reporting_fy,
+            does_business_in_california: profile.does_business_in_california,
+          },
         },
         token,
       )
       setComplianceReport(report)
-      pushToast(`Compliance score ${report.overall_score_pct.toFixed(0)}%`, 'success')
+      const mandatory = report.mandatory_frameworks.length
+      pushToast(
+        report.profile_complete
+          ? `${mandatory} mandatory framework${mandatory === 1 ? '' : 's'} for this profile`
+          : 'Profile incomplete — frameworks shown for information only',
+        report.profile_complete ? 'success' : 'neutral',
+      )
     } catch (error) {
       pushToast(error instanceof Error ? error.message : 'Compliance check failed', 'danger')
     } finally {

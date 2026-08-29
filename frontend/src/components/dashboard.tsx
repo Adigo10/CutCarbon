@@ -102,7 +102,12 @@ export function DashboardView({
   const factorRows = selectedScenarioFactorRows(selectedScenario.factors_snapshot)
   const hotspot = topEmissionSource(selectedScenario)
   const best = bestScenario(scenarios)
-  const complianceScore = complianceReport?.overall_score_pct ?? null
+  // Obligation scoping is a count of what binds, not a score — and a report run
+  // without a reporting profile determines nothing at all.
+  const mandatoryFrameworks =
+    complianceReport && complianceReport.profile_complete
+      ? complianceReport.mandatory_frameworks.length
+      : null
 
   const portfolioConfig: ChartConfiguration<'bar' | 'line'> | null = sortedScenarios.length
     ? {
@@ -574,9 +579,13 @@ export function DashboardView({
               </p>
             </article>
             <article className="signal-card">
-              <span className="eyebrow">Compliance pulse</span>
-              <strong>{complianceScore ? `${formatNumber(complianceScore, 0)}%` : 'Run compliance check'}</strong>
-              <p>Most recent compliance score in this workspace.</p>
+              <span className="eyebrow">Mandatory frameworks</span>
+              <strong>{mandatoryFrameworks === null ? 'Scope obligations' : mandatoryFrameworks}</strong>
+              <p>
+                {mandatoryFrameworks === null
+                  ? 'Enter a reporting profile on the Compliance tab to scope them.'
+                  : 'Frameworks determined mandatory for the reporting profile you entered.'}
+              </p>
             </article>
           </div>
         </Panel>

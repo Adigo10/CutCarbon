@@ -328,6 +328,17 @@ export interface NewOffsetPurchase {
   country: string
 }
 
+/** The reporting entity's characteristics, used to scope disclosure obligations.
+ *  Empty strings / null mean "not specified" — the backend then reports the
+ *  affected frameworks as informational rather than asserting an obligation. */
+export interface ReportingProfile {
+  employee_band: string
+  annual_turnover_band: string
+  listing_status: string
+  reporting_fy: number | null
+  does_business_in_california: boolean
+}
+
 export interface ComplianceInput {
   region: string
   total_tco2e: number
@@ -335,21 +346,43 @@ export interface ComplianceInput {
   event_days: number
   has_scope3: boolean
   has_ghg_report: boolean
+  profile: ReportingProfile
+}
+
+export interface ComplianceClause {
+  clause: string
+  requirement: string
+  evidence_status: string
 }
 
 export interface ComplianceCheck {
   framework: string
+  framework_key: string
+  /** mandatory | voluntary | out_of_scope | not_in_force | enjoined | informational */
+  applies: string
+  reason: string
+  /** in_force | proposed | enjoined | voluntary_initiative | draft_standard |
+   *  methodology | management_system_standard | benchmark */
   status: string
-  score_pct: number
+  as_of: string
+  first_reporting_fy: number | null
+  scope3_required: boolean | null
+  score_pct: number | null
+  readiness: string | null
   gaps: string[]
   recommendations: string[]
+  clause_checklist: ComplianceClause[]
 }
 
+/** No overall score: averaging incommensurable frameworks meant nothing. */
 export interface ComplianceReport {
-  overall_score_pct: number
   checks: ComplianceCheck[]
   mandatory_frameworks: string[]
+  profile_complete: boolean
+  profile_note: string
+  frameworks_as_of: string
   penalty_risk_usd: number
+  disclaimer: string
 }
 
 export interface ReportDownloadOptions {

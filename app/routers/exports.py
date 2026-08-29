@@ -546,15 +546,34 @@ def _scenario_report_csv_bytes(report: ScenarioReportPayload) -> bytes:
                 unit = ""  # narrative row (claim statement), not a measure
             writer.writerow(("offsets", key, _labelize(key), value, unit))
 
-    writer.writerow(("compliance", "overall_score_pct", "Overall Score", report.compliance.overall_score_pct, "pct"))
+    # Obligation scoping — per-framework applicability, never an overall score
+    # (averaging a methodology, a certifiable management system and several
+    # statutes produced a number that meant nothing).
+    writer.writerow(("compliance", "profile_complete", "Reporting Profile Complete", report.compliance.profile_complete, "boolean"))
+    if report.compliance.profile_note:
+        writer.writerow(("compliance", "profile_note", "Reporting Profile Note", report.compliance.profile_note, ""))
+    writer.writerow(("compliance", "frameworks_as_of", "Frameworks As Of", report.compliance.frameworks_as_of, ""))
     writer.writerow(("compliance", "penalty_risk_usd", "Penalty Risk", report.compliance.penalty_risk_usd, "usd"))
     for framework in report.compliance.mandatory_frameworks:
         writer.writerow(("compliance_mandatory", framework, framework, framework, ""))
     for index, check in enumerate(report.compliance.checks, start=1):
         prefix = f"check_{index}"
         writer.writerow(("compliance_check", f"{prefix}.framework", "Framework", check.framework, ""))
+        writer.writerow(("compliance_check", f"{prefix}.applies", f"{check.framework} applies", check.applies, ""))
         writer.writerow(("compliance_check", f"{prefix}.status", f"{check.framework} status", check.status, ""))
-        writer.writerow(("compliance_check", f"{prefix}.score_pct", f"{check.framework} score", check.score_pct, "pct"))
+        writer.writerow(("compliance_check", f"{prefix}.as_of", f"{check.framework} as of", check.as_of, ""))
+        writer.writerow(("compliance_check", f"{prefix}.reason", f"{check.framework} reason", check.reason, ""))
+        if check.scope3_required is not None:
+            writer.writerow(("compliance_check", f"{prefix}.scope3_required", f"{check.framework} Scope 3 required", check.scope3_required, "boolean"))
+        if check.score_pct is not None:
+            writer.writerow(("compliance_check", f"{prefix}.score_pct", f"{check.framework} completeness", check.score_pct, "pct"))
+            writer.writerow(("compliance_check", f"{prefix}.readiness", f"{check.framework} readiness", check.readiness or "", ""))
+        for clause_idx, clause in enumerate(check.clause_checklist, start=1):
+            writer.writerow((
+                "compliance_clause", f"{prefix}.clause_{clause_idx}",
+                f"{check.framework} clause {clause.clause}",
+                f"{clause.requirement} — {clause.evidence_status}", "",
+            ))
         for gap_idx, gap in enumerate(check.gaps, start=1):
             if gap:
                 writer.writerow(("compliance_gap", f"{prefix}.gap_{gap_idx}", f"{check.framework} gap", gap, ""))
@@ -609,7 +628,8 @@ def _scenario_report_xlsx(report: ScenarioReportPayload):
         ("Per Attendee tCO2e", emissions["per_attendee_tco2e"]),
         ("Per Attendee Day tCO2e", emissions["per_attendee_day_tco2e"]),
         ("Data Quality", data_quality_label(emissions["data_quality"])),
-        ("Overall Compliance Score", report.compliance.overall_score_pct),
+        ("Mandatory Frameworks", ", ".join(report.compliance.mandatory_frameworks) or "none determined"),
+        ("Reporting Profile", "complete" if report.compliance.profile_complete else "incomplete"),
         ("Offset Coverage %", report.offset_portfolio.coverage_pct if report.offset_portfolio.coverage_pct is not None else "—"),
     ]:
         summary_ws.append([label, value])
@@ -644,16 +664,31 @@ def _scenario_report_xlsx(report: ScenarioReportPayload):
         nzce_ws.append(["Note", report.nzce_note])
 
     compliance_ws = wb.create_sheet("Compliance")
-    compliance_ws.append(["Framework", "Status", "Score %", "Gaps", "Recommendations"])
+    compliance_ws.append([
+        "Framework", "Applies", "Status", "As Of", "Scope 3 Required",
+        # Completeness is left blank wherever a number would be invented — for every
+        # statutory scoping decision, and for ISO 20121, which is audited by clause.
+        "Inventory Completeness %", "Readiness",
+        "Reason", "Clause Checklist", "Gaps", "Recommendations",
+    ])
     _style_header(compliance_ws)
     for check in report.compliance.checks:
         compliance_ws.append([
             check.framework,
+            check.applies,
             check.status,
-            check.score_pct,
+            check.as_of,
+            "" if check.scope3_required is None else check.scope3_required,
+            "" if check.score_pct is None else check.score_pct,
+            check.readiness or "",
+            check.reason,
+            "\n".join(f"{c.clause}: {c.requirement} — {c.evidence_status}" for c in check.clause_checklist),
             "\n".join([gap for gap in check.gaps if gap]),
             "\n".join(check.recommendations),
         ])
+    if report.compliance.profile_note:
+        compliance_ws.append([])
+        compliance_ws.append(["Note", report.compliance.profile_note])
 
     offsets_ws = wb.create_sheet("Offsets")
     offsets_ws.append(["Metric", "Value"])
@@ -931,12 +966,36 @@ def _scenario_report_pdf(report: ScenarioReportPayload, provenance: str = "") ->
 
     story.extend(
         [
-            Paragraph("Compliance Status", styles["SectionHeading"]),
+            Paragraph("Applicable Reporting Frameworks", styles["SectionHeading"]),
             Spacer(1, 0.2 * cm),
             _table(
-                [["Framework", "Status", "Score %"]]
-                + [[check.framework, check.status, f"{check.score_pct:.1f}"] for check in report.compliance.checks],
-                [8 * cm, 4 * cm, 2.5 * cm],
+                [["Framework", "Applies", "Status", "As of"]]
+                + [
+                    [
+                        _pdf_text(check.framework),
+                        _labelize(check.applies),
+                        _labelize(check.status),
+                        check.as_of,
+                    ]
+                    for check in report.compliance.checks
+                ],
+                [7 * cm, 3 * cm, 3.5 * cm, 2.5 * cm],
+            ),
+            Spacer(1, 0.15 * cm),
+            # The reasons matter more than the labels: they say WHY each framework
+            # does or does not bind, so a reader can check the determination.
+            *[
+                Paragraph(
+                    f"<b>{_pdf_text(check.framework)}:</b> {_pdf_text(check.reason)}",
+                    styles["BodySmall"],
+                )
+                for check in report.compliance.checks
+                if check.reason
+            ],
+            Spacer(1, 0.15 * cm),
+            Paragraph(
+                _pdf_text(report.compliance.profile_note or report.compliance.disclaimer),
+                styles["BodySmall"],
             ),
             Spacer(1, 0.35 * cm),
             Paragraph("Offset Coverage", styles["SectionHeading"]),

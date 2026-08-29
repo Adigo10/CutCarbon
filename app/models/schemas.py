@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, field_validator, model_validator
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from datetime import date
 from enum import Enum
 from uuid import uuid4
@@ -371,6 +371,30 @@ class FinancialResult(BaseModel):
 
 # -- Compliance models ---------------------------------------------------------
 
+# Size bands and listing tiers are cut at the thresholds the scope tests use, so
+# each band sits unambiguously above or below every threshold. The canonical
+# definitions (with numeric bounds and labels) live in app/data/frameworks.json;
+# a test asserts these Literals stay in step with that file.
+EmployeeBand = Literal["lt_50", "50_249", "250_1000", "gt_1000"]
+TurnoverBand = Literal["lt_50m", "50m_450m", "450m_1b", "gt_1b"]
+ListingStatus = Literal["none", "listed", "sti_constituent", "asrs_group1", "asrs_group2"]
+
+
+class ReportingProfile(BaseModel):
+    """The reporting entity's characteristics, used to scope disclosure obligations.
+
+    Every field is optional: an absent field yields an "informational" scoping
+    decision for the frameworks that need it, never an asserted obligation.
+    """
+
+    employee_band: Optional[EmployeeBand] = None
+    annual_turnover_band: Optional[TurnoverBand] = None
+    listing_status: Optional[ListingStatus] = None
+    # Calendar year in which the reporting period BEGINS (1 Jul 2026 - 30 Jun 2027 = 2026).
+    reporting_fy: Optional[int] = Field(default=None, ge=2000, le=2100)
+    does_business_in_california: bool = False
+
+
 class ComplianceRequest(BaseModel):
     total_tco2e: float = Field(ge=0)
     has_scope3: bool = True
@@ -378,21 +402,52 @@ class ComplianceRequest(BaseModel):
     region: str = "singapore"
     event_days: int = Field(default=1, gt=0)
     attendees: int = Field(default=100, gt=0)
+    reporting_profile: Optional[ReportingProfile] = None
+
+
+class ComplianceClause(BaseModel):
+    """One clause of a management-system standard, and whether it is evidenced."""
+
+    clause: str
+    requirement: str
+    evidence_status: str = "not_evidenced"
 
 
 class ComplianceCheck(BaseModel):
     framework: str
-    status: str  # compliant | partial | non_compliant | not_applicable
-    score_pct: float
+    framework_key: str = ""
+    # Whether the framework binds THIS profile:
+    # mandatory | voluntary | out_of_scope | not_in_force | enjoined | informational
+    applies: str = "informational"
+    reason: str = ""
+    # What the framework IS: in_force | proposed | enjoined | voluntary_initiative |
+    # draft_standard | methodology | management_system_standard | benchmark
+    status: str = "informational"
+    as_of: str = ""
+    first_reporting_fy: Optional[int] = None
+    # Populated for the climate-disclosure regimes that phase Scope 3 separately
+    # (SGX, AASB S2, CA SB 253, ESRS E1); None where the concept does not apply.
+    scope3_required: Optional[bool] = None
+    # Completeness/maturity of what the tool can actually assess. None for the
+    # regulatory frameworks, where a number would be meaningless, and for
+    # ISO 20121, which is audited against clauses rather than scored.
+    score_pct: Optional[float] = None
+    readiness: Optional[str] = None  # compliant | partial | non_compliant
     gaps: List[str] = Field(default_factory=list)
     recommendations: List[str] = Field(default_factory=list)
+    clause_checklist: List[ComplianceClause] = Field(default_factory=list)
 
 
 class ComplianceReport(BaseModel):
-    overall_score_pct: float
+    # No overall score: averaging incommensurable frameworks (a methodology, a
+    # certifiable management system and several statutes) produced a number that
+    # meant nothing. Read the per-framework `applies` values instead.
     checks: List[ComplianceCheck]
     mandatory_frameworks: List[str]
-    penalty_risk_usd: float
+    profile_complete: bool = False
+    profile_note: str = ""
+    frameworks_as_of: str = ""
+    penalty_risk_usd: float = 0.0
     disclaimer: str = ""
 
 

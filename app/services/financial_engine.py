@@ -3,12 +3,13 @@ Financial savings + tax compliance engine.
 Calculates carbon tax savings, energy cost reductions, green incentives,
 and compliance value from emission reduction actions.
 """
-from typing import List, Dict, Any
+from typing import List, Dict, Any, NamedTuple, Optional
 
 from app.models.schemas import (
-    FinancialRequest, FinancialResult, TaxSaving, ComplianceCheck, ComplianceReport
+    FinancialRequest, FinancialResult, TaxSaving, ComplianceCheck, ComplianceClause,
+    ComplianceReport, ReportingProfile,
 )
-from app.services.data_files import TAX_DATA
+from app.services.data_files import FRAMEWORKS_DATA, TAX_DATA
 from app.services.regions import (
     CARBON_TAX_KEYS,
     ELECTRICITY_KEYS,
@@ -384,6 +385,366 @@ def generate_financial_report(req: FinancialRequest) -> FinancialResult:
     )
 
 
+# -- Obligation scoping --------------------------------------------------------
+#
+# Which disclosure frameworks actually BIND a given reporting entity is a scoping
+# question, not a score. The regulatory facts (status, as-of date, phase-in years,
+# size thresholds, tier boundaries) all live in app/data/frameworks.json so they can
+# be audited and updated without touching code; the branching each framework needs
+# lives here, keyed by the framework's ``scope_rule``.
+#
+# The cardinal rule: never assert an obligation the profile does not support. A
+# missing profile field, a size band that straddles a threshold, or an unspecified
+# tier all yield "informational", and an enjoined or merely proposed regime can
+# never come out "mandatory".
+
+_FRAMEWORKS: List[Dict[str, Any]] = FRAMEWORKS_DATA["frameworks"]
+_EMPLOYEE_BANDS: Dict[str, Any] = FRAMEWORKS_DATA["employee_bands"]
+_TURNOVER_BANDS: Dict[str, Any] = FRAMEWORKS_DATA["turnover_bands"]
+
+_NO_PROFILE_REASON = (
+    "Profile incomplete — shown for information only. This framework's scope test "
+    "needs the reporting entity's profile, which was not supplied."
+)
+
+
+class ScopeDecision(NamedTuple):
+    """One framework's determination for one profile.
+
+    ``first_reporting_fy`` is the year that applies to *this profile's tier*, which
+    is not the same as the framework's earliest year: an ASRS Group 2 entity starts
+    in FY2026, not Group 1's FY2025. It is None whenever the tier is undetermined,
+    because there is no single year to name.
+    """
+
+    applies: str
+    reason: str
+    scope3_required: Optional[bool] = None
+    first_reporting_fy: Optional[int] = None
+
+
+def _band_position(band_key: Optional[str], bands: Dict[str, Any], threshold: float) -> str:
+    """Where a size band sits relative to a "strictly greater than" threshold.
+
+    Returns "above", "below", "straddles" (the band spans the threshold, so the
+    test cannot be decided) or "unknown" (no band supplied). Bands in
+    frameworks.json are cut at the thresholds the scope tests use, so "straddles"
+    should not occur for the encoded frameworks — it exists so that editing the
+    bands degrades to an honest "cannot tell" rather than a wrong answer.
+    """
+    band = bands.get(band_key or "")
+    if not band:
+        return "unknown"
+    low, high = band["min"], band["max"]
+    if low > threshold:
+        return "above"
+    if high is not None and high <= threshold:
+        return "below"
+    return "straddles"
+
+
+def _band_label(band_key: Optional[str], bands: Dict[str, Any]) -> str:
+    band = bands.get(band_key or "")
+    return band["label"] if band else "not specified"
+
+
+def _indeterminate(what: str) -> ScopeDecision:
+    # No tier determined, so no first reporting year can be named.
+    return ScopeDecision("informational", f"Cannot scope this framework: {what}")
+
+
+# -- Per-framework scope rules -------------------------------------------------
+
+def _scope_eu_csrd(fw: Dict[str, Any], profile: ReportingProfile) -> ScopeDecision:
+    thresholds = fw["thresholds"]
+    employees = _band_position(profile.employee_band, _EMPLOYEE_BANDS, thresholds["employees_gt"])
+    turnover = _band_position(profile.annual_turnover_band, _TURNOVER_BANDS, thresholds["turnover_gt"])
+    first_fy = fw["first_reporting_fy"]
+    test = f"{thresholds['employees_gt_label']} AND {thresholds['turnover_gt_label']}"
+
+    if profile.reporting_fy is None:
+        return _indeterminate("the reporting financial year was not supplied.")
+    if employees == "unknown" or turnover == "unknown":
+        return _indeterminate("the employee and turnover bands are both needed for the "
+                              f"post-Omnibus I size test ({test}).")
+    if employees == "below" or turnover == "below":
+        return ScopeDecision(
+            "out_of_scope",
+            f"Post-Omnibus I (adopted 24 February 2026), CSRD is mandatory only for "
+            f"undertakings with {test}. This profile reports "
+            f"{_band_label(profile.employee_band, _EMPLOYEE_BANDS)} employees and "
+            f"{_band_label(profile.annual_turnover_band, _TURNOVER_BANDS)} turnover.",
+            first_reporting_fy=first_fy,
+        )
+    if employees == "straddles" or turnover == "straddles":
+        return _indeterminate(f"a reported size band spans the threshold ({test}).")
+    if profile.reporting_fy < first_fy:
+        return ScopeDecision(
+            "not_in_force",
+            f"In scope on size, but CSRD applies to financial years starting on or after "
+            f"1 January {first_fy} (simplified ESRS adopted 3 July 2026). This profile "
+            f"reports FY{profile.reporting_fy}.",
+            first_reporting_fy=first_fy,
+        )
+    return ScopeDecision(
+        "mandatory",
+        f"In scope: {test}, reporting FY{profile.reporting_fy} (CSRD applies to financial "
+        f"years starting on or after 1 January {first_fy}). ESRS E1 requires Scope 3.",
+        scope3_required=True,
+        first_reporting_fy=first_fy,
+    )
+
+
+def _scope_sgx_issb(fw: Dict[str, Any], profile: ReportingProfile) -> ScopeDecision:
+    tiers = fw["tiers"]
+    fy = profile.reporting_fy
+    if fy is None:
+        return _indeterminate("the reporting financial year was not supplied.")
+    if not profile.listing_status:
+        return _indeterminate("the listing status determines the SGX phase-in tier.")
+
+    tier = tiers.get(profile.listing_status)
+    if tier is None:
+        return _indeterminate(
+            f"listing status '{profile.listing_status}' is not an SGX reporting tier."
+        )
+
+    if profile.listing_status == "sti_constituent":
+        first_fy, scope3_fy = tier["first_reporting_fy"], tier["scope3_from_fy"]
+        if fy < first_fy:
+            return ScopeDecision(
+                "not_in_force",
+                f"STI constituents report ISSB climate-related disclosures from FY{first_fy}; "
+                f"this profile reports FY{fy}.",
+                first_reporting_fy=first_fy,
+            )
+        scope3 = fy >= scope3_fy
+        return ScopeDecision(
+            "mandatory",
+            f"STI constituent: ISSB climate-related disclosure mandatory from FY{first_fy}, "
+            f"Scope 3 mandatory from FY{scope3_fy}. Reporting FY{fy}, so Scope 3 is "
+            f"{'required' if scope3 else 'not yet required'}.",
+            scope3_required=scope3,
+            first_reporting_fy=first_fy,
+        )
+
+    # Non-STI tiers: the phase-in year turns on size, and Scope 3 stays voluntary.
+    size = _band_position(profile.annual_turnover_band, _TURNOVER_BANDS, tier["size_threshold"])
+    size_test = tier["size_threshold_label"]
+    approximation = (
+        f" The statutory test is {size_test}, approximated here by the reported size band."
+    )
+    if size in ("unknown", "straddles"):
+        return _indeterminate(f"the tier turns on {size_test} and the reported band cannot settle it.")
+
+    if profile.listing_status == "listed":
+        first_fy = (tier["first_reporting_fy_above_threshold"] if size == "above"
+                    else tier["first_reporting_fy_below_threshold"])
+        if fy < first_fy:
+            return ScopeDecision(
+                "not_in_force",
+                f"{tier['label']}: in scope from FY{first_fy}; this profile reports FY{fy}."
+                + approximation,
+                first_reporting_fy=first_fy,
+            )
+        return ScopeDecision(
+            "mandatory",
+            f"{tier['label']}: climate reporting from FY{first_fy}, reporting FY{fy}. "
+            f"Scope 3 disclosure is voluntary outside the STI tier." + approximation,
+            scope3_required=False,
+            first_reporting_fy=first_fy,
+        )
+
+    # Non-listed: only the large ones ever come into scope.
+    first_fy = tier["first_reporting_fy_above_threshold"]
+    if size == "below":
+        return ScopeDecision(
+            "out_of_scope",
+            f"Only large non-listed companies ({size_test}) come into scope, from FY{first_fy}. "
+            f"This profile reports {_band_label(profile.annual_turnover_band, _TURNOVER_BANDS)}."
+            + approximation,
+            first_reporting_fy=first_fy,
+        )
+    if fy < first_fy:
+        return ScopeDecision(
+            "not_in_force",
+            f"{tier['label']}: in scope from FY{first_fy}; this profile reports FY{fy}."
+            + approximation,
+            first_reporting_fy=first_fy,
+        )
+    return ScopeDecision(
+        "mandatory",
+        f"{tier['label']}: climate reporting from FY{first_fy}, reporting FY{fy}. "
+        f"Scope 3 disclosure is voluntary outside the STI tier." + approximation,
+        scope3_required=False,
+        first_reporting_fy=first_fy,
+    )
+
+
+def _scope_uk_srs(fw: Dict[str, Any], profile: Optional[ReportingProfile]) -> ScopeDecision:
+    # Published for voluntary use; the mandatory regime is only proposed, so this
+    # can never be "mandatory" regardless of how large the entity is.
+    return ScopeDecision("voluntary", fw["reason"])
+
+
+def _scope_au_asrs(fw: Dict[str, Any], profile: ReportingProfile) -> ScopeDecision:
+    fy = profile.reporting_fy
+    if fy is None:
+        return _indeterminate("the reporting financial year was not supplied.")
+    tier = fw["tiers"].get(profile.listing_status or "")
+    if tier is None:
+        return _indeterminate(
+            "the ASRS group was not specified. AASB S2 phases in by entity group, which "
+            "depends on consolidated revenue, assets, employees and emitter status."
+        )
+
+    first_fy, scope3_fy = tier["first_reporting_fy"], tier["scope3_from_fy"]
+    if fy < first_fy:
+        return ScopeDecision(
+            "not_in_force",
+            f"{tier['label']}: {tier['first_period_note']} This profile reports FY{fy}.",
+            first_reporting_fy=first_fy,
+        )
+    scope3 = fy >= scope3_fy
+    first_period = "" if scope3 else (
+        " Scope 3 is not required in an entity's first reporting period and becomes "
+        "mandatory from the second."
+    )
+    return ScopeDecision(
+        "mandatory",
+        f"{tier['label']}: {tier['first_period_note']} Reporting FY{fy}, so Scope 3 is "
+        f"{'required' if scope3 else 'not yet required'}.{first_period}",
+        scope3_required=scope3,
+        first_reporting_fy=first_fy,
+    )
+
+
+def _scope_ca_sb253(fw: Dict[str, Any], profile: ReportingProfile) -> ScopeDecision:
+    thresholds = fw["thresholds"]
+    fy = profile.reporting_fy
+    if fy is None:
+        return _indeterminate("the reporting financial year was not supplied.")
+    if not profile.does_business_in_california:
+        return ScopeDecision(
+            "out_of_scope",
+            "SB 253 applies to entities doing business in California; this profile does "
+            "not report a California nexus.",
+        )
+    revenue = _band_position(profile.annual_turnover_band, _TURNOVER_BANDS, thresholds["revenue_gt"])
+    test = thresholds["revenue_gt_label"]
+    if revenue in ("unknown", "straddles"):
+        return _indeterminate(f"the revenue test is {test} and the reported band cannot settle it.")
+    first_fy, scope3_fy, due = fw["first_reporting_fy"], fw["scope3_from_fy"], fw["first_report_due"]
+    if revenue == "below":
+        return ScopeDecision(
+            "out_of_scope",
+            f"SB 253 applies to entities with {test}. This profile reports "
+            f"{_band_label(profile.annual_turnover_band, _TURNOVER_BANDS)} revenue.",
+            first_reporting_fy=first_fy,
+        )
+
+    if fy < first_fy:
+        return ScopeDecision(
+            "not_in_force",
+            f"In scope on size and California nexus, but the first reporting year is "
+            f"FY{first_fy}; this profile reports FY{fy}.",
+            first_reporting_fy=first_fy,
+        )
+    scope3 = fy >= scope3_fy
+    return ScopeDecision(
+        "mandatory",
+        f"In scope: {test} and doing business in California. The first Scope 1 and 2 "
+        f"report (covering FY{first_fy}) is due {due}; Scope 3 reporting begins in "
+        f"{scope3_fy + 1} covering FY{scope3_fy}. Reporting FY{fy}, so Scope 3 is "
+        f"{'required' if scope3 else 'not yet required'}.",
+        scope3_required=scope3,
+        first_reporting_fy=first_fy,
+    )
+
+
+def _scope_ca_sb261(fw: Dict[str, Any], profile: Optional[ReportingProfile]) -> ScopeDecision:
+    # An enjoined statute is never a live obligation, whatever the profile says.
+    return ScopeDecision("enjoined", fw["reason"])
+
+
+_SCOPE_RULES = {
+    "eu_csrd": _scope_eu_csrd,
+    "sgx_issb": _scope_sgx_issb,
+    "uk_srs": _scope_uk_srs,
+    "au_asrs": _scope_au_asrs,
+    "ca_sb253": _scope_ca_sb253,
+    "ca_sb261": _scope_ca_sb261,
+}
+
+
+def _base_check(fw: Dict[str, Any], applies: str, reason: str,
+                scope3_required: Optional[bool] = None,
+                first_reporting_fy: Optional[int] = None) -> ComplianceCheck:
+    """Build a check. ``first_reporting_fy`` is the year for the profile's TIER.
+
+    Tiered frameworks carry no top-level year (it would be another tier's), so an
+    undetermined tier shows no year rather than a misleading one.
+    """
+    return ComplianceCheck(
+        framework=fw["name"],
+        framework_key=fw["key"],
+        applies=applies,
+        reason=reason,
+        status=fw["status"],
+        as_of=fw["as_of"],
+        first_reporting_fy=(first_reporting_fy if first_reporting_fy is not None
+                            else fw.get("first_reporting_fy")),
+        scope3_required=scope3_required,
+        gaps=list(fw.get("gaps", [])),
+        recommendations=list(fw.get("recommendations", [])),
+    )
+
+
+def _voluntary_check(
+    fw: Dict[str, Any], has_scope3: bool, has_ghg_report: bool
+) -> ComplianceCheck:
+    """The frameworks that bind nobody by force of law — but that the tool CAN assess."""
+    check = _base_check(fw, "voluntary", fw.get("reason", fw["note"]))
+
+    if fw["key"] == "ghg_protocol":
+        # Completeness of the inventory the tool actually holds.
+        check.score_pct = 100.0 if (has_ghg_report and has_scope3) else (60.0 if has_ghg_report else 20.0)
+        check.readiness = ("compliant" if check.score_pct >= 80
+                           else "partial" if check.score_pct >= 40 else "non_compliant")
+        if not has_scope3:
+            check.gaps.append("Scope 3 emissions not fully measured")
+        if not has_ghg_report:
+            check.gaps.append("No formal GHG report generated")
+    elif fw["key"] == "nzce":
+        check.score_pct = 60.0 if (has_ghg_report and has_scope3) else (40.0 if has_ghg_report else 25.0)
+        check.readiness = "partial"
+    elif fw["key"] == "iso_20121_2024":
+        # Never a number: a management system is certified against clauses by audit.
+        check.clause_checklist = [
+            ComplianceClause(clause=item["clause"], requirement=item["requirement"])
+            for item in fw.get("clause_checklist", [])
+        ]
+    return check
+
+
+def _intensity_check(
+    fw: Dict[str, Any], total_tco2e: float, event_days: int, attendees: int
+) -> ComplianceCheck:
+    """Informational comparison against published EVENT bands (never an SBTi call)."""
+    per_att_day = total_tco2e / max(attendees, 1) / max(event_days, 1)
+    band = fw["typical_band_tco2e_per_attendee_day"]
+    on_track = per_att_day <= band
+
+    check = _base_check(fw, "informational", fw["reason"])
+    check.score_pct = 80.0 if on_track else 40.0
+    check.readiness = "compliant" if on_track else "partial"
+    if not on_track:
+        check.gaps.append(
+            f"{per_att_day:.3f} tCO2e/attendee/day exceeds the ~{band} typical event band"
+        )
+    return check
+
+
 def get_compliance_report(
     total_tco2e: float,
     has_scope3: bool,
@@ -391,125 +752,74 @@ def get_compliance_report(
     region: str,
     event_days: int,
     attendees: int,
+    reporting_profile: Optional[ReportingProfile] = None,
 ) -> ComplianceReport:
-    """Generate compliance status across key frameworks."""
-    checks = []
-    mandatory = []
+    """Scope each reporting framework against the entity profile.
 
-    # GHG Protocol — completeness of the inventory the tool can actually assess.
-    ghg_score = 100 if (has_ghg_report and has_scope3) else (60 if has_ghg_report else 20)
-    ghg_gaps = []
-    if not has_scope3:
-        ghg_gaps.append("Scope 3 emissions not fully measured")
-    if not has_ghg_report:
-        ghg_gaps.append("No formal GHG report generated")
-    checks.append(ComplianceCheck(
-        framework="GHG Protocol",
-        status="compliant" if ghg_score >= 80 else ("partial" if ghg_score >= 40 else "non_compliant"),
-        score_pct=ghg_score,
-        gaps=ghg_gaps,
-        recommendations=["Calculate all 3 scopes", "Generate downloadable GHG inventory report"],
-    ))
-
-    # ISO 20121 — a management-system standard certified by third-party audit, not a
-    # numeric per-event score. We present it as a checklist of what's still required.
-    checks.append(ComplianceCheck(
-        framework="ISO 20121 (Sustainable Events management system)",
-        status="partial",
-        score_pct=50.0,
-        gaps=[
-            "Sustainability policy not documented",
-            "Stakeholder engagement plan not provided",
-            "Supply-chain sustainability procedures not evidenced",
-            "Third-party certification audit not performed",
-        ],
-        recommendations=[
-            "ISO 20121 certifies a management system via accredited audit, not an emissions number",
-            "Document policy, objectives, stakeholder engagement and continual improvement",
-        ],
-    ))
-
-    # Net Zero Carbon Events — the event industry's own measurement methodology
-    # (9 emission categories, Scope 1/2/3 per GHG Protocol, biennial reporting).
-    # Voluntary signatory-based, so NOT added to mandatory_frameworks.
-    nzce_score = 60.0 if (has_ghg_report and has_scope3) else (40.0 if has_ghg_report else 25.0)
-    checks.append(ComplianceCheck(
-        framework="Net Zero Carbon Events (NZCE) Measurement Methodology",
-        status="partial",
-        score_pct=nzce_score,
-        gaps=[
-            "Categories measured here: Travel, Local Transport, Energy, Accommodation, "
-            "Food & Beverage, Waste, Digital Content, and parts of Production & Materials; "
-            "Freight & Logistics only as an equipment freight line",
-            "Biennial public reporting commitment to NZCE not evidenced",
-            "No baseline year or reduction trajectory towards net zero by 2050 provided",
-        ],
-        recommendations=[
-            "Use the NZCE category mapping section included in the exported reports",
-            "Become an NZCE signatory and report progress at least every two years",
-            "Set a baseline year and interim reduction targets per the NZCE roadmap",
-        ],
-    ))
-
-    # Event carbon intensity vs published EVENT benchmarks (informational — SBTi is a
-    # CORPORATE framework, not an event one). Compare per attendee per day correctly.
-    per_att_day = total_tco2e / max(attendees, 1) / max(event_days, 1)
-    band_typical = 0.30  # tCO2e/attendee/day (MeetGreen/JMIC range ~0.15–0.5)
-    on_track = per_att_day <= band_typical
-    intensity_score = 80.0 if on_track else 40.0
-    checks.append(ComplianceCheck(
-        framework="Event carbon intensity (vs published event benchmarks)",
-        status="compliant" if on_track else "partial",
-        score_pct=intensity_score,
-        gaps=([] if on_track else
-              [f"{per_att_day:.3f} tCO2e/attendee/day exceeds the ~{band_typical} typical event band"]),
-        recommendations=[
-            "Informational only — not an SBTi determination (SBTi validates corporate inventories)",
-            "Compare against Net Zero Carbon Events / MeetGreen published event bands",
-        ],
-    ))
-
-    # Region-specific reporting regimes.
+    Frameworks are filtered to the requested region, then each is resolved to an
+    ``applies`` value with the reason behind it. Without a profile every regulated
+    framework comes back "informational" — the report describes the landscape and
+    asserts no obligation.
+    """
     region = normalize_region(region)
-    if region == "singapore":
-        mandatory.append("SGX Sustainability Reporting (Scope 1+2)")
-        sgx_score = 70 if has_ghg_report else 20
-        checks.append(ComplianceCheck(
-            framework="SGX Sustainability Reporting",
-            status="partial" if sgx_score >= 40 else "non_compliant",
-            score_pct=sgx_score,
-            gaps=["Mandatory Scope 1+2 from FY2025; Scope 3 from FY2026 for STI constituents"],
-            recommendations=["Prepare annual sustainability report", "Align with IFRS S2 / ISSB"],
-        ))
+    checks: List[ComplianceCheck] = []
+    # Regulated frameworks the profile could NOT settle. This — not "was a profile
+    # supplied" — is what decides completeness: a profile carrying only a reporting
+    # year leaves every size test undecided, and calling that "complete" would let
+    # an empty mandatory list read as "nothing binds you", which is itself an
+    # unsupported obligation claim.
+    undetermined: List[str] = []
 
-    if region == "european_union":
-        mandatory.append("EU CSRD")
-        csrd_score = 50 if has_ghg_report else 10
-        checks.append(ComplianceCheck(
-            framework="EU CSRD",
-            status="partial" if csrd_score >= 40 else "non_compliant",
-            score_pct=csrd_score,
-            gaps=[
-                "Double materiality assessment required",
-                "ESRS E1 climate disclosure incomplete",
-                "Statutory penalties are member-state specific (e.g. Germany: up to EUR 10M or 5% of turnover); "
-                "Omnibus I (in force 18 Mar 2026) narrows in-scope entities",
-            ],
-            recommendations=["Commission double materiality assessment", "Align reporting with ESRS standards"],
-        ))
+    for fw in _FRAMEWORKS:
+        regions = fw.get("regions", ["*"])
+        if "*" not in regions and region not in regions:
+            continue
 
-    overall = sum(c.score_pct for c in checks) / len(checks) if checks else 0
+        rule = fw["scope_rule"]
+        if rule == "always_voluntary":
+            checks.append(_voluntary_check(fw, has_scope3, has_ghg_report))
+        elif rule == "benchmark":
+            checks.append(_intensity_check(fw, total_tco2e, event_days, attendees))
+        elif reporting_profile is None and fw.get("profile_required", True):
+            checks.append(_base_check(fw, "informational", _NO_PROFILE_REASON))
+            undetermined.append(fw["name"])
+        else:
+            decision = _SCOPE_RULES[rule](fw, reporting_profile)
+            checks.append(_base_check(
+                fw, decision.applies, decision.reason,
+                decision.scope3_required, decision.first_reporting_fy,
+            ))
+            if fw.get("profile_required", True) and decision.applies == "informational":
+                undetermined.append(fw["name"])
+
+    profile_complete = reporting_profile is not None and not undetermined
+    if reporting_profile is None:
+        profile_note = (
+            "Profile incomplete — showing all frameworks as informational. No obligation "
+            "determination has been made; complete the reporting profile to scope them."
+        )
+    elif undetermined:
+        profile_note = (
+            f"Profile incomplete — {len(undetermined)} framework(s) could not be scoped "
+            f"and are shown as informational: {', '.join(undetermined)}. No obligation "
+            "determination has been made for them."
+        )
+    else:
+        profile_note = ""
 
     return ComplianceReport(
-        overall_score_pct=round(overall, 1),
         checks=checks,
-        mandatory_frameworks=mandatory,
+        mandatory_frameworks=[c.framework for c in checks if c.applies == "mandatory"],
+        profile_complete=profile_complete,
+        profile_note=profile_note,
+        frameworks_as_of=FRAMEWORKS_DATA["as_of"],
         # We do not fabricate a probability-weighted penalty. Statutory maximum exposure
-        # is surfaced qualitatively in the CSRD gaps above instead.
+        # is surfaced qualitatively in the per-framework gaps instead.
         penalty_risk_usd=0.0,
         disclaimer=(
-            "Informational self-assessment based on the data entered — not a third-party "
-            "compliance determination or legal advice. Scores indicate completeness/maturity, "
-            "not certified conformance."
+            "Informational self-assessment of which reporting frameworks apply, based on "
+            "the profile entered — not a third-party compliance determination or legal "
+            "advice. Confirm scope and deadlines with the regulator or your adviser before "
+            "relying on them."
         ),
     )

@@ -1,17 +1,22 @@
 import { type Dispatch, type FormEvent, type SetStateAction, useDeferredValue, useState } from 'react'
 import {
   ACCOMMODATION_OPTIONS,
+  APPLIES_LABELS,
   AVAILABLE_ACTIONS,
   CATERING_OPTIONS,
   EMISSION_CATEGORIES,
+  EMPLOYEE_BANDS,
   EVENT_TYPES,
   FINANCIAL_REGIONS,
+  FRAMEWORK_STATUS_LABELS,
   GRID_OPTIONS,
   INTERNAL_CARBON_PRICE_PRESETS,
+  LISTING_STATUSES,
   START_SUGGESTIONS,
   TRAVEL_CLASS_OPTIONS,
   TRAVEL_MODE_OPTIONS,
   TSHIRT_OPTIONS,
+  TURNOVER_BANDS,
 } from '../lib/constants'
 import {
   cn,
@@ -28,6 +33,7 @@ import type {
   ChatMessage,
   ComplianceInput,
   ComplianceReport,
+  ReportingProfile,
   FinancialCalcState,
   FinancialResult,
   NewOffsetPurchase,
@@ -1800,6 +1806,33 @@ export function OffsetsView({
   )
 }
 
+/** Merge a patch into the nested reporting profile without disturbing the rest. */
+function setProfile(
+  setInput: Dispatch<SetStateAction<ComplianceInput>>,
+  patch: Partial<ReportingProfile>,
+) {
+  setInput((current) => ({ ...current, profile: { ...current.profile, ...patch } }))
+}
+
+/** Chip colour by how binding the determination is — an enjoined or merely
+ *  informational framework must never read as a live obligation. */
+function appliesTone(applies: string): 'fresh' | 'cyan' | 'amber' | 'rose' | 'neutral' {
+  switch (applies) {
+    case 'mandatory':
+      return 'rose'
+    case 'not_in_force':
+      return 'amber'
+    case 'enjoined':
+      return 'amber'
+    case 'voluntary':
+      return 'cyan'
+    case 'out_of_scope':
+      return 'fresh'
+    default:
+      return 'neutral'
+  }
+}
+
 interface ComplianceViewProps {
   input: ComplianceInput
   setInput: Dispatch<SetStateAction<ComplianceInput>>
@@ -1921,8 +1954,88 @@ export function ComplianceView({
             <span>GHG report drafted</span>
           </label>
         </div>
+
+        {/* Reporting profile — without it no obligation can be determined, so every
+            regulated framework comes back informational rather than asserted. */}
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">Reporting profile</span>
+            <h3>Who is reporting</h3>
+          </div>
+        </div>
+        <p className="muted-note">
+          Disclosure duties turn on the reporting entity, not the event. Leave a field blank and the
+          frameworks that need it stay informational.
+        </p>
+        <div className="form-grid">
+          <label className="field">
+            <span>Employees</span>
+            <select
+              value={input.profile.employee_band}
+              onChange={(event) => setProfile(setInput, { employee_band: event.target.value })}
+            >
+              {EMPLOYEE_BANDS.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Annual turnover / revenue</span>
+            <select
+              value={input.profile.annual_turnover_band}
+              onChange={(event) => setProfile(setInput, { annual_turnover_band: event.target.value })}
+            >
+              {TURNOVER_BANDS.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Listing status</span>
+            <select
+              value={input.profile.listing_status}
+              onChange={(event) => setProfile(setInput, { listing_status: event.target.value })}
+            >
+              {LISTING_STATUSES.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Reporting FY (year it starts)</span>
+            <input
+              type="number"
+              min="2000"
+              max="2100"
+              placeholder="Not specified"
+              value={input.profile.reporting_fy ?? ''}
+              onChange={(event) =>
+                setProfile(setInput, {
+                  reporting_fy: event.target.value ? Number(event.target.value) : null,
+                })
+              }
+            />
+          </label>
+        </div>
+        <div className="check-grid">
+          <label className="check-field">
+            <input
+              checked={input.profile.does_business_in_california}
+              onChange={(event) => setProfile(setInput, { does_business_in_california: event.target.checked })}
+              type="checkbox"
+            />
+            <span>Does business in California</span>
+          </label>
+        </div>
+
         <Button tone="primary" busy={loading} onClick={onCheck}>
-          Run compliance check
+          Scope reporting obligations
         </Button>
         <div className="hero-actions">
           {reportFormats.map((format) => (
@@ -1942,34 +2055,78 @@ export function ComplianceView({
       <div className="stacked-panels">
         {report ? (
           <>
+            {/* No overall dial: averaging a methodology, a certifiable management
+                system and several statutes produced a number that meant nothing. */}
             <Panel className="highlight-panel">
-              <span className="eyebrow">Overall score</span>
-              <strong>{report.overall_score_pct.toFixed(0)}%</strong>
+              <span className="eyebrow">Mandatory frameworks</span>
+              <strong>{report.mandatory_frameworks.length}</strong>
               <p>
-                {report.penalty_risk_usd > 0
-                  ? `Penalty risk ${formatCurrency(report.penalty_risk_usd)}`
-                  : 'No penalty risk modeled right now.'}
+                {/* The zero case is stated as "none determined mandatory", never as
+                    "nothing binds you" — the latter is a negative obligation claim,
+                    and it is only ever safe when every framework was actually scoped. */}
+                {report.mandatory_frameworks.length
+                  ? report.mandatory_frameworks.join(', ')
+                  : report.profile_complete
+                    ? 'No framework in this region was determined mandatory for this profile.'
+                    : report.profile_note}
               </p>
             </Panel>
             <Panel>
               <div className="panel-heading">
                 <div>
-                  <span className="eyebrow">Framework status</span>
-                  <h3>Framework checks</h3>
+                  <span className="eyebrow">Obligation scoping</span>
+                  <h3>Framework applicability</h3>
                 </div>
+                {report.frameworks_as_of ? (
+                  <Badge tone="neutral">Data as of {report.frameworks_as_of}</Badge>
+                ) : null}
               </div>
               <div className="stack-list">
                 {report.checks.map((check) => (
-                  <article key={check.framework} className="framework-card">
+                  <article key={check.framework_key || check.framework} className="framework-card">
                     <div className="framework-header">
                       <strong>{check.framework}</strong>
-                      <Badge tone={check.status === 'compliant' ? 'fresh' : check.status === 'partial' ? 'amber' : check.status === 'not_applicable' ? 'neutral' : 'rose'}>
-                        {labelize(check.status)}
-                      </Badge>
+                      <span className="framework-chips">
+                        <Badge tone={appliesTone(check.applies)}>
+                          {APPLIES_LABELS[check.applies] ?? labelize(check.applies)}
+                        </Badge>
+                        <Badge tone="neutral">
+                          {FRAMEWORK_STATUS_LABELS[check.status] ?? labelize(check.status)}
+                        </Badge>
+                      </span>
                     </div>
-                    <div className="framework-score">
-                      <span style={{ width: `${check.score_pct}%` }} />
-                    </div>
+                    <p className="framework-meta">
+                      As of {check.as_of || 'n/a'}
+                      {check.first_reporting_fy ? ` · First reporting FY${check.first_reporting_fy}` : ''}
+                      {check.scope3_required === null
+                        ? ''
+                        : ` · Scope 3 ${check.scope3_required ? 'required' : 'not required'}`}
+                    </p>
+                    {check.reason ? <p className="framework-reason">{check.reason}</p> : null}
+                    {/* A completeness bar only where the tool can actually assess one —
+                        never for ISO 20121 or a statutory scoping decision. Labelled,
+                        so the bar reads as inventory completeness and not as conformance. */}
+                    {check.score_pct !== null ? (
+                      <>
+                        <p className="framework-meta">
+                          Inventory completeness {check.score_pct.toFixed(0)}%
+                          {check.readiness ? ` · ${labelize(check.readiness)}` : ''}
+                        </p>
+                        <div className="framework-score">
+                          <span style={{ width: `${check.score_pct}%` }} />
+                        </div>
+                      </>
+                    ) : null}
+                    {check.clause_checklist.length ? (
+                      <div className="framework-list">
+                        <strong>Clause evidence checklist</strong>
+                        {check.clause_checklist.map((clause) => (
+                          <p key={clause.clause}>
+                            <b>{clause.clause}</b> — {clause.requirement} ({labelize(clause.evidence_status)})
+                          </p>
+                        ))}
+                      </div>
+                    ) : null}
                     {check.gaps.length ? (
                       <div className="framework-list">
                         <strong>Gaps</strong>
@@ -1989,12 +2146,13 @@ export function ComplianceView({
                   </article>
                 ))}
               </div>
+              {report.disclaimer ? <p className="muted-note">{report.disclaimer}</p> : null}
             </Panel>
           </>
         ) : (
           <EmptyState
-            title="No compliance report yet"
-            body="Run the checker to see framework gaps, recommendations, and modeled penalty risk."
+            title="No scoping result yet"
+            body="Enter the reporting profile and run the check to see which frameworks bind this entity, and why."
             className="compact-empty-state"
           />
         )}

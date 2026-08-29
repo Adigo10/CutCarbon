@@ -51,10 +51,14 @@ async def check_compliance(
     req: ComplianceRequest,
     current_user: UserDB = Depends(get_current_user),
 ):
-    """Check compliance across GHG Protocol, ISO 20121, SBTi and regional standards."""
+    """Scope the reporting frameworks that apply to this entity and region.
+
+    Without a `reporting_profile` every regulated framework is returned as
+    informational — the response describes the landscape and asserts no obligation.
+    """
     return get_compliance_report(
         req.total_tco2e, req.has_scope3, req.has_ghg_report,
-        req.region, req.event_days, req.attendees,
+        req.region, req.event_days, req.attendees, req.reporting_profile,
     )
 
 

@@ -1,0 +1,299 @@
+{
+  "version": "2026.1",
+  "as_of": "2026-08-29",
+  "note": "Obligation-scoping data for the compliance report. Each entry records what a framework IS (status, as-of date, first reporting year) and the parameters its scope test needs. The branching logic lives in app/services/financial_engine.py keyed by scope_rule; every threshold, date and tier boundary lives here so it can be audited and updated without touching code. This is an informational self-assessment aid, not legal advice.",
+  "conventions": {
+    "reporting_fy": "An integer naming the calendar year in which the reporting period BEGINS. A period running 1 Jul 2026 - 30 Jun 2027 is reporting_fy 2026.",
+    "first_reporting_fy": "The earliest reporting_fy for which the framework (or the profile's tier of it) imposes a reporting obligation.",
+    "scope3_from_fy": "The earliest reporting_fy for which Scope 3 disclosure is required. Null means Scope 3 is never required by that tier.",
+    "size_bands": "Employee and turnover bands are deliberately cut at the thresholds the scope tests use, so every band sits unambiguously above or below each threshold. A band that straddles a threshold yields an 'informational' decision rather than a guess.",
+    "currency": "Turnover bands are absolute amounts in the entity's own reporting currency. The statutory tests differ in denomination (EUR 450m for CSRD, USD 1bn for SB 253, SGD 1bn for the SGX tiers); the bands approximate all three and every reason string names the statutory test it is approximating."
+  },
+  "statuses": {
+    "in_force": "Enacted and operative law or listing rule.",
+    "proposed": "Published or consulted on, but not yet law.",
+    "enjoined": "Enacted but blocked by a court order; not enforceable while the order stands.",
+    "voluntary_initiative": "An industry commitment entered into voluntarily.",
+    "draft_standard": "A standard released in draft for comment.",
+    "methodology": "An accounting methodology, not a regulation.",
+    "management_system_standard": "A certifiable management-system standard assessed by accredited audit, never by a number.",
+    "benchmark": "An informational comparison against published figures."
+  },
+  "applies_values": {
+    "mandatory": "The profile is in scope and the obligation has commenced.",
+    "voluntary": "Applies only if the entity chooses to apply it.",
+    "out_of_scope": "The profile does not meet the framework's scope test.",
+    "not_in_force": "The profile would be in scope, but the obligation has not commenced for this reporting year.",
+    "enjoined": "Blocked by a court order; no obligation is asserted.",
+    "informational": "Not enough profile detail to scope the obligation; shown for information only."
+  },
+  "employee_bands": {
+    "lt_50": {"label": "Fewer than 50", "min": 0, "max": 49},
+    "50_249": {"label": "50 to 249", "min": 50, "max": 249},
+    "250_1000": {"label": "250 to 1,000", "min": 250, "max": 1000},
+    "gt_1000": {"label": "More than 1,000", "min": 1001, "max": null}
+  },
+  "turnover_bands": {
+    "lt_50m": {"label": "Up to 50m", "min": 0, "max": 50000000},
+    "50m_450m": {"label": "50m to 450m", "min": 50000001, "max": 450000000},
+    "450m_1b": {"label": "450m to 1bn", "min": 450000001, "max": 1000000000},
+    "gt_1b": {"label": "More than 1bn", "min": 1000000001, "max": null}
+  },
+  "listing_statuses": {
+    "none": "Not listed on a securities exchange.",
+    "listed": "Listed, but not a constituent of the reference index used for tiering.",
+    "sti_constituent": "Constituent of the Straits Times Index (SGX tier 1).",
+    "asrs_group1": "Australian ASRS Group 1 entity.",
+    "asrs_group2": "Australian ASRS Group 2 entity."
+  },
+  "frameworks": [
+    {
+      "key": "ghg_protocol",
+      "name": "GHG Protocol (Corporate Standard and Scope 3 Standard)",
+      "regions": ["*"],
+      "status": "methodology",
+      "as_of": "2026-08-29",
+      "scope_rule": "always_voluntary",
+      "profile_required": false,
+      "reason": "The GHG Protocol is an accounting methodology, not a regulation, so it imposes no obligation of its own; regulators cite it as the accounting basis. The current Corporate Value Chain (Scope 3) Standard applies here. The proposed revision introducing a 95% Scope 3 completeness rule is a DRAFT under consultation and is deliberately NOT applied to this inventory.",
+      "note": "Cited standard: GHG Protocol Corporate Standard (revised edition) plus the Corporate Value Chain (Scope 3) Accounting and Reporting Standard. Revision drafts are not applied.",
+      "source": "https://ghgprotocol.org/standards",
+      "recommendations": [
+        "Calculate all three scopes and document the organizational and operational boundary",
+        "Generate a downloadable GHG inventory report with the factor provenance attached"
+      ]
+    },
+    {
+      "key": "iso_20121_2024",
+      "name": "ISO 20121:2024 (Sustainable event management systems)",
+      "regions": ["*"],
+      "status": "management_system_standard",
+      "as_of": "2024-05-31",
+      "scope_rule": "always_voluntary",
+      "profile_required": false,
+      "reason": "ISO 20121 certifies a management system through accredited third-party audit; it is never a numeric per-event score, so a clause evidence checklist is shown instead. Certificates issued against the 2012 edition must transition to the 2024 edition by 31 March 2027.",
+      "note": "Voluntary certifiable standard. This tool collects none of the clause evidence, so every clause below is recorded as not evidenced.",
+      "source": "https://www.iso.org/standard/86389.html",
+      "clause_checklist": [
+        {"clause": "6.3", "requirement": "Planning of changes to the sustainable event management system"},
+        {"clause": "7.3", "requirement": "Awareness and communication of the sustainability policy to internal and external interested parties"},
+        {"clause": "9.3.4", "requirement": "Management review results: documented outputs, decisions and follow-up actions"},
+        {"clause": "4.1 / 4.2", "requirement": "Consideration of climate change as a relevant external issue and interested-party requirement"},
+        {"clause": "Legacy", "requirement": "Identification and management of the event's intended and unintended legacy"},
+        {"clause": "Annex D", "requirement": "Human rights, labour practices and child-protection considerations across the event supply chain"}
+      ],
+      "recommendations": [
+        "Certification is by accredited audit of the management system, not by an emissions number",
+        "Transition any ISO 20121:2012 certificate to the 2024 edition by 31 March 2027"
+      ]
+    },
+    {
+      "key": "nzce",
+      "name": "Net Zero Carbon Events (NZCE) Measurement Methodology",
+      "regions": ["*"],
+      "status": "voluntary_initiative",
+      "as_of": "2026-08-29",
+      "scope_rule": "always_voluntary",
+      "profile_required": false,
+      "reason": "A voluntary industry initiative. Signatories commit to measuring against the 9-category methodology and to reporting progress publicly at least every two years; it creates no statutory obligation.",
+      "note": "Signatory-based commitment, never listed as a mandatory framework.",
+      "source": "https://www.netzerocarbonevents.org/",
+      "gaps": [
+        "Categories measured here: Travel, Local Transport, Energy, Accommodation, Food & Beverage, Waste, Digital Content, and parts of Production & Materials; Freight & Logistics only as an equipment freight line",
+        "Biennial public reporting commitment to NZCE not evidenced",
+        "No baseline year or reduction trajectory towards net zero by 2050 provided"
+      ],
+      "recommendations": [
+        "Use the NZCE category mapping section included in the exported reports",
+        "Become an NZCE signatory and report progress at least every two years",
+        "Set a baseline year and interim reduction targets per the NZCE roadmap"
+      ]
+    },
+    {
+      "key": "event_carbon_intensity",
+      "name": "Event carbon intensity (vs published event benchmarks)",
+      "regions": ["*"],
+      "status": "benchmark",
+      "as_of": "2026-08-29",
+      "scope_rule": "benchmark",
+      "profile_required": false,
+      "typical_band_tco2e_per_attendee_day": 0.3,
+      "reason": "Informational comparison of this event's intensity against published event bands (roughly 0.15 to 0.5 tCO2e per attendee per day). It is not an SBTi determination: SBTi validates corporate inventories and targets, not single events.",
+      "note": "Band sourced from MeetGreen / JMIC published event figures.",
+      "source": "https://www.netzerocarbonevents.org/",
+      "recommendations": [
+        "Informational only - not an SBTi determination (SBTi validates corporate inventories)",
+        "Compare against Net Zero Carbon Events / MeetGreen published event bands"
+      ]
+    },
+    {
+      "key": "eu_csrd",
+      "name": "EU CSRD / ESRS E1 climate disclosure",
+      "regions": ["european_union"],
+      "status": "in_force",
+      "as_of": "2026-07-03",
+      "first_reporting_fy": 2027,
+      "scope_rule": "eu_csrd",
+      "profile_required": true,
+      "thresholds": {
+        "employees_gt": 1000,
+        "employees_gt_label": "more than 1,000 employees",
+        "turnover_gt": 450000000,
+        "turnover_gt_label": "more than EUR 450m turnover"
+      },
+      "scope3_from_fy": 2027,
+      "note": "Omnibus I, adopted 24 February 2026, narrowed CSRD to undertakings with more than 1,000 employees AND more than EUR 450m turnover, applying to financial years starting on or after 1 January 2027. The simplified ESRS were adopted 3 July 2026.",
+      "source": "https://finance.ec.europa.eu/capital-markets-union-and-financial-markets/company-reporting-and-auditing/company-reporting_en",
+      "gaps": [
+        "Double materiality assessment required",
+        "ESRS E1 climate disclosure incomplete",
+        "Statutory penalties are member-state specific (e.g. Germany: up to EUR 10M or 5% of turnover)"
+      ],
+      "recommendations": [
+        "Commission a double materiality assessment",
+        "Align reporting with the simplified ESRS adopted 3 July 2026"
+      ]
+    },
+    {
+      "key": "sgx_issb",
+      "name": "SGX climate reporting (IFRS S2 / ISSB)",
+      "regions": ["singapore"],
+      "status": "in_force",
+      "as_of": "2026-08-29",
+      "first_reporting_fy": null,
+      "first_reporting_fy_note": "Tier-dependent — see tiers below. No single year applies to the framework as a whole.",
+      "scope_rule": "sgx_issb",
+      "profile_required": true,
+      "tiers": {
+        "sti_constituent": {
+          "label": "STI constituent",
+          "first_reporting_fy": 2025,
+          "scope3_from_fy": 2026,
+          "scope3_basis": "mandatory"
+        },
+        "listed": {
+          "label": "Listed issuer (non-STI)",
+          "size_threshold": 1000000000,
+          "size_threshold_label": "SGD 1bn market capitalisation",
+          "first_reporting_fy_above_threshold": 2028,
+          "first_reporting_fy_below_threshold": 2030,
+          "scope3_from_fy": null,
+          "scope3_basis": "voluntary"
+        },
+        "none": {
+          "label": "Large non-listed company",
+          "size_threshold": 1000000000,
+          "size_threshold_label": "SGD 1bn revenue",
+          "first_reporting_fy_above_threshold": 2030,
+          "scope3_from_fy": null,
+          "scope3_basis": "voluntary"
+        }
+      },
+      "note": "Tiered ISSB-aligned climate reporting: STI constituents from FY2025 with Scope 3 mandatory from FY2026; other listed issuers above SGD 1bn market capitalisation from FY2028 and the remainder from FY2030; large non-listed companies from FY2030. Scope 3 remains voluntary outside the STI tier.",
+      "source": "https://www.sgx.com/regulation/sustainability-reporting",
+      "gaps": [
+        "Annual sustainability report not evidenced",
+        "IFRS S2 / ISSB-aligned climate disclosure not evidenced"
+      ],
+      "recommendations": [
+        "Prepare the annual sustainability report on the IFRS S2 basis",
+        "Confirm the reporting tier with SGX RegCo before relying on a phase-in date"
+      ]
+    },
+    {
+      "key": "uk_srs",
+      "name": "UK Sustainability Reporting Standards (UK SRS S1 and S2)",
+      "regions": ["united_kingdom"],
+      "status": "proposed",
+      "as_of": "2026-02-25",
+      "first_reporting_fy": null,
+      "scope_rule": "uk_srs",
+      "profile_required": false,
+      "reason": "UK SRS S1 and S2 were published on 25 February 2026 for VOLUNTARY use. A mandatory regime is proposed from 1 January 2027, subject to the FCA policy statement expected in autumn 2026. It is not law today, so no obligation is asserted here.",
+      "note": "Voluntary standards today; the mandatory regime is a proposal, not an enacted requirement.",
+      "source": "https://www.gov.uk/government/publications/uk-sustainability-reporting-standards",
+      "recommendations": [
+        "Voluntary early adoption of UK SRS S1/S2 is possible now",
+        "Track the FCA policy statement expected in autumn 2026 before planning for a mandatory 2027 start"
+      ]
+    },
+    {
+      "key": "au_asrs",
+      "name": "Australian Sustainability Reporting Standards (AASB S2)",
+      "regions": ["australia"],
+      "status": "in_force",
+      "as_of": "2026-08-29",
+      "first_reporting_fy": null,
+      "first_reporting_fy_note": "Tier-dependent — see tiers below. No single year applies to the framework as a whole.",
+      "scope_rule": "au_asrs",
+      "profile_required": true,
+      "tiers": {
+        "asrs_group1": {
+          "label": "Group 1",
+          "first_reporting_fy": 2025,
+          "first_period_note": "Group 1 first reporting periods began on or after 1 January 2025.",
+          "scope3_from_fy": 2026
+        },
+        "asrs_group2": {
+          "label": "Group 2",
+          "first_reporting_fy": 2026,
+          "first_period_note": "Group 2 first reporting periods begin on or after 1 July 2026.",
+          "scope3_from_fy": 2027
+        }
+      },
+      "note": "AASB S2 phases in by entity group. Scope 3 greenhouse gas disclosure is NOT required in an entity's first reporting period and becomes mandatory from the second. Group membership depends on size, revenue and emitter status, which this profile does not derive.",
+      "source": "https://www.aasb.gov.au/publications/aasb-s2/",
+      "gaps": [
+        "Climate statements and directors' declaration not evidenced",
+        "Scenario analysis under AASB S2 not evidenced"
+      ],
+      "recommendations": [
+        "Confirm the ASRS group from the consolidated revenue, assets and employee tests",
+        "Prepare climate statements including the required scenario analysis"
+      ]
+    },
+    {
+      "key": "ca_sb253",
+      "name": "California SB 253 (Climate Corporate Data Accountability Act)",
+      "regions": ["usa"],
+      "status": "in_force",
+      "as_of": "2026-02-28",
+      "first_reporting_fy": 2025,
+      "scope_rule": "ca_sb253",
+      "profile_required": true,
+      "thresholds": {
+        "revenue_gt": 1000000000,
+        "revenue_gt_label": "more than USD 1bn total annual revenue",
+        "requires_california_nexus": true
+      },
+      "scope3_from_fy": 2026,
+      "first_report_due": "10 November 2026",
+      "note": "CARB adopted its implementing rules in February 2026. The first Scope 1 and 2 reports (covering FY2025) are due 10 November 2026, extended from August. Scope 3 reporting begins in 2027 covering FY2026. Applies to entities with more than USD 1bn total annual revenue doing business in California. The regime remains in flux: deadlines and templates have moved more than once and litigation continues.",
+      "source": "https://ww2.arb.ca.gov/our-work/programs/climate-corporate-data-accountability-act",
+      "gaps": [
+        "Limited assurance over Scope 1 and 2 not evidenced",
+        "CARB reporting template submission not evidenced"
+      ],
+      "recommendations": [
+        "Confirm the current CARB filing deadline before relying on a date - it has moved before",
+        "Arrange limited assurance over the Scope 1 and 2 inventory"
+      ]
+    },
+    {
+      "key": "ca_sb261",
+      "name": "California SB 261 (Climate-Related Financial Risk Act)",
+      "regions": ["usa"],
+      "status": "enjoined",
+      "as_of": "2025-11-18",
+      "first_reporting_fy": null,
+      "scope_rule": "ca_sb261",
+      "profile_required": false,
+      "reason": "Enjoined. The Ninth Circuit granted an injunction on 18 November 2025 and the matter remains pending. SB 261 is not enforceable while that injunction stands and must not be asserted as a binding obligation.",
+      "note": "Reported for awareness only. No obligation is asserted while the injunction is in place; monitor the appeal rather than planning to a filing date.",
+      "source": "https://ww2.arb.ca.gov/our-work/programs/climate-related-financial-risk-act",
+      "recommendations": [
+        "Monitor the Ninth Circuit appeal; do not plan to an SB 261 filing date while the injunction stands"
+      ]
+    }
+  ]
+}
