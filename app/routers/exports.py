@@ -34,7 +34,6 @@ from app.models.schemas import (
 )
 from app.routers.auth import get_current_user
 from app.services.claims import portfolio_claim_statement
-from app.services.emissions_engine import ENGINE_VERSION
 from app.services.financial_engine import get_compliance_report
 from app.services.scenario_serializer import serialize_scenario
 from app.utils.time import utcnow
@@ -46,6 +45,10 @@ router = APIRouter()
 reports_router = APIRouter()
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
+
+# Recorded when a scenario carries no provenance for a version (e.g. it was calculated
+# before engine versioning existed). Never substitute the running version for it.
+_UNKNOWN_VERSION = "unknown"
 
 # CSV/Excel formula-injection mitigation. A string cell beginning with any of these
 # is interpreted as a formula (or DDE payload) by Excel/LibreOffice/Sheets when the
@@ -365,13 +368,20 @@ def payload_sha256(payload: dict[str, Any]) -> str:
     return hashlib.sha256(canonical_payload_json(payload).encode("utf-8")).hexdigest()
 
 
+def _version_label(name: str, value: str) -> str:
+    """`engine v2.0.0` for a recorded version, `engine unknown` when it was never captured."""
+    if value == _UNKNOWN_VERSION:
+        return f"{name} {_UNKNOWN_VERSION}"
+    return f"{name} v{value}"
+
+
 def _provenance_footer_text(ef_version: str, engine_version: str, sha256: str) -> str:
     """The integrity line printed in the PDF footer. Empty when nothing is known."""
     parts = []
     if ef_version:
-        parts.append(f"factors v{ef_version}")
+        parts.append(_version_label("factors", ef_version))
     if engine_version:
-        parts.append(f"engine v{engine_version}")
+        parts.append(_version_label("engine", engine_version))
     if sha256:
         parts.append(f"sha256 {sha256[:12]}")
     if not parts:
@@ -399,8 +409,13 @@ async def _record_report_snapshot(
         scenario_id=scenario_id,
         format=export_format,
         payload=payload,
-        ef_version=str(factors.get("ef_version") or "unknown"),
-        engine_version=str(factors.get("engine_version") or ENGINE_VERSION),
+        # Both fall back to "unknown", never to the *running* versions: a report is
+        # rendered from stored columns without recalculating, so a scenario computed
+        # before engine versioning existed must not be stamped with today's engine.
+        # This also matches `_factor_drift`, which treats a snapshot with no
+        # engine_version as stale rather than current.
+        ef_version=str(factors.get("ef_version") or _UNKNOWN_VERSION),
+        engine_version=str(factors.get("engine_version") or _UNKNOWN_VERSION),
         sha256=payload_sha256(payload),
     )
     db.add(snapshot)

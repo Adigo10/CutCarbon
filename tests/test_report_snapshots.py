@@ -4,15 +4,19 @@ Covers: ENGINE_VERSION stamped into the factors snapshot, the write-on-export
 report_snapshots row, listing/retrieval with ownership enforcement, canonical
 sha256 stability, the PDF provenance footer, and the factor-drift serializer field.
 """
+import asyncio
 import json
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
-from app.models.database import ScenarioDB
+import app.models.database as database
+from app.models.database import ReportSnapshotDB, ScenarioDB
 from app.models.schemas import EventScenarioInput
 from app.routers.exports import (
     _provenance_footer_text,
+    _snapshot_provenance,
     canonical_payload_json,
     payload_sha256,
 )
@@ -71,6 +75,29 @@ def test_provenance_footer_tolerates_missing_snapshot():
     assert _provenance_footer_text("", "", "") == ""
 
 
+def test_provenance_footer_never_invents_a_version_it_does_not_know():
+    """A report whose provenance was never recorded must say so, not guess.
+
+    Reports are rendered from stored columns without recalculating, so printing the
+    *current* engine version on a legacy row would assert to an auditor that numbers
+    were produced by an engine that never touched them.
+    """
+    text = _provenance_footer_text("unknown", "unknown", "a" * 64)
+    assert "engine unknown" in text
+    assert "factors unknown" in text
+    assert "vunknown" not in text  # no "engine vunknown" mangling
+    assert ENGINE_VERSION not in text
+
+
+def test_snapshot_provenance_for_legacy_row_reports_unknown_engine():
+    """The exact string handed to the PDF footer for a pre-versioning scenario."""
+    snapshot = ReportSnapshotDB(ef_version="2026.1", engine_version="unknown", sha256="b" * 64)
+    text = _snapshot_provenance(snapshot)
+    assert "factors v2026.1" in text
+    assert "engine unknown" in text
+    assert ENGINE_VERSION not in text
+
+
 # -- Part C: write-on-export + retrieval (DB-backed) ---------------------------
 
 @pytest.mark.parametrize("fmt", REPORT_FORMATS)
@@ -123,6 +150,59 @@ def test_report_snapshots_accumulate_and_are_newest_first(client: TestClient):
     assert len(rows) == len(REPORT_FORMATS)
     assert {r["format"] for r in rows} == set(REPORT_FORMATS)
     assert [r["created_at"] for r in rows] == sorted((r["created_at"] for r in rows), reverse=True)
+
+
+def _strip_engine_version(scenario_id: str) -> None:
+    """Rewrite a stored scenario to look like one saved before engine versioning."""
+
+    async def _runner():
+        async with database.AsyncSessionLocal() as session:
+            row = await session.scalar(select(ScenarioDB).where(ScenarioDB.id == scenario_id))
+            snapshot = dict(row.factors_snapshot or {})
+            snapshot.pop("engine_version", None)
+            row.factors_snapshot = snapshot  # reassign so SQLAlchemy sees the change
+            await session.commit()
+
+    asyncio.run(_runner())
+
+
+@pytest.mark.parametrize("fmt", REPORT_FORMATS)
+def test_legacy_scenario_is_not_stamped_with_the_current_engine_version(
+    client: TestClient, fmt: str
+):
+    """A pre-versioning row must snapshot engine_version='unknown', never the current one.
+
+    Exports are built from stored columns with no recalculation, so claiming the
+    running engine produced those numbers would be false provenance in an
+    auditor-facing report.
+    """
+    headers = register_user(client)
+    scenario_id = create_scenario(client, headers)["scenario_id"]
+    _strip_engine_version(scenario_id)
+
+    assert client.get(f"/api/exports/scenarios/{scenario_id}.{fmt}", headers=headers).status_code == 200
+    row = client.get(f"/api/scenarios/{scenario_id}/reports", headers=headers).json()[0]
+
+    assert row["engine_version"] == "unknown"
+    assert row["engine_version"] != ENGINE_VERSION
+    # Only the engine provenance is missing — the factor catalog is still known.
+    assert row["ef_version"] == EF.get("version", "unknown")
+
+
+def test_legacy_scenario_is_reported_stale_and_snapshotted_unknown_consistently(
+    client: TestClient,
+):
+    """The drift flag and the stored snapshot must agree about missing provenance."""
+    headers = register_user(client)
+    scenario_id = create_scenario(client, headers)["scenario_id"]
+    _strip_engine_version(scenario_id)
+
+    scenario = client.get(f"/api/scenarios/{scenario_id}", headers=headers).json()
+    assert scenario["factors_stale"] is True  # serializer treats it as stale...
+
+    assert client.get(f"/api/exports/scenarios/{scenario_id}.pdf", headers=headers).status_code == 200
+    row = client.get(f"/api/scenarios/{scenario_id}/reports", headers=headers).json()[0]
+    assert row["engine_version"] == "unknown"  # ...so the snapshot must not claim otherwise
 
 
 def test_report_snapshot_endpoints_require_auth(client: TestClient):
