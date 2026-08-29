@@ -23,6 +23,7 @@ import {
   sortScenariosByTotal,
   topEmissionSource,
 } from '../lib/format'
+import { DATA_QUALITY_LABELS } from '../types'
 import type {
   ComplianceReport,
   FinancialCalcState,
@@ -286,7 +287,7 @@ export function DashboardView({
           labels: selectedOpportunities.map((row) => row.label),
           datasets: [
             {
-              label: 'Potential tCO2e reduction',
+              label: 'Illustrative tCO2e reduction',
               data: selectedOpportunities.map((row) => row.value),
               backgroundColor: selectedOpportunities.map((row) => row.color),
               borderRadius: 8,
@@ -347,19 +348,21 @@ export function DashboardView({
       }
     : null
 
+  // The line stops at the residual footprint. It used to end on a hardcoded 0,
+  // which drew a "net zero achieved" conclusion the model never produced.
+  const illustrativeResidual = Math.max(
+    selectedScenario.emissions.total_tco2e - estimatedReductionOpportunity(selectedScenario),
+    0,
+  )
+
   const pathwayConfig: ChartConfiguration<'line'> = {
     type: 'line',
     data: {
-      labels: ['Current', 'Operational cuts', 'Residual', 'Offset-ready'],
+      labels: ['Current footprint', 'After illustrative cuts'],
       datasets: [
         {
           label: 'tCO2e',
-          data: [
-            selectedScenario.emissions.total_tco2e,
-            selectedScenario.emissions.total_tco2e - estimatedReductionOpportunity(selectedScenario),
-            Math.max(selectedScenario.emissions.total_tco2e - estimatedReductionOpportunity(selectedScenario), 0),
-            0,
-          ],
+          data: [selectedScenario.emissions.total_tco2e, illustrativeResidual],
           borderColor: '#146f48',
           backgroundColor: 'rgba(20,111,72,0.08)',
           fill: true,
@@ -401,6 +404,10 @@ export function DashboardView({
             <div>
               <span>Intensity band</span>
               <strong>{intensityBand(selectedScenario)}</strong>
+            </div>
+            <div>
+              <span>Data quality</span>
+              <strong>{DATA_QUALITY_LABELS[selectedScenario.emissions.data_quality] ?? DATA_QUALITY_LABELS.modelled}</strong>
             </div>
           </div>
           <div className="hero-actions hero-actions-row">
@@ -456,9 +463,9 @@ export function DashboardView({
           tone="amber"
         />
         <MetricCard
-          eyebrow="Reduction opportunity"
+          eyebrow="Reduction opportunity (illustrative)"
           value={formatTons(estimatedReductionOpportunity(selectedScenario))}
-          detail="Illustrative default — load Suggestions for the modeled plan"
+          detail="Illustrative default fractions — load Suggestions for the modelled plan"
           tone="rose"
         />
       </div>
@@ -512,10 +519,11 @@ export function DashboardView({
           <div className="panel-heading">
             <div>
               <span className="eyebrow">Abatement model</span>
-              <h3>Reduction opportunity</h3>
+              <h3>Reduction opportunity (illustrative)</h3>
             </div>
+            <p>Illustrative default fractions per category — load Suggestions for the modelled plan.</p>
           </div>
-          <ChartSurface config={opportunityConfig} empty="No modeled reductions available yet." height={260} />
+          <ChartSurface config={opportunityConfig} empty="No illustrative reductions available yet." height={260} />
         </Panel>
       </div>
 
@@ -524,9 +532,12 @@ export function DashboardView({
           <div className="panel-heading">
             <div>
               <span className="eyebrow">Pathway</span>
-              <h3>Operational path to net zero</h3>
+              <h3>Illustrative reduction pathway</h3>
             </div>
-            <p>Shows how much of the current footprint could be cut before offsetting.</p>
+            <p>
+              Illustrative only — built from default per-category abatement fractions, not a modelled plan. The line
+              ends at the residual footprint, not at zero. Load Suggestions for the modelled reductions.
+            </p>
           </div>
           <ChartSurface config={pathwayConfig} empty="Pathway data unavailable." />
         </Panel>
