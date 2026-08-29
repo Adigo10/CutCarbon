@@ -20,6 +20,47 @@ from app.services.emissions_engine import build_factors_snapshot, get_benchmark_
 # Columns that must never be copied when cloning a scenario row.
 _CLONE_EXCLUDED = {"id", "user_id", "created_at", "updated_at"}
 
+# -- Data-quality tiers --------------------------------------------------------
+# Canonical vocabulary, coarsest first. "primary" is an *evidence* tier: it is
+# awarded only when supporting documents are attached, which the deterministic
+# engine cannot observe, so the engine never emits it (see calculate_scenario).
+DATA_QUALITY_TIERS = ("modelled", "partly_primary", "primary")
+
+# Rows written before the rename still carry the retired words. Map them forward
+# on every read path so the API and the exports never emit the old vocabulary.
+# The old "verified" was awarded for filling in every advanced-mode form — a
+# completeness signal with no evidence behind it — so it maps down to
+# "partly_primary", never up to the evidence tier.
+_LEGACY_DATA_QUALITY = {
+    "estimated": "modelled",
+    "partial": "partly_primary",
+    "verified": "partly_primary",
+}
+
+# Client-facing rendering (exports, UI). Values, not claims: the tier number
+# names the strength of the underlying data, not an assurance level.
+_DATA_QUALITY_LABELS = {
+    "modelled": "Tier 3 — modelled",
+    "partly_primary": "Tier 2 — partly primary",
+    "primary": "Tier 1 — primary (evidenced)",
+}
+
+
+def normalize_data_quality(value: Any) -> str:
+    """Any stored/legacy data-quality value -> the canonical tier.
+
+    Unknown or missing values fall back to the most conservative tier, so a bad
+    row can never overstate how well evidenced a footprint is.
+    """
+    if value in DATA_QUALITY_TIERS:
+        return value
+    return _LEGACY_DATA_QUALITY.get(value, "modelled")
+
+
+def data_quality_label(value: Any) -> str:
+    """Canonical or legacy tier -> the label rendered in reports and the UI."""
+    return _DATA_QUALITY_LABELS[normalize_data_quality(value)]
+
 
 def serialize_scenario(s: ScenarioDB) -> dict[str, Any]:
     """ScenarioDB row -> the wire/report dict used by the API and all exports."""
@@ -49,7 +90,7 @@ def serialize_scenario(s: ScenarioDB) -> dict[str, Any]:
             "total_tco2e": s.total_tco2e,
             "per_attendee_tco2e": s.per_attendee_tco2e,
             "per_attendee_day_tco2e": per_attendee_day,
-            "data_quality": s.data_quality,
+            "data_quality": normalize_data_quality(s.data_quality),
             "scopes": {
                 "scope1_tco2e": getattr(s, "scope1_tco2e", 0) or 0,
                 "scope2_tco2e": getattr(s, "scope2_tco2e", 0) or 0,
@@ -117,7 +158,7 @@ def db_row_to_result(s: ScenarioDB) -> ScenarioResult:
             digital_tco2e=getattr(s, "digital_tco2e", 0) or 0,
             total_tco2e=s.total_tco2e,
             per_attendee_tco2e=s.per_attendee_tco2e,
-            data_quality=s.data_quality,
+            data_quality=normalize_data_quality(s.data_quality),
             scopes=ScopeBreakdown(
                 scope1_tco2e=getattr(s, "scope1_tco2e", 0) or 0,
                 scope2_tco2e=getattr(s, "scope2_tco2e", 0) or 0,

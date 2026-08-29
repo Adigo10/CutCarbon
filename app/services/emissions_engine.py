@@ -693,10 +693,13 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
     per_attendee = total_tco2e / attendees if attendees > 0 else 0
     per_attendee_day = per_attendee / days if days > 0 else per_attendee
 
-    # Data quality flag. A populated venue_energy (even grid + renewable only) counts
-    # as real input. "verified" is reachable only when the scenario is in ADVANCED mode
-    # AND all core categories carry measured inputs — i.e. complete primary data, not
-    # proxy estimates. (This is a completeness tier, not a third-party assurance claim.)
+    # Data quality tier. A populated venue_energy (even grid + renewable only) counts
+    # as real input. The engine can award "modelled" (Tier 3, everything from proxies)
+    # and "partly_primary" (Tier 2, at least one measured input) only — "primary"
+    # (Tier 1) requires attached supporting evidence, which the engine has no view of.
+    # Filling in every advanced-mode form proves completeness, not provenance, so a
+    # fully populated scenario still lands on Tier 2. See
+    # app.services.scenario_serializer.DATA_QUALITY_TIERS for the canonical vocabulary.
     core_provided = {
         "travel": bool(scenario.travel_segments),
         "venue_energy": scenario.venue_energy is not None,
@@ -722,7 +725,8 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
         return "not provided" if optional else "proxy"
 
     # Segments that cover only part of the headcount are a mix of measured and proxy
-    # data, so the travel category lands on the existing "partial" tier.
+    # data, so the travel category is flagged "partial" (a per-category coverage flag,
+    # distinct from the scenario-level tier assigned below).
     travel_quality = "partial" if "travel_coverage" in t_notes else _quality(
         core_provided["travel"], gated=is_virtual
     )
@@ -741,12 +745,7 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
         ),
     }
 
-    if all_core_provided and scenario.mode == ScenarioMode.ADVANCED:
-        quality = "verified"
-    elif has_actual_data:
-        quality = "partial"
-    else:
-        quality = "estimated"
+    quality = "partly_primary" if has_actual_data else "modelled"
 
     if scenario.mode == ScenarioMode.ADVANCED and not all_core_provided:
         missing = [k for k, v in core_provided.items() if not v]

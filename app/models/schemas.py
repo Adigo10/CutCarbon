@@ -231,7 +231,7 @@ class EmissionBreakdown(BaseModel):
     total_tco2e: float = 0.0
     per_attendee_tco2e: float = 0.0
     per_attendee_day_tco2e: float = 0.0
-    data_quality: str = "estimated"  # estimated | partial | verified
+    data_quality: str = "modelled"  # modelled | partly_primary | primary
     scopes: Optional[ScopeBreakdown] = None
 
 

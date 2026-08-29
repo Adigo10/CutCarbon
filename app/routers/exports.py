@@ -24,7 +24,7 @@ from app.models.schemas import (
 from app.routers.auth import get_current_user
 from app.services.claims import portfolio_claim_statement
 from app.services.financial_engine import get_compliance_report
-from app.services.scenario_serializer import serialize_scenario
+from app.services.scenario_serializer import data_quality_label, serialize_scenario
 from app.utils.time import utcnow
 
 router = APIRouter()
@@ -371,7 +371,7 @@ def _scenario_report_csv_bytes(report: ScenarioReportPayload) -> bytes:
         ("metadata", "attendees", "Attendees", scenario["attendees"], "count"),
         ("metadata", "event_days", "Event Days", scenario["event_days"], "days"),
         ("metadata", "mode", "Mode", scenario.get("mode", ""), ""),
-        ("metadata", "data_quality", "Data Quality", emissions["data_quality"], ""),
+        ("metadata", "data_quality", "Data Quality", data_quality_label(emissions["data_quality"]), ""),
         ("metadata", "created_at", "Created At", scenario["created_at"], ""),
         ("metadata", "exported_at", "Exported At", report.exported_at, ""),
         ("metadata", "region", "Compliance Region", report.compliance_overrides.region, ""),
@@ -472,7 +472,7 @@ def _scenario_report_xlsx(report: ScenarioReportPayload):
         ("Total tCO2e", emissions["total_tco2e"]),
         ("Per Attendee tCO2e", emissions["per_attendee_tco2e"]),
         ("Per Attendee Day tCO2e", emissions["per_attendee_day_tco2e"]),
-        ("Data Quality", emissions["data_quality"]),
+        ("Data Quality", data_quality_label(emissions["data_quality"])),
         ("Overall Compliance Score", report.compliance.overall_score_pct),
         ("Offset Coverage %", report.offset_portfolio.coverage_pct if report.offset_portfolio.coverage_pct is not None else "—"),
     ]:
@@ -724,7 +724,7 @@ def _scenario_report_pdf(report: ScenarioReportPayload) -> bytes:
                 ["Event Type", _labelize(scenario["event_type"])],
                 ["Attendees", scenario["attendees"]],
                 ["Event Days", scenario["event_days"]],
-                ["Data Quality", emissions["data_quality"]],
+                ["Data Quality", data_quality_label(emissions["data_quality"])],
                 ["Compliance Region", report.compliance_overrides.region],
             ],
             [5 * cm, 11 * cm],
@@ -909,7 +909,7 @@ def _build_scenarios_workbook(rows):
             round(s.scope1_tco2e or 0, 4),
             round(s.scope2_tco2e or 0, 4),
             round(s.scope3_tco2e or 0, 4),
-            s.data_quality,
+            data_quality_label(s.data_quality),
             s.created_at.strftime("%Y-%m-%d %H:%M") if s.created_at else "",
         ])
 

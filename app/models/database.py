@@ -148,7 +148,7 @@ class ScenarioDB(Base):
     digital_tco2e = Column(Float, default=0.0)
     total_tco2e = Column(Float, default=0.0)
     per_attendee_tco2e = Column(Float, default=0.0)
-    data_quality = Column(String, default="estimated")
+    data_quality = Column(String, default="modelled")
 
     # Scope breakdown
     scope1_tco2e = Column(Float, default=0.0)

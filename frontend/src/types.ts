@@ -103,6 +103,17 @@ export interface ScopeBreakdown {
   scope3_tco2e: number
 }
 
+// Data-quality tiers, coarsest first. `primary` is an evidence tier — the backend
+// awards it only when supporting documents are attached, never for form
+// completeness — so it can arrive from the API but is never inferred here.
+export type DataQualityTier = 'modelled' | 'partly_primary' | 'primary'
+
+export const DATA_QUALITY_LABELS: Record<DataQualityTier, string> = {
+  modelled: 'Tier 3 — modelled',
+  partly_primary: 'Tier 2 — partly primary',
+  primary: 'Tier 1 — primary (evidenced)',
+}
+
 export interface Emissions {
   travel_tco2e: number
   venue_energy_tco2e: number
@@ -115,7 +126,7 @@ export interface Emissions {
   total_tco2e: number
   per_attendee_tco2e: number
   per_attendee_day_tco2e: number
-  data_quality: string
+  data_quality: DataQualityTier
   scopes?: ScopeBreakdown
 }
 
