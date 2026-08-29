@@ -167,6 +167,87 @@ export function AuthView({
   )
 }
 
+interface PasswordRecoveryViewProps {
+  password: string
+  confirmPassword: string
+  error: string
+  busy: boolean
+  onPasswordChange: (value: string) => void
+  onConfirmPasswordChange: (value: string) => void
+  onSubmit: () => void
+}
+
+/** Shown after a Supabase reset link is opened (the PASSWORD_RECOVERY event). The
+ *  recovery link signs the user in, so without this panel their password would be
+ *  silently left unchanged. */
+export function PasswordRecoveryView({
+  password,
+  confirmPassword,
+  error,
+  busy,
+  onPasswordChange,
+  onConfirmPasswordChange,
+  onSubmit,
+}: PasswordRecoveryViewProps) {
+  return (
+    <div className="auth-shell">
+      <div className="auth-poster">
+        <span className="eyebrow">CutCarbon Co-Pilot</span>
+        <h1>Choose a new password to finish recovering your workspace.</h1>
+        <p>
+          You opened a password reset link. Set a new password below — until you do, your old
+          password is still the one on your account.
+        </p>
+      </div>
+      <Panel className="auth-panel">
+        <div className="auth-panel-head">
+          <img className="app-logo" src="/favicon.svg" alt="CutCarbon logo" />
+          <div>
+            <strong>Set a new password</strong>
+            <p>Enter it twice so we can be sure it is what you meant to type.</p>
+          </div>
+        </div>
+        <form
+          className="auth-form"
+          onSubmit={(event) => {
+            event.preventDefault()
+            onSubmit()
+          }}
+        >
+          <label className="field">
+            <span>New password</span>
+            <input
+              value={password}
+              onChange={(event) => onPasswordChange(event.target.value)}
+              placeholder="••••••••"
+              type="password"
+              name="new-password"
+              autoComplete="new-password"
+              required
+            />
+          </label>
+          <label className="field">
+            <span>Confirm new password</span>
+            <input
+              value={confirmPassword}
+              onChange={(event) => onConfirmPasswordChange(event.target.value)}
+              placeholder="••••••••"
+              type="password"
+              name="confirm-password"
+              autoComplete="new-password"
+              required
+            />
+          </label>
+          {error ? <p className="field-error">{error}</p> : null}
+          <Button tone="primary" busy={busy} type="submit">
+            Update password
+          </Button>
+        </form>
+      </Panel>
+    </div>
+  )
+}
+
 interface ChatViewProps {
   messages: ChatMessage[]
   chatInput: string
