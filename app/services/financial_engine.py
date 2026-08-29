@@ -3,7 +3,7 @@ Financial savings + tax compliance engine.
 Calculates carbon tax savings, energy cost reductions, green incentives,
 and compliance value from emission reduction actions.
 """
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, NamedTuple, Optional
 
 from app.models.schemas import (
     FinancialRequest, FinancialResult, TaxSaving, ComplianceCheck, ComplianceClause,
@@ -402,17 +402,25 @@ _FRAMEWORKS: List[Dict[str, Any]] = FRAMEWORKS_DATA["frameworks"]
 _EMPLOYEE_BANDS: Dict[str, Any] = FRAMEWORKS_DATA["employee_bands"]
 _TURNOVER_BANDS: Dict[str, Any] = FRAMEWORKS_DATA["turnover_bands"]
 
-_PROFILE_INCOMPLETE_NOTE = (
-    "Profile incomplete — showing all frameworks as informational. No obligation "
-    "determination has been made; complete the reporting profile to scope them."
-)
 _NO_PROFILE_REASON = (
     "Profile incomplete — shown for information only. This framework's scope test "
     "needs the reporting entity's profile, which was not supplied."
 )
 
-# (applies, reason, scope3_required)
-ScopeDecision = Tuple[str, str, Optional[bool]]
+
+class ScopeDecision(NamedTuple):
+    """One framework's determination for one profile.
+
+    ``first_reporting_fy`` is the year that applies to *this profile's tier*, which
+    is not the same as the framework's earliest year: an ASRS Group 2 entity starts
+    in FY2026, not Group 1's FY2025. It is None whenever the tier is undetermined,
+    because there is no single year to name.
+    """
+
+    applies: str
+    reason: str
+    scope3_required: Optional[bool] = None
+    first_reporting_fy: Optional[int] = None
 
 
 def _band_position(band_key: Optional[str], bands: Dict[str, Any], threshold: float) -> str:
@@ -441,7 +449,8 @@ def _band_label(band_key: Optional[str], bands: Dict[str, Any]) -> str:
 
 
 def _indeterminate(what: str) -> ScopeDecision:
-    return "informational", f"Cannot scope this framework: {what}", None
+    # No tier determined, so no first reporting year can be named.
+    return ScopeDecision("informational", f"Cannot scope this framework: {what}")
 
 
 # -- Per-framework scope rules -------------------------------------------------
@@ -459,29 +468,30 @@ def _scope_eu_csrd(fw: Dict[str, Any], profile: ReportingProfile) -> ScopeDecisi
         return _indeterminate("the employee and turnover bands are both needed for the "
                               f"post-Omnibus I size test ({test}).")
     if employees == "below" or turnover == "below":
-        return (
+        return ScopeDecision(
             "out_of_scope",
             f"Post-Omnibus I (adopted 24 February 2026), CSRD is mandatory only for "
             f"undertakings with {test}. This profile reports "
             f"{_band_label(profile.employee_band, _EMPLOYEE_BANDS)} employees and "
             f"{_band_label(profile.annual_turnover_band, _TURNOVER_BANDS)} turnover.",
-            None,
+            first_reporting_fy=first_fy,
         )
     if employees == "straddles" or turnover == "straddles":
         return _indeterminate(f"a reported size band spans the threshold ({test}).")
     if profile.reporting_fy < first_fy:
-        return (
+        return ScopeDecision(
             "not_in_force",
             f"In scope on size, but CSRD applies to financial years starting on or after "
             f"1 January {first_fy} (simplified ESRS adopted 3 July 2026). This profile "
             f"reports FY{profile.reporting_fy}.",
-            None,
+            first_reporting_fy=first_fy,
         )
-    return (
+    return ScopeDecision(
         "mandatory",
         f"In scope: {test}, reporting FY{profile.reporting_fy} (CSRD applies to financial "
         f"years starting on or after 1 January {first_fy}). ESRS E1 requires Scope 3.",
-        True,
+        scope3_required=True,
+        first_reporting_fy=first_fy,
     )
 
 
@@ -502,19 +512,20 @@ def _scope_sgx_issb(fw: Dict[str, Any], profile: ReportingProfile) -> ScopeDecis
     if profile.listing_status == "sti_constituent":
         first_fy, scope3_fy = tier["first_reporting_fy"], tier["scope3_from_fy"]
         if fy < first_fy:
-            return (
+            return ScopeDecision(
                 "not_in_force",
                 f"STI constituents report ISSB climate-related disclosures from FY{first_fy}; "
                 f"this profile reports FY{fy}.",
-                None,
+                first_reporting_fy=first_fy,
             )
         scope3 = fy >= scope3_fy
-        return (
+        return ScopeDecision(
             "mandatory",
             f"STI constituent: ISSB climate-related disclosure mandatory from FY{first_fy}, "
             f"Scope 3 mandatory from FY{scope3_fy}. Reporting FY{fy}, so Scope 3 is "
             f"{'required' if scope3 else 'not yet required'}.",
-            scope3,
+            scope3_required=scope3,
+            first_reporting_fy=first_fy,
         )
 
     # Non-STI tiers: the phase-in year turns on size, and Scope 3 stays voluntary.
@@ -530,48 +541,50 @@ def _scope_sgx_issb(fw: Dict[str, Any], profile: ReportingProfile) -> ScopeDecis
         first_fy = (tier["first_reporting_fy_above_threshold"] if size == "above"
                     else tier["first_reporting_fy_below_threshold"])
         if fy < first_fy:
-            return (
+            return ScopeDecision(
                 "not_in_force",
                 f"{tier['label']}: in scope from FY{first_fy}; this profile reports FY{fy}."
                 + approximation,
-                None,
+                first_reporting_fy=first_fy,
             )
-        return (
+        return ScopeDecision(
             "mandatory",
             f"{tier['label']}: climate reporting from FY{first_fy}, reporting FY{fy}. "
             f"Scope 3 disclosure is voluntary outside the STI tier." + approximation,
-            False,
+            scope3_required=False,
+            first_reporting_fy=first_fy,
         )
 
     # Non-listed: only the large ones ever come into scope.
     first_fy = tier["first_reporting_fy_above_threshold"]
     if size == "below":
-        return (
+        return ScopeDecision(
             "out_of_scope",
             f"Only large non-listed companies ({size_test}) come into scope, from FY{first_fy}. "
             f"This profile reports {_band_label(profile.annual_turnover_band, _TURNOVER_BANDS)}."
             + approximation,
-            None,
+            first_reporting_fy=first_fy,
         )
     if fy < first_fy:
-        return (
+        return ScopeDecision(
             "not_in_force",
             f"{tier['label']}: in scope from FY{first_fy}; this profile reports FY{fy}."
             + approximation,
-            None,
+            first_reporting_fy=first_fy,
         )
-    return (
+    return ScopeDecision(
         "mandatory",
         f"{tier['label']}: climate reporting from FY{first_fy}, reporting FY{fy}. "
         f"Scope 3 disclosure is voluntary outside the STI tier." + approximation,
-        False,
+        scope3_required=False,
+        first_reporting_fy=first_fy,
     )
 
 
 def _scope_uk_srs(fw: Dict[str, Any], profile: Optional[ReportingProfile]) -> ScopeDecision:
     # Published for voluntary use; the mandatory regime is only proposed, so this
     # can never be "mandatory" regardless of how large the entity is.
-    return "voluntary", fw["reason"], None
+    return ScopeDecision("voluntary", fw["reason"])
 
 
 def _scope_au_asrs(fw: Dict[str, Any], profile: ReportingProfile) -> ScopeDecision:
@@ -587,21 +600,22 @@ def _scope_au_asrs(fw: Dict[str, Any], profile: ReportingProfile) -> ScopeDecisi
 
     first_fy, scope3_fy = tier["first_reporting_fy"], tier["scope3_from_fy"]
     if fy < first_fy:
-        return (
+        return ScopeDecision(
             "not_in_force",
             f"{tier['label']}: {tier['first_period_note']} This profile reports FY{fy}.",
-            None,
+            first_reporting_fy=first_fy,
         )
     scope3 = fy >= scope3_fy
     first_period = "" if scope3 else (
         " Scope 3 is not required in an entity's first reporting period and becomes "
         "mandatory from the second."
     )
-    return (
+    return ScopeDecision(
         "mandatory",
         f"{tier['label']}: {tier['first_period_note']} Reporting FY{fy}, so Scope 3 is "
         f"{'required' if scope3 else 'not yet required'}.{first_period}",
-        scope3,
+        scope3_required=scope3,
+        first_reporting_fy=first_fy,
     )
 
 
@@ -611,46 +625,46 @@ def _scope_ca_sb253(fw: Dict[str, Any], profile: ReportingProfile) -> ScopeDecis
     if fy is None:
         return _indeterminate("the reporting financial year was not supplied.")
     if not profile.does_business_in_california:
-        return (
+        return ScopeDecision(
             "out_of_scope",
             "SB 253 applies to entities doing business in California; this profile does "
             "not report a California nexus.",
-            None,
         )
     revenue = _band_position(profile.annual_turnover_band, _TURNOVER_BANDS, thresholds["revenue_gt"])
     test = thresholds["revenue_gt_label"]
     if revenue in ("unknown", "straddles"):
         return _indeterminate(f"the revenue test is {test} and the reported band cannot settle it.")
+    first_fy, scope3_fy, due = fw["first_reporting_fy"], fw["scope3_from_fy"], fw["first_report_due"]
     if revenue == "below":
-        return (
+        return ScopeDecision(
             "out_of_scope",
             f"SB 253 applies to entities with {test}. This profile reports "
             f"{_band_label(profile.annual_turnover_band, _TURNOVER_BANDS)} revenue.",
-            None,
+            first_reporting_fy=first_fy,
         )
 
-    first_fy, scope3_fy, due = fw["first_reporting_fy"], fw["scope3_from_fy"], fw["first_report_due"]
     if fy < first_fy:
-        return (
+        return ScopeDecision(
             "not_in_force",
             f"In scope on size and California nexus, but the first reporting year is "
             f"FY{first_fy}; this profile reports FY{fy}.",
-            None,
+            first_reporting_fy=first_fy,
         )
     scope3 = fy >= scope3_fy
-    return (
+    return ScopeDecision(
         "mandatory",
         f"In scope: {test} and doing business in California. The first Scope 1 and 2 "
         f"report (covering FY{first_fy}) is due {due}; Scope 3 reporting begins in "
         f"{scope3_fy + 1} covering FY{scope3_fy}. Reporting FY{fy}, so Scope 3 is "
         f"{'required' if scope3 else 'not yet required'}.",
-        scope3,
+        scope3_required=scope3,
+        first_reporting_fy=first_fy,
     )
 
 
 def _scope_ca_sb261(fw: Dict[str, Any], profile: Optional[ReportingProfile]) -> ScopeDecision:
     # An enjoined statute is never a live obligation, whatever the profile says.
-    return "enjoined", fw["reason"], None
+    return ScopeDecision("enjoined", fw["reason"])
 
 
 _SCOPE_RULES = {
@@ -664,7 +678,13 @@ _SCOPE_RULES = {
 
 
 def _base_check(fw: Dict[str, Any], applies: str, reason: str,
-                scope3_required: Optional[bool] = None) -> ComplianceCheck:
+                scope3_required: Optional[bool] = None,
+                first_reporting_fy: Optional[int] = None) -> ComplianceCheck:
+    """Build a check. ``first_reporting_fy`` is the year for the profile's TIER.
+
+    Tiered frameworks carry no top-level year (it would be another tier's), so an
+    undetermined tier shows no year rather than a misleading one.
+    """
     return ComplianceCheck(
         framework=fw["name"],
         framework_key=fw["key"],
@@ -672,7 +692,8 @@ def _base_check(fw: Dict[str, Any], applies: str, reason: str,
         reason=reason,
         status=fw["status"],
         as_of=fw["as_of"],
-        first_reporting_fy=fw.get("first_reporting_fy"),
+        first_reporting_fy=(first_reporting_fy if first_reporting_fy is not None
+                            else fw.get("first_reporting_fy")),
         scope3_required=scope3_required,
         gaps=list(fw.get("gaps", [])),
         recommendations=list(fw.get("recommendations", [])),
@@ -742,6 +763,12 @@ def get_compliance_report(
     """
     region = normalize_region(region)
     checks: List[ComplianceCheck] = []
+    # Regulated frameworks the profile could NOT settle. This — not "was a profile
+    # supplied" — is what decides completeness: a profile carrying only a reporting
+    # year leaves every size test undecided, and calling that "complete" would let
+    # an empty mandatory list read as "nothing binds you", which is itself an
+    # unsupported obligation claim.
+    undetermined: List[str] = []
 
     for fw in _FRAMEWORKS:
         regions = fw.get("regions", ["*"])
@@ -755,17 +782,36 @@ def get_compliance_report(
             checks.append(_intensity_check(fw, total_tco2e, event_days, attendees))
         elif reporting_profile is None and fw.get("profile_required", True):
             checks.append(_base_check(fw, "informational", _NO_PROFILE_REASON))
+            undetermined.append(fw["name"])
         else:
-            applies, reason, scope3 = _SCOPE_RULES[rule](fw, reporting_profile)
-            checks.append(_base_check(fw, applies, reason, scope3))
+            decision = _SCOPE_RULES[rule](fw, reporting_profile)
+            checks.append(_base_check(
+                fw, decision.applies, decision.reason,
+                decision.scope3_required, decision.first_reporting_fy,
+            ))
+            if fw.get("profile_required", True) and decision.applies == "informational":
+                undetermined.append(fw["name"])
 
-    profile_complete = reporting_profile is not None and reporting_profile.reporting_fy is not None
+    profile_complete = reporting_profile is not None and not undetermined
+    if reporting_profile is None:
+        profile_note = (
+            "Profile incomplete — showing all frameworks as informational. No obligation "
+            "determination has been made; complete the reporting profile to scope them."
+        )
+    elif undetermined:
+        profile_note = (
+            f"Profile incomplete — {len(undetermined)} framework(s) could not be scoped "
+            f"and are shown as informational: {', '.join(undetermined)}. No obligation "
+            "determination has been made for them."
+        )
+    else:
+        profile_note = ""
 
     return ComplianceReport(
         checks=checks,
         mandatory_frameworks=[c.framework for c in checks if c.applies == "mandatory"],
         profile_complete=profile_complete,
-        profile_note="" if profile_complete else _PROFILE_INCOMPLETE_NOTE,
+        profile_note=profile_note,
         frameworks_as_of=FRAMEWORKS_DATA["as_of"],
         # We do not fabricate a probability-weighted penalty. Statutory maximum exposure
         # is surfaced qualitatively in the per-framework gaps instead.

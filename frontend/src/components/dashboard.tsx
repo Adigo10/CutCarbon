@@ -573,7 +573,7 @@ export function DashboardView({
               <p>
                 {mandatoryFrameworks === null
                   ? 'Enter a reporting profile on the Compliance tab to scope them.'
-                  : 'Frameworks that bind the reporting profile you entered.'}
+                  : 'Frameworks determined mandatory for the reporting profile you entered.'}
               </p>
             </article>
           </div>

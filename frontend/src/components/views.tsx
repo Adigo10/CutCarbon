@@ -1916,11 +1916,14 @@ export function ComplianceView({
               <span className="eyebrow">Mandatory frameworks</span>
               <strong>{report.mandatory_frameworks.length}</strong>
               <p>
-                {report.profile_complete
-                  ? report.mandatory_frameworks.length
-                    ? report.mandatory_frameworks.join(', ')
-                    : 'No framework in this region binds the profile you entered.'
-                  : report.profile_note}
+                {/* The zero case is stated as "none determined mandatory", never as
+                    "nothing binds you" — the latter is a negative obligation claim,
+                    and it is only ever safe when every framework was actually scoped. */}
+                {report.mandatory_frameworks.length
+                  ? report.mandatory_frameworks.join(', ')
+                  : report.profile_complete
+                    ? 'No framework in this region was determined mandatory for this profile.'
+                    : report.profile_note}
               </p>
             </Panel>
             <Panel>

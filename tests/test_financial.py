@@ -290,6 +290,52 @@ class TestObligationScoping:
                 assert check.reason
                 assert check.as_of
 
+    def test_fy_only_profile_is_not_complete_and_asserts_no_negative(self):
+        # The SPA sends blank bands as null, so a user who fills in only the
+        # reporting year leaves every size test undecided. That must NOT read as
+        # "nothing binds you": profile_complete stays False and the note names
+        # exactly which frameworks went undetermined.
+        for region, key in (("EU", "eu_csrd"), ("singapore", "sgx_issb"),
+                            ("australia", "au_asrs")):
+            report = get_compliance_report(
+                50, True, True, region, 2, 100, ReportingProfile(reporting_fy=2027)
+            )
+            assert _check(report, key).applies == "informational"
+            assert report.mandatory_frameworks == []
+            assert report.profile_complete is False, f"{region} wrongly reported complete"
+            assert "profile incomplete" in report.profile_note.lower()
+            assert _check(report, key).framework in report.profile_note
+
+    def test_california_nexus_is_a_real_answer_not_a_missing_one(self):
+        # does_business_in_california is a checkbox with a meaningful default, so
+        # "not ticked" is an answer: SB 253 is genuinely out of scope, and the
+        # empty mandatory list for the US is therefore supported.
+        report = get_compliance_report(
+            50, True, True, "usa", 2, 100, ReportingProfile(reporting_fy=2027)
+        )
+        assert _check(report, "ca_sb253").applies == "out_of_scope"
+        assert _check(report, "ca_sb261").applies == "enjoined"
+        assert report.profile_complete is True
+        assert report.mandatory_frameworks == []
+
+    def test_fully_determined_profile_is_complete_with_no_note(self):
+        report = get_compliance_report(50, True, True, "singapore", 2, 100, PROFILE_STI_2026)
+        assert report.profile_complete is True
+        assert report.profile_note == ""
+        assert _check(report, "sgx_issb").applies == "mandatory"
+
+    def test_out_of_scope_everywhere_still_counts_as_complete(self):
+        # A genuinely determined profile that nothing binds: the empty mandatory
+        # list IS supported here, because no framework came back informational.
+        report = get_compliance_report(
+            50, True, True, "EU", 2, 100,
+            ReportingProfile(employee_band="lt_50", annual_turnover_band="lt_50m",
+                             listing_status="none", reporting_fy=2027),
+        )
+        assert report.profile_complete is True
+        assert report.mandatory_frameworks == []
+        assert _check(report, "eu_csrd").applies == "out_of_scope"
+
     def test_voluntary_frameworks_never_need_a_profile(self):
         report = get_compliance_report(50, True, True, "australia", 2, 100)
         for key in ("ghg_protocol", "nzce", "iso_20121_2024"):
@@ -514,6 +560,115 @@ class TestIso20121Checklist:
         assert "annex d" in joined
         assert all(item.evidence_status == "not_evidenced" for item in check.clause_checklist)
         assert any("31 March 2027" in text for text in [check.reason, *check.recommendations])
+
+
+class TestTierAwareFirstReportingFy:
+    """The displayed first reporting year must be the PROFILE's tier year.
+
+    Reading the framework's top-level year showed an ASRS Group 2 entity Group 1's
+    FY2025 next to a reason saying its period begins in FY2026, and a sub-threshold
+    SGX issuer the STI year next to a reason saying FY2030.
+    """
+
+    def test_au_group2_shows_its_own_year_not_group1s(self):
+        group2 = _check(
+            get_compliance_report(
+                50, True, True, "australia", 2, 100,
+                ReportingProfile(listing_status="asrs_group2", reporting_fy=2026),
+            ),
+            "au_asrs",
+        )
+        assert group2.first_reporting_fy == 2026
+        assert f"FY{group2.first_reporting_fy}" != "FY2025"
+
+        group1 = _check(
+            get_compliance_report(
+                50, True, True, "australia", 2, 100,
+                ReportingProfile(listing_status="asrs_group1", reporting_fy=2026),
+            ),
+            "au_asrs",
+        )
+        assert group1.first_reporting_fy == 2025
+
+        # Not-in-force branch names the same tier year it is waiting for.
+        waiting = _check(
+            get_compliance_report(
+                50, True, True, "australia", 2, 100,
+                ReportingProfile(listing_status="asrs_group2", reporting_fy=2025),
+            ),
+            "au_asrs",
+        )
+        assert waiting.applies == "not_in_force"
+        assert waiting.first_reporting_fy == 2026
+
+    def test_sgx_sub_threshold_issuer_shows_fy2030_not_the_sti_year(self):
+        smaller = _check(
+            get_compliance_report(
+                50, True, True, "singapore", 2, 100,
+                ReportingProfile(listing_status="listed", annual_turnover_band="450m_1b",
+                                 reporting_fy=2028),
+            ),
+            "sgx_issb",
+        )
+        assert smaller.applies == "not_in_force"
+        assert smaller.first_reporting_fy == 2030
+        assert "FY2030" in smaller.reason
+
+        large = _check(
+            get_compliance_report(
+                50, True, True, "singapore", 2, 100,
+                ReportingProfile(listing_status="listed", annual_turnover_band="gt_1b",
+                                 reporting_fy=2028),
+            ),
+            "sgx_issb",
+        )
+        assert large.first_reporting_fy == 2028
+        assert _check(
+            get_compliance_report(50, True, True, "singapore", 2, 100, PROFILE_STI_2026),
+            "sgx_issb",
+        ).first_reporting_fy == 2025
+
+    def test_displayed_year_always_agrees_with_the_reason(self):
+        # Whatever year the card shows must be the one the reason argues for.
+        profiles = [
+            ("australia", "au_asrs", ReportingProfile(listing_status="asrs_group2", reporting_fy=2026)),
+            ("australia", "au_asrs", ReportingProfile(listing_status="asrs_group1", reporting_fy=2025)),
+            ("singapore", "sgx_issb", ReportingProfile(listing_status="listed",
+                                                       annual_turnover_band="450m_1b", reporting_fy=2028)),
+            ("singapore", "sgx_issb", ReportingProfile(listing_status="none",
+                                                       annual_turnover_band="gt_1b", reporting_fy=2029)),
+            ("EU", "eu_csrd", ReportingProfile(employee_band="gt_1000",
+                                               annual_turnover_band="gt_1b", reporting_fy=2026)),
+        ]
+        for region, key, profile in profiles:
+            check = _check(get_compliance_report(50, True, True, region, 2, 100, profile), key)
+            assert check.first_reporting_fy is not None
+            # The year itself must appear in the reason; CSRD words it as a date
+            # ("1 January 2027"), the tiered regimes as "FY2027".
+            assert str(check.first_reporting_fy) in check.reason, (
+                f"{key}: shows FY{check.first_reporting_fy} but reason says {check.reason!r}"
+            )
+
+    def test_undetermined_tier_shows_no_year_at_all(self):
+        for region, key in (("singapore", "sgx_issb"), ("australia", "au_asrs")):
+            check = _check(
+                get_compliance_report(50, True, True, region, 2, 100,
+                                      ReportingProfile(reporting_fy=2027)),
+                key,
+            )
+            assert check.applies == "informational"
+            assert check.first_reporting_fy is None, (
+                f"{key} named a year without knowing the tier"
+            )
+
+    def test_tiered_frameworks_carry_no_misleading_top_level_year(self):
+        by_key = {f["key"]: f for f in FRAMEWORKS_DATA["frameworks"]}
+        for key in ("sgx_issb", "au_asrs"):
+            assert by_key[key].get("first_reporting_fy") is None
+            assert by_key[key].get("tiers")
+        # Untiered regimes keep theirs.
+        assert by_key["eu_csrd"]["first_reporting_fy"] == 2027
+        assert by_key["ca_sb253"]["first_reporting_fy"] == 2025
 
 
 class TestRetainedQualitativeChecks:

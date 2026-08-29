@@ -160,7 +160,8 @@
       "regions": ["singapore"],
       "status": "in_force",
       "as_of": "2026-08-29",
-      "first_reporting_fy": 2025,
+      "first_reporting_fy": null,
+      "first_reporting_fy_note": "Tier-dependent — see tiers below. No single year applies to the framework as a whole.",
       "scope_rule": "sgx_issb",
       "profile_required": true,
       "tiers": {
@@ -222,7 +223,8 @@
       "regions": ["australia"],
       "status": "in_force",
       "as_of": "2026-08-29",
-      "first_reporting_fy": 2025,
+      "first_reporting_fy": null,
+      "first_reporting_fy_note": "Tier-dependent — see tiers below. No single year applies to the framework as a whole.",
       "scope_rule": "au_asrs",
       "profile_required": true,
       "tiers": {
