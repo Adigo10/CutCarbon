@@ -206,8 +206,23 @@ export function createDefaultScenarioDraft(): ScenarioDraft {
     streaming_hours_per_day: 6,
     event_app_users: 0,
     emails_sent: 0,
+    exclusions: '',
   }
 }
+
+// Emission categories keyed the way the engine keys `category_data_quality`
+// (which is not how the emissions totals are keyed — "waste" vs
+// "materials_waste_tco2e"), in the order the provenance panel lists them.
+export const DATA_QUALITY_CATEGORIES: Array<[string, string]> = [
+  ['travel', 'Travel'],
+  ['venue_energy', 'Venue energy'],
+  ['accommodation', 'Accommodation'],
+  ['catering', 'Catering'],
+  ['waste', 'Materials & waste'],
+  ['equipment', 'Equipment'],
+  ['swag', 'Swag'],
+  ['digital', 'Digital & virtual'],
+]
 
 // Internal (shadow) carbon price presets in USD/tCO2e, used when the organisation is
 // not covered by a compliance carbon pricing scheme.

@@ -693,6 +693,13 @@ input[type='range'] {
   font-weight: 700;
 }
 
+.field-hint {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
 .slider-line {
   gap: 0.85rem;
 }
@@ -1609,6 +1616,67 @@ tbody tr:last-child td {
 
 .toast-neutral .toast-dot {
   background: var(--accent-slate);
+}
+
+/* "How this number was built" provenance panel */
+
+.provenance-block {
+  margin-top: 0.9rem;
+  padding: 0.9rem;
+}
+
+.provenance-block .subpanel-header {
+  margin-bottom: 0.7rem;
+}
+
+.provenance-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.4rem 1.1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.provenance-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--stroke);
+}
+
+.provenance-list li > span {
+  color: var(--text);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.provenance-notes {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+}
+
+.provenance-notes dt {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.provenance-notes dd,
+.provenance-note-body {
+  margin: 0.2rem 0 0;
+  color: var(--text);
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.provenance-note-body {
+  margin: 0;
 }
 
 @media (max-width: 1180px) {

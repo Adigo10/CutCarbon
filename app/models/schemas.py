@@ -202,6 +202,11 @@ class EventScenarioInput(BaseModel):
     equipment: Optional[EquipmentGroup] = None
     swag: Optional[SwagGroup] = None
     digital: Optional[DigitalGroup] = None
+    # Free text describing what the organizer has deliberately left outside the
+    # reporting boundary (GHG Protocol / ISO 14064-1 both require exclusions to be
+    # stated). Persisted with the rest of the input payload and rendered verbatim in
+    # every export; empty renders as "None declared".
+    exclusions: Optional[str] = Field(default=None, max_length=2000)
 
     @model_validator(mode="after")
     def validate_travel_attendees(self):
@@ -260,6 +265,12 @@ class ScenarioDetail(BaseModel):
     assumptions: Dict[str, Any] = Field(default_factory=dict)
     input_payload: Dict[str, Any] = Field(default_factory=dict)
     factors_snapshot: Dict[str, Any] = Field(default_factory=dict)
+    # Share of the footprint (%) sourced from categories flagged "actual" in
+    # assumptions.category_data_quality. Derived at read time; None when the
+    # scenario has no emissions to apportion.
+    coverage_pct: Optional[float] = None
+    # User-declared boundary exclusions, echoed back from the stored input payload.
+    exclusions: Optional[str] = None
     created_at: str = ""
 
 
@@ -480,6 +491,11 @@ class ScenarioReportPayload(BaseModel):
     # Events (NZCE) Measurement Methodology categories.
     nzce_categories: List[ScenarioReportMetric] = Field(default_factory=list)
     nzce_note: str = ""
+    # Boundary/provenance disclosures rendered alongside the methodology in every
+    # export format. `exclusions` is already resolved for display — an undeclared
+    # boundary reads "None declared" rather than being omitted.
+    exclusions: str = "None declared"
+    coverage_pct: Optional[float] = None
 
 
 # -- Export models -------------------------------------------------------------
