@@ -172,6 +172,70 @@ class TestUnallocatedAttendeeReconciliation:
         assert "100 of 300" in note
         assert "200 remote attendees" in note
 
+    def test_hybrid_no_segments_proxy_also_nets_the_remote_cohort(self):
+        # The basic-mode path: no travel data at all. The declared remote cohort must be
+        # netted here too, or adding travel data would discontinuously drop the total.
+        result = calculate_scenario(
+            EventScenarioInput(
+                name="hybrid-noseg",
+                attendees=500,
+                event_type="hybrid_event",
+                digital=DigitalGroup(virtual_attendees=200),
+            )
+        )
+        assert result.emissions.travel_tco2e == pytest.approx(_travel_proxy_kg(300) / 1000, abs=1e-4)
+        note = result.assumptions["travel"]
+        assert "300 of 500" in note
+        assert "200 remote attendees" in note
+
+    def test_hybrid_no_segments_without_declared_cohort_is_unchanged(self):
+        result = calculate_scenario(
+            EventScenarioInput(name="hybrid-plain", attendees=500, event_type="hybrid_event")
+        )
+        assert result.emissions.travel_tco2e == pytest.approx(_travel_proxy_kg(500) / 1000, abs=1e-4)
+
+    def test_conference_no_segments_proxy_ignores_declared_stream_audience(self):
+        # A conference's streamed audience is additive, not overlapping — netting must
+        # not leak outside hybrid events.
+        result = calculate_scenario(
+            EventScenarioInput(
+                name="conf-stream",
+                attendees=500,
+                digital=DigitalGroup(virtual_attendees=200),
+            )
+        )
+        assert result.emissions.travel_tco2e == pytest.approx(_travel_proxy_kg(500) / 1000, abs=1e-4)
+
+    def test_adding_travel_data_never_inflates_a_hybrid_total(self):
+        """Monotonicity guard: the discontinuity this fix removes.
+
+        A segment covering N <= (attendees - remote) must not push the travel total above
+        the no-segments proxy for the same event, because both now proxy over the same
+        travelling base.
+        """
+        def hybrid(segments):
+            return calculate_scenario(
+                EventScenarioInput(
+                    name="mono",
+                    attendees=500,
+                    event_type="hybrid_event",
+                    digital=DigitalGroup(virtual_attendees=200),
+                    travel_segments=segments,
+                )
+            ).emissions.travel_tco2e
+
+        segment = TravelSegment(mode=TravelMode.SHORT_HAUL_FLIGHT, attendees=100, distance_km=800)
+        no_segments = hybrid([])
+        with_segment = hybrid([segment])
+        assert with_segment <= no_segments
+
+        # The stronger invariant that holds for any segment weight: the two differ only by
+        # (measured cohort - the proxy it replaced), i.e. the proxy base is continuous.
+        measured_kg = 100 * 800 * EF["travel"]["short_haul_flight"]["economy"]
+        assert with_segment == pytest.approx(
+            no_segments - _travel_proxy_kg(100) / 1000 + measured_kg / 1000, abs=1e-4
+        )
+
     def test_hybrid_without_declared_virtual_attendees_uses_full_headcount(self):
         result = calculate_scenario(
             EventScenarioInput(

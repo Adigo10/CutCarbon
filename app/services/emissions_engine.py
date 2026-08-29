@@ -64,15 +64,23 @@ def _travel_emissions(
     ``reconcile`` gates the unallocated-attendee remainder. It is off for virtual events,
     where the headcount is an audience that never travels — supplied segments (e.g. a crew
     flying to the studio) count as-is and nothing is inferred on top.
-    ``remote_attendees`` is netted out of the reconciliation base for hybrid events, so the
-    declared virtual cohort does not get booked physical travel it never took.
+    ``remote_attendees`` is netted out of the travelling base for hybrid events, so the
+    declared virtual cohort does not get booked physical travel it never took. It applies
+    to BOTH proxy paths — the no-segments proxy and the unallocated remainder — so that
+    supplying travel data for part of the headcount cannot discontinuously change the base.
     """
     total_kg = 0.0
     notes = {}
+    travel_base = attendees - remote_attendees
 
     if not segments:
-        total_kg = _travel_proxy_kg(attendees)
+        total_kg = _travel_proxy_kg(travel_base)
         notes["travel"] = "Proxy: 70% long-haul flight 2000km economy, 30% local MRT 50km"
+        if remote_attendees > 0:
+            notes["travel"] += (
+                f", applied to {travel_base} of {attendees} attendees; "
+                f"{remote_attendees} remote attendees do not travel to the venue"
+            )
     else:
         for seg in segments:
             mode = seg.mode.value
@@ -115,7 +123,6 @@ def _travel_emissions(
         # travel to the venue are in the base — remote attendees never do.
         if reconcile:
             covered = sum(seg.attendees for seg in segments)
-            travel_base = attendees - remote_attendees
             unallocated = max(0, travel_base - covered)
             if unallocated > 0:
                 total_kg += _travel_proxy_kg(unallocated)
