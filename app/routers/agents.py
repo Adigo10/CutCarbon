@@ -33,7 +33,7 @@ async def trigger_agents(
     }
 
 
-@router.get("/run/sync")
+@router.post("/run/sync")
 @limiter.limit("2/hour")
 async def trigger_agents_sync(
     request: Request,

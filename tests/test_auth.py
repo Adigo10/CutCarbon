@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.auth.supabase import TokenError, verify_supabase_token
+from app.config import settings
 
 from helpers import auth_headers, make_supabase_token, register_user
 
@@ -17,6 +18,25 @@ def test_me_provisions_profile_from_token(client: TestClient):
     body = me.json()
     assert body["email"] == "roundtrip@example.com"
     uuid.UUID(body["id"])  # id is the Supabase auth UUID, serialized as a string
+
+
+def test_me_reports_admin_flag(client: TestClient, monkeypatch):
+    """/me carries is_admin so the UI can hide admin-only controls."""
+    monkeypatch.setattr(settings, "ADMIN_EMAILS", "Boss@Example.com")
+
+    admin = client.get("/api/auth/me", headers=register_user(client, email="boss@example.com"))
+    assert admin.status_code == 200
+    assert admin.json()["is_admin"] is True
+
+    pleb = client.get("/api/auth/me", headers=register_user(client, email="pleb@example.com"))
+    assert pleb.status_code == 200
+    assert pleb.json()["is_admin"] is False
+
+
+def test_me_admin_flag_false_when_allowlist_empty(client: TestClient, monkeypatch):
+    monkeypatch.setattr(settings, "ADMIN_EMAILS", "")
+    me = client.get("/api/auth/me", headers=register_user(client, email="nobody@example.com"))
+    assert me.json()["is_admin"] is False
 
 
 def test_me_provisioning_is_idempotent(client: TestClient):

@@ -37,6 +37,21 @@ def test_scenario_crud_roundtrip(client: TestClient):
     assert client.get(f"/api/scenarios/{scenario_id}", headers=headers).status_code == 404
 
 
+def test_delete_unknown_scenario_returns_404(client: TestClient):
+    headers = register_user(client, email="delmiss@example.com")
+    assert client.delete("/api/scenarios/does-not-exist", headers=headers).status_code == 404
+
+
+def test_delete_other_users_scenario_returns_404(client: TestClient):
+    owner_headers = register_user(client, email="delowner@example.com")
+    other_headers = register_user(client, email="delthief@example.com")
+    scenario_id = create_scenario(client, owner_headers)["scenario_id"]
+
+    assert client.delete(f"/api/scenarios/{scenario_id}", headers=other_headers).status_code == 404
+    # The owner's row survives the failed delete.
+    assert client.get(f"/api/scenarios/{scenario_id}", headers=owner_headers).status_code == 200
+
+
 def test_clone_scenario(client: TestClient):
     headers = register_user(client, email="clone@example.com")
     scenario_id = create_scenario(client, headers)["scenario_id"]

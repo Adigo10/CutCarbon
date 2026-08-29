@@ -8,6 +8,7 @@ import {
   DataView,
   FinancialView,
   OffsetsView,
+  PasswordRecoveryView,
   ScenariosView,
 } from './components/views'
 import './App.css'
@@ -56,11 +57,21 @@ function App() {
   const [authPassword, setAuthPassword] = useState('')
   const [authError, setAuthError] = useState('')
   const [authLoading, setAuthLoading] = useState(false)
+  // Set by the PASSWORD_RECOVERY auth event (a reset link was opened). Supabase signs
+  // the user in when they follow that link, so without this panel they would land in
+  // the workspace with their password silently unchanged.
+  const [recoveryMode, setRecoveryMode] = useState(false)
+  const [recoveryPassword, setRecoveryPassword] = useState('')
+  const [recoveryConfirm, setRecoveryConfirm] = useState('')
   const [currentUser, setCurrentUser] = useState<UserOut | null>(null)
   // The access token is owned by the Supabase session (see the auth-listener effect
   // below), not localStorage. It stays in state so the existing api.*(token) calls
   // and `if (!token)` guards keep working unchanged.
   const [token, setToken] = useState<string | null>(null)
+  // True until the initial Supabase session check settles and — when a session
+  // exists — the profile load finishes. Without it, returning users see the
+  // sign-in screen flash before their session is restored.
+  const [bootstrapping, setBootstrapping] = useState(true)
   const [scenarios, setScenarios] = useState<Scenario[]>([])
   const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(
     () => localStorage.getItem('cc_selected_scenario_id'),
@@ -96,6 +107,9 @@ function App() {
 
   const selectedScenario = scenarios.find((scenario) => scenario.scenario_id === selectedScenarioId) ?? scenarios[0] ?? null
   const currentNav = NAV_ITEMS.find((item) => item.id === activeTab) ?? NAV_ITEMS[0]
+  // Agent-run endpoints are gated by the ADMIN_EMAILS allowlist server-side; hide
+  // the controls that would only return 403 for everyone else.
+  const isAdmin = currentUser?.is_admin ?? false
 
   const pushToast = useCallback((
     message: string,
@@ -129,11 +143,26 @@ function App() {
   // session itself, so there's no localStorage token handling here.
   useEffect(() => {
     let mounted = true
-    supabase.auth.getSession().then(({ data }) => {
-      if (mounted) setToken(data.session?.access_token ?? null)
-    })
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (!mounted) return
+        setToken(data.session?.access_token ?? null)
+        // No stored session — nothing left to restore, so stop the splash here.
+        // With a session, the profile effect below clears `bootstrapping`.
+        if (!data.session) setBootstrapping(false)
+      })
+      .catch(() => {
+        if (!mounted) return
+        setToken(null)
+        setBootstrapping(false)
+      })
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       setToken(session?.access_token ?? null)
+      if (!session) setBootstrapping(false)
+      // Fired when the user lands from a reset email; the session is a recovery
+      // session, so hold them on the "Set a new password" panel until they finish.
+      if (event === 'PASSWORD_RECOVERY') setRecoveryMode(true)
     })
     return () => {
       mounted = false
@@ -197,6 +226,8 @@ function App() {
         if (!active) return
         clearSession()
         pushToast(error instanceof Error ? error.message : 'Session expired', 'warning')
+      } finally {
+        if (active) setBootstrapping(false)
       }
     })()
 
@@ -281,6 +312,48 @@ function App() {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Authentication failed'
       setAuthError(message)
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  async function handleForgotPassword() {
+    const email = authEmail.trim()
+    if (!email) {
+      setAuthError('Enter your email address first, then choose "Forgot password?".')
+      return
+    }
+    setAuthLoading(true)
+    setAuthError('')
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin,
+      })
+      if (error) throw error
+      pushToast('Password reset link sent — check your email.', 'neutral')
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Could not send the reset email')
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  async function handleSetNewPassword() {
+    if (recoveryPassword !== recoveryConfirm) {
+      setAuthError('The two passwords do not match.')
+      return
+    }
+    setAuthLoading(true)
+    setAuthError('')
+    try {
+      const { error } = await supabase.auth.updateUser({ password: recoveryPassword })
+      if (error) throw error
+      setRecoveryPassword('')
+      setRecoveryConfirm('')
+      setRecoveryMode(false)
+      pushToast('Password updated', 'success')
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Could not update the password')
     } finally {
       setAuthLoading(false)
     }
@@ -592,10 +665,15 @@ function App() {
     if (!token) return
     setAgentsRunning(true)
     try {
-      try {
-        await api.runAgentsSync(token)
-      } catch {
-        pushToast('Factor refresh agent unavailable, recalculating with current factors.', 'warning')
+      // The factor sync is admin-only (ADMIN_EMAILS allowlist); the recalculation
+      // that follows is not, so non-admins skip straight to it rather than being
+      // locked out of "Recalculate all" entirely.
+      if (isAdmin) {
+        try {
+          await api.runAgentsSync(token)
+        } catch {
+          pushToast('Factor refresh agent unavailable, recalculating with current factors.', 'warning')
+        }
       }
       const recalc = await api.recalculateScenarios(token)
       setScenarios(recalc.scenarios)
@@ -612,7 +690,7 @@ function App() {
   }
 
   async function handleForceRefreshAgents() {
-    if (!token) return
+    if (!token || !isAdmin) return
     setAgentsRunning(true)
     try {
       await api.runAgentsForce(token)
@@ -740,6 +818,7 @@ function App() {
           agentStatus={agentStatus}
           agentHistory={agentHistory}
           agentsRunning={agentsRunning}
+          isAdmin={isAdmin}
           onDownload={handleDownload}
           onDownloadReport={(format) => {
             if (!selectedScenario) return
@@ -750,6 +829,34 @@ function App() {
         />
       )
       break
+  }
+
+  if (bootstrapping) {
+    return (
+      <div className="boot-splash" role="status" aria-live="polite">
+        <img className="app-logo" src="/favicon.svg" alt="" />
+        <span>Restoring your workspace…</span>
+      </div>
+    )
+  }
+
+  // Gated on `token` too: without a live recovery session `updateUser` cannot
+  // succeed, so fall through to the sign-in screen rather than show a dead form.
+  if (recoveryMode && token) {
+    return (
+      <>
+        <PasswordRecoveryView
+          password={recoveryPassword}
+          confirmPassword={recoveryConfirm}
+          error={authError}
+          busy={authLoading}
+          onPasswordChange={setRecoveryPassword}
+          onConfirmPasswordChange={setRecoveryConfirm}
+          onSubmit={handleSetNewPassword}
+        />
+        <ToastViewport toasts={toasts} />
+      </>
+    )
   }
 
   if (!currentUser || !token) {
@@ -765,6 +872,7 @@ function App() {
           onEmailChange={setAuthEmail}
           onPasswordChange={setAuthPassword}
           onSubmit={handleAuthSubmit}
+          onForgotPassword={handleForgotPassword}
         />
         <ToastViewport toasts={toasts} />
       </>
@@ -799,7 +907,7 @@ function App() {
 
           <div className="topbar-actions">
             <Button tone="soft" busy={agentsRunning} onClick={handleRefreshAgents}>
-              Refresh factors
+              {isAdmin ? 'Refresh factors' : 'Recalculate'}
             </Button>
             <Button tone="primary" onClick={() => handleOpenTab('chat')}>
               Ask co-pilot

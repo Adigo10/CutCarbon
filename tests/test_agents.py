@@ -25,15 +25,28 @@ def test_agent_triggers_require_admin(client: TestClient, monkeypatch):
     admin_headers = register_user(client, email="admin@example.com")
 
     assert client.post("/api/agents/run", headers=user_headers).status_code == 403
-    assert client.get("/api/agents/run/sync", headers=user_headers).status_code == 403
+    assert client.post("/api/agents/run/sync", headers=user_headers).status_code == 403
 
     dispatched = client.post("/api/agents/run", headers=admin_headers)
     assert dispatched.status_code == 200
     assert dispatched.json()["status"] == "agents_dispatched"
 
-    sync = client.get("/api/agents/run/sync", headers=admin_headers)
+    sync = client.post("/api/agents/run/sync", headers=admin_headers)
     assert sync.status_code == 200
     assert sync.json()["status"] == "ok"
+
+
+def test_sync_run_is_not_reachable_by_get(client: TestClient, monkeypatch):
+    """A GET must not mutate global factor state (crawlers/prefetchers issue GETs)."""
+    calls = _mock_run_and_update(monkeypatch)
+    monkeypatch.setattr(settings, "ADMIN_EMAILS", "admin@example.com")
+    admin_headers = register_user(client, email="admin@example.com")
+
+    # 405 with no SPA build present; 404 once frontend/dist exists, because the
+    # StaticFiles mount at "/" (app/main.py) then swallows the unmatched GET.
+    # Either way the handler never runs — that's what this asserts.
+    assert client.get("/api/agents/run/sync", headers=admin_headers).status_code in (404, 405)
+    assert calls["count"] == 0
 
 
 def test_empty_admin_list_locks_everyone_out(client: TestClient, monkeypatch):
