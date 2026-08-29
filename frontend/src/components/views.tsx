@@ -1421,6 +1421,8 @@ interface OffsetsViewProps {
   recommendations: OffsetRecommendation[]
   draft: NewOffsetPurchase
   setDraft: Dispatch<SetStateAction<NewOffsetPurchase>>
+  reductionPct: number
+  setReductionPct: Dispatch<SetStateAction<number>>
   loading: boolean
   onCreate: () => void
   onRetire: (id: number) => void
@@ -1438,6 +1440,8 @@ export function OffsetsView({
   recommendations,
   draft,
   setDraft,
+  reductionPct,
+  setReductionPct,
   loading,
   onCreate,
   onRetire,
@@ -1447,6 +1451,8 @@ export function OffsetsView({
   const registryOptions = Object.entries(registries)
   const projectOptions = Object.entries(projects)
   const selectedProject = projects[draft.project_type]
+  const sizingBasis = recommendations[0]?.basis
+  const sizedAgainst = recommendations[0]?.residual_tco2e
 
   return (
     <div className="split-view">
@@ -1523,6 +1529,67 @@ export function OffsetsView({
               onChange={(event) => setDraft((current) => ({ ...current, vintage_year: Number(event.target.value) }))}
             />
           </label>
+          <label className="field">
+            <span>Retirement serial</span>
+            <input
+              type="text"
+              placeholder="Registry retirement serial block"
+              value={draft.retirement_serial}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, retirement_serial: event.target.value }))
+              }
+            />
+          </label>
+          <label className="field">
+            <span>Retirement date</span>
+            <input
+              type="date"
+              value={draft.retirement_date}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, retirement_date: event.target.value }))
+              }
+            />
+          </label>
+          <label className="field">
+            <span>Methodology</span>
+            <input
+              type="text"
+              placeholder="Crediting methodology + version"
+              value={draft.methodology}
+              onChange={(event) => setDraft((current) => ({ ...current, methodology: event.target.value }))}
+            />
+          </label>
+          <label className="field">
+            <span>Host country</span>
+            <input
+              type="text"
+              placeholder="Project host country"
+              value={draft.country}
+              onChange={(event) => setDraft((current) => ({ ...current, country: event.target.value }))}
+            />
+          </label>
+          <label className="check-field">
+            <input
+              type="checkbox"
+              checked={draft.ccp_approved}
+              onChange={(event) => setDraft((current) => ({ ...current, ccp_approved: event.target.checked }))}
+            />
+            <span>ICVCM CCP-approved</span>
+          </label>
+          <label className="check-field">
+            <input
+              type="checkbox"
+              checked={draft.article6_adjustment}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, article6_adjustment: event.target.checked }))
+              }
+            />
+            <span>Article 6.4 adjustment</span>
+          </label>
+          <p className="field-full subtle-copy">
+            A retirement from 1 Jan 2026 only backs a compensation statement with a CCP or
+            Article 6.4 label plus a registry retirement serial and date (VCMI Claims Code).
+          </p>
           <label className="field field-full">
             <span>Notes</span>
             <textarea
@@ -1590,33 +1657,91 @@ export function OffsetsView({
                 <strong>{portfolio.coverage_pct ? `${portfolio.coverage_pct}%` : '—'}</strong>
               </div>
             </div>
+            {portfolio.claim_statement ? (
+              <div className="subpanel">
+                <span className="eyebrow">Compliant wording</span>
+                {/* Coverage % on its own reads as neutrality; this is the
+                    measured / reduced / residual-compensated construction the API
+                    returns instead (ISO 14068-1, EU 2024/825). */}
+                <p className="subtle-copy">{portfolio.claim_statement}</p>
+              </div>
+            ) : (
+              <p className="subtle-copy">
+                Select a scenario to state this coverage against a measured total.
+              </p>
+            )}
           </Panel>
         ) : null}
 
-        {recommendations.length ? (
-          <Panel>
-            <div className="panel-heading">
-              <div>
-                <span className="eyebrow">Recommended mix</span>
-                <h3>Residual offset portfolio</h3>
+        <Panel>
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">Recommended mix</span>
+              <h3>Residual offset portfolio</h3>
+            </div>
+            {sizingBasis ? (
+              <Badge tone={sizingBasis === 'net_of_reductions' ? 'fresh' : 'amber'}>
+                {sizingBasis === 'net_of_reductions' ? 'Net of reductions' : 'Gross total'}
+              </Badge>
+            ) : null}
+          </div>
+          <div className="form-grid">
+            <label className="field">
+              <span>Committed reduction (%)</span>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={reductionPct}
+                onChange={(event) => setReductionPct(Number(event.target.value))}
+              />
+            </label>
+            <p className="subtle-copy">
+              Enter your committed reduction target. Offsetting applies to residual
+              emissions only, so the mix is sized against what is left after it.
+            </p>
+          </div>
+          {recommendations.length ? (
+            <>
+              <p className="subtle-copy">
+                Sized against {formatTons(sizedAgainst ?? 0)}{' '}
+                {sizingBasis === 'net_of_reductions'
+                  ? 'residual after the stated reduction'
+                  : 'gross measured total (no reduction stated)'}
+                .
+              </p>
+              <div className="stack-list">
+                {recommendations.map((recommendation) => (
+                  <article key={recommendation.project_type} className="stack-row">
+                    <div>
+                      <strong>{recommendation.label}</strong>
+                      <p>{recommendation.description}</p>
+                      <div className="tag-row">
+                        <Badge tone="neutral">Permanence: {recommendation.permanence}</Badge>
+                        <Badge
+                          tone={recommendation.risk_warning ? 'rose' : 'neutral'}
+                        >
+                          {recommendation.additionality_risk} additionality risk
+                        </Badge>
+                      </div>
+                      {recommendation.risk_warning ? (
+                        <p className="subtle-copy">{recommendation.risk_warning}</p>
+                      ) : null}
+                    </div>
+                    <div className="stack-row-side">
+                      <strong>{formatTons(recommendation.recommended_qty_tco2e)}</strong>
+                      <span>{formatCurrency(recommendation.estimated_cost_usd)}</span>
+                    </div>
+                  </article>
+                ))}
               </div>
-            </div>
-            <div className="stack-list">
-              {recommendations.map((recommendation) => (
-                <article key={recommendation.project_type} className="stack-row">
-                  <div>
-                    <strong>{recommendation.label}</strong>
-                    <p>{recommendation.description}</p>
-                  </div>
-                  <div className="stack-row-side">
-                    <strong>{formatTons(recommendation.recommended_qty_tco2e)}</strong>
-                    <span>{formatCurrency(recommendation.estimated_cost_usd)}</span>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </Panel>
-        ) : null}
+            </>
+          ) : (
+            <p className="subtle-copy">
+              Build a recommendation mix to see project types, risk and sizing.
+            </p>
+          )}
+        </Panel>
 
         <Panel>
           <div className="panel-heading">
@@ -1635,6 +1760,17 @@ export function OffsetsView({
                     <p>
                       {purchase.quantity_tco2e} tCO2e · {purchase.registry} · {formatDateTime(purchase.created_at)}
                     </p>
+                    <div className="tag-row">
+                      {/* Claim eligibility is evidence, not lifecycle: a retired credit
+                          without a CCP/Article 6.4 label and a registry serial + date
+                          cannot back a compensation statement (VCMI Claims Code). */}
+                      <Badge tone={purchase.claim_eligible ? 'fresh' : 'amber'}>
+                        {purchase.claim_eligible ? 'Claim-eligible' : 'Integrity evidence pending'}
+                      </Badge>
+                      {purchase.vintage_stale ? (
+                        <Badge tone="rose">Vintage {purchase.vintage_year} predates the event</Badge>
+                      ) : null}
+                    </div>
                   </div>
                   <div className="stack-row-actions">
                     <Badge tone={purchase.status === 'retired' ? 'fresh' : purchase.status === 'cancelled' ? 'rose' : 'amber'}>

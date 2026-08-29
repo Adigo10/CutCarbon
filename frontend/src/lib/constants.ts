@@ -248,5 +248,13 @@ export function createDefaultOffsetPurchase(): NewOffsetPurchase {
     price_per_tco2e_usd: 8.5,
     vintage_year: new Date().getFullYear(),
     notes: '',
+    // Integrity evidence — a credit only backs a compensation statement once a CCP
+    // or Article 6.4 label is paired with a registry retirement serial + date.
+    ccp_approved: false,
+    article6_adjustment: false,
+    methodology: '',
+    retirement_serial: '',
+    retirement_date: '',
+    country: '',
   }
 }

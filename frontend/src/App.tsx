@@ -96,6 +96,7 @@ function App() {
   const [offsetPortfolio, setOffsetPortfolio] = useState<OffsetPortfolioSummary | null>(null)
   const [offsetRecommendations, setOffsetRecommendations] = useState<OffsetRecommendation[]>([])
   const [offsetDraft, setOffsetDraft] = useState(createDefaultOffsetPurchase)
+  const [offsetReductionPct, setOffsetReductionPct] = useState(0)
   const [offsetLoading, setOffsetLoading] = useState(false)
   const [complianceInput, setComplianceInput] = useState(createDefaultComplianceInput)
   const [complianceReport, setComplianceReport] = useState<ComplianceReport | null>(null)
@@ -578,10 +579,17 @@ function App() {
     if (!token) return
     setOffsetLoading(true)
     try {
+      const { methodology, retirement_serial, retirement_date, country, ...rest } = offsetDraft
       await api.createOffsetPurchase(
         {
           scenario_id: selectedScenario?.scenario_id ?? null,
-          ...offsetDraft,
+          ...rest,
+          // Blank integrity fields are absent evidence, not empty values — the API
+          // types them as optional string/date, so send null rather than ''.
+          methodology: methodology.trim() || null,
+          retirement_serial: retirement_serial.trim() || null,
+          retirement_date: retirement_date || null,
+          country: country.trim() || null,
         },
         token,
       )
@@ -621,7 +629,11 @@ function App() {
   async function handleLoadOffsetRecommendations() {
     if (!token || !selectedScenario) return
     try {
-      const recommendations = await api.getOffsetRecommendations(selectedScenario.scenario_id, token)
+      const recommendations = await api.getOffsetRecommendations(
+        selectedScenario.scenario_id,
+        token,
+        offsetReductionPct,
+      )
       setOffsetRecommendations(recommendations)
       pushToast('Offset recommendations generated', 'success')
     } catch (error) {
@@ -785,6 +797,8 @@ function App() {
           recommendations={offsetRecommendations}
           draft={offsetDraft}
           setDraft={setOffsetDraft}
+          reductionPct={offsetReductionPct}
+          setReductionPct={setOffsetReductionPct}
           loading={offsetLoading}
           onCreate={handleCreateOffset}
           onRetire={handleRetireOffset}

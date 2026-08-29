@@ -54,6 +54,11 @@ DEFAULT_CREDIT_DESC = "unspecified credits (registry not recorded)"
 # phrase itself, which is what makes sanitizing idempotent.
 CLAIM_REDACTION = "[claim removed — see the measured/reduced/compensated figures]"
 
+# Appended when the retired credits backing a compensation statement do not carry
+# the integrity evidence a post-2026 claim requires (app.services.offset_integrity).
+# The figures stay — what is withdrawn is the clean, uncaveated reading of them.
+CLAIM_INTEGRITY_CAVEAT = " (credits pending integrity evidence — not claim-eligible)"
+
 # Every pattern is word-boundary anchored and matched case-insensitively, so
 # unrelated words are never touched ("neutralization", "greenhouse",
 # "decarbonization").
@@ -149,6 +154,7 @@ def portfolio_claim_statement(
     total_tco2e: float,
     retired_tco2e: float,
     by_registry: Mapping[str, float],
+    credits_claim_eligible: bool = True,
 ) -> str:
     """Compliant wording for an offset portfolio held against a measured total.
 
@@ -157,11 +163,23 @@ def portfolio_claim_statement(
     undocumented reduction is precisely what must not be claimed. With no
     reduction, the residual *is* the measured total; only the retired credits
     count as compensated, so anything less leaves an outstanding balance.
+
+    ``by_registry`` must be aggregated over the **retired** credits only: those
+    are the ones being described as compensating, and naming a registry whose
+    credits are merely held would misattribute the compensation.
+
+    ``credits_claim_eligible`` is false when any retired credit in the mix lacks
+    the integrity evidence a post-2026 claim needs; the statement then carries
+    :data:`CLAIM_INTEGRITY_CAVEAT` so the tonnage is never read as a clean claim.
+    This is the single chokepoint both the offsets API and the exports use.
     """
-    return compliant_compensation_statement(
+    statement = compliant_compensation_statement(
         total_tco2e,
         0.0,
         total_tco2e,
         describe_credit_sources(by_registry),
         compensated_tco2e=retired_tco2e,
     )
+    if not credits_claim_eligible:
+        statement += CLAIM_INTEGRITY_CAVEAT
+    return statement

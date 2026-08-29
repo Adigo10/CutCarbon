@@ -274,6 +274,15 @@ export interface OffsetPurchase {
   retired_at?: string | null
   notes?: string | null
   created_at: string
+  // Credit-integrity evidence (ICVCM CCP / Article 6.4 + registry retirement).
+  ccp_approved?: boolean | null
+  article6_adjustment?: boolean | null
+  methodology?: string | null
+  retirement_serial?: string | null
+  retirement_date?: string | null
+  country?: string | null
+  claim_eligible: boolean
+  vintage_stale: boolean
 }
 
 export interface OffsetPortfolioSummary {
@@ -283,6 +292,9 @@ export interface OffsetPortfolioSummary {
   by_project_type: Record<string, number>
   by_registry: Record<string, number>
   coverage_pct?: number | null
+  // Compliant measured/reduced/residual-compensated wording; empty when no
+  // scenario is in scope. Never render coverage % as a neutrality claim.
+  claim_statement?: string
 }
 
 export interface OffsetRecommendation {
@@ -293,8 +305,12 @@ export interface OffsetRecommendation {
   recommended_qty_tco2e: number
   estimated_cost_usd: number
   permanence: string
+  additionality_risk?: string
+  risk_warning?: string
   co_benefits: string[]
   sdgs: number[]
+  basis?: 'gross' | 'net_of_reductions'
+  residual_tco2e?: number
 }
 
 export interface NewOffsetPurchase {
@@ -304,6 +320,12 @@ export interface NewOffsetPurchase {
   price_per_tco2e_usd: number
   vintage_year: number
   notes: string
+  ccp_approved: boolean
+  article6_adjustment: boolean
+  methodology: string
+  retirement_serial: string
+  retirement_date: string
+  country: string
 }
 
 export interface ComplianceInput {

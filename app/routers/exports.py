@@ -35,6 +35,7 @@ from app.models.schemas import (
 from app.routers.auth import get_current_user
 from app.services.claims import portfolio_claim_statement
 from app.services.financial_engine import get_compliance_report
+from app.services.offset_integrity import claim_eligible, sum_by_registry
 from app.services.scenario_serializer import data_quality_label, serialize_scenario
 from app.utils.time import utcnow
 
@@ -289,6 +290,11 @@ async def _build_offset_summary_for_scenario(
     if total_tco2e > 0:
         coverage_pct = round(total_retired / total_tco2e * 100, 1)
 
+    # by_registry above breaks down everything *held*; only the retired credits may
+    # be named as the source of the compensation (see app/services/claims.py).
+    retired = [p for p in purchases if p.status == "retired"]
+    retired_by_registry = sum_by_registry(retired)
+
     return OffsetPortfolioSummary(
         total_purchased_tco2e=round(total_purchased, 3),
         total_retired_tco2e=round(total_retired, 3),
@@ -298,7 +304,14 @@ async def _build_offset_summary_for_scenario(
         coverage_pct=coverage_pct,
         # Every export states the coverage as measured/reduced/residual-compensated
         # rather than letting a coverage % imply neutrality (EU 2024/825, ISO 14068-1).
-        claim_statement=portfolio_claim_statement(total_tco2e, total_retired, by_registry),
+        # Only the retired credits may be named as the source, and the statement is
+        # caveated when any of them lacks post-2026 claim-integrity evidence.
+        claim_statement=portfolio_claim_statement(
+            total_tco2e,
+            total_retired,
+            retired_by_registry,
+            credits_claim_eligible=all(claim_eligible(p) for p in retired),
+        ),
     )
 
 
