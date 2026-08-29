@@ -52,8 +52,21 @@ def _travel_proxy_kg(attendees: float) -> float:
     return long_haul + local
 
 
-def _travel_emissions(segments, attendees: int) -> tuple[float, dict]:
-    """Returns travel kg CO2e and assumption notes."""
+def _travel_emissions(
+    segments,
+    attendees: int,
+    *,
+    reconcile: bool = True,
+    remote_attendees: int = 0,
+) -> tuple[float, dict]:
+    """Returns travel kg CO2e and assumption notes.
+
+    ``reconcile`` gates the unallocated-attendee remainder. It is off for virtual events,
+    where the headcount is an audience that never travels — supplied segments (e.g. a crew
+    flying to the studio) count as-is and nothing is inferred on top.
+    ``remote_attendees`` is netted out of the reconciliation base for hybrid events, so the
+    declared virtual cohort does not get booked physical travel it never took.
+    """
     total_kg = 0.0
     notes = {}
 
@@ -98,17 +111,26 @@ def _travel_emissions(segments, attendees: int) -> tuple[float, dict]:
 
         # Reconcile against the headcount: attendees not covered by any segment would
         # otherwise travel to the event for free. Estimate the remainder with the same
-        # proxy used when no segments are supplied at all.
-        covered = sum(seg.attendees for seg in segments)
-        unallocated = attendees - covered
-        if unallocated > 0:
-            total_kg += _travel_proxy_kg(unallocated)
-            coverage_pct = (covered / attendees * 100) if attendees > 0 else 0.0
-            notes["travel_coverage"] = (
-                f"Travel data covers {covered} of {attendees} attendees ({coverage_pct:.0f}%); "
-                f"the remaining {unallocated} estimated via proxy "
-                "(70% long-haul flight 2000km economy, 30% local MRT 50km)"
-            )
+        # proxy used when no segments are supplied at all. Only attendees who actually
+        # travel to the venue are in the base — remote attendees never do.
+        if reconcile:
+            covered = sum(seg.attendees for seg in segments)
+            travel_base = attendees - remote_attendees
+            unallocated = max(0, travel_base - covered)
+            if unallocated > 0:
+                total_kg += _travel_proxy_kg(unallocated)
+                coverage_pct = (covered / travel_base * 100) if travel_base > 0 else 0.0
+                note = (
+                    f"Travel data covers {covered} of {travel_base} attendees ({coverage_pct:.0f}%); "
+                    f"the remaining {unallocated} estimated via proxy "
+                    "(70% long-haul flight 2000km economy, 30% local MRT 50km)"
+                )
+                if remote_attendees > 0:
+                    note += (
+                        f". {remote_attendees} remote attendees were netted out of the "
+                        f"{attendees}-person headcount — they do not travel to the venue"
+                    )
+                notes["travel_coverage"] = note
 
     return total_kg, notes
 
@@ -508,11 +530,31 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
     # footprint. Explicitly provided inputs (e.g. a studio venue) are still honored.
     is_virtual = scenario.event_type.value == "virtual_event"
 
+    # Remote attendees never travel to the venue, so they are netted out of the travel
+    # reconciliation base on hybrid events. Only an explicitly declared virtual cohort
+    # counts — the hybrid *digital* proxy (30% of attendees) is itself an assumption and
+    # must not silently shrink the travel base.
+    declared_virtual = scenario.digital.virtual_attendees if scenario.digital else 0
+    is_hybrid = scenario.event_type.value == "hybrid_event"
+    remote_attendees = min(declared_virtual, attendees) if is_hybrid else 0
+
     # Travel (Scope 3)
     if is_virtual and not scenario.travel_segments:
         travel_kg, t_notes = 0.0, {"travel": "Virtual event: no physical travel assumed"}
     else:
-        travel_kg, t_notes = _travel_emissions(scenario.travel_segments, attendees)
+        # On a virtual event the headcount is an audience that stays home: any supplied
+        # segment (a crew flying to the studio) counts as-is, with no proxy remainder.
+        travel_kg, t_notes = _travel_emissions(
+            scenario.travel_segments,
+            attendees,
+            reconcile=not is_virtual,
+            remote_attendees=remote_attendees,
+        )
+        if is_virtual and scenario.travel_segments:
+            t_notes["travel"] = (
+                "Virtual event: only the travel segments supplied are counted; "
+                "the remote audience is not assumed to travel"
+            )
     scope3_total += travel_kg
 
     # Venue energy (Scope 2, with potential Scope 1 from generators)

@@ -15,6 +15,7 @@ from app.models.schemas import (
 from app.services.emissions_engine import (
     EF,
     _OFFSET_PRICE_USD,
+    _travel_proxy_kg,
     calculate_scenario,
     estimate_venue_kwh,
     get_benchmark_comparison,
@@ -126,6 +127,63 @@ class TestUnallocatedAttendeeReconciliation:
         result = calculate_scenario(self._scenario(100, 100))
         assert "travel_coverage" not in result.assumptions
         assert result.assumptions["category_data_quality"]["travel"] == "actual"
+
+    def test_virtual_event_with_segments_gets_no_proxy_remainder(self):
+        # A 5-person crew flying to the studio must not book 495 long-haul proxies for
+        # the audience sitting at home.
+        crew = TravelSegment(mode=TravelMode.LONG_HAUL_FLIGHT, attendees=5, distance_km=4000)
+        virtual = calculate_scenario(
+            EventScenarioInput(
+                name="v-crew", attendees=500, event_type="virtual_event", travel_segments=[crew]
+            )
+        )
+        crew_only = calculate_scenario(
+            EventScenarioInput(name="crew-only", attendees=5, travel_segments=[crew])
+        )
+        assert virtual.emissions.travel_tco2e == pytest.approx(crew_only.emissions.travel_tco2e, rel=1e-9)
+        assert "travel_coverage" not in virtual.assumptions
+
+    def test_hybrid_event_nets_declared_virtual_attendees_out_of_the_base(self):
+        result = calculate_scenario(
+            EventScenarioInput(
+                name="hybrid-coverage",
+                attendees=500,
+                event_type="hybrid_event",
+                digital=DigitalGroup(virtual_attendees=200),
+                travel_segments=[
+                    TravelSegment(mode=TravelMode.SHORT_HAUL_FLIGHT, attendees=100, distance_km=800)
+                ],
+            )
+        )
+        # 500 headcount - 200 remote - 100 covered = 200 unallocated travellers.
+        segments_only = calculate_scenario(
+            EventScenarioInput(
+                name="segs",
+                attendees=100,
+                travel_segments=[
+                    TravelSegment(mode=TravelMode.SHORT_HAUL_FLIGHT, attendees=100, distance_km=800)
+                ],
+            )
+        ).emissions.travel_tco2e
+        expected = segments_only + _travel_proxy_kg(200) / 1000
+        assert result.emissions.travel_tco2e == pytest.approx(expected, abs=1e-4)
+
+        note = result.assumptions["travel_coverage"]
+        assert "100 of 300" in note
+        assert "200 remote attendees" in note
+
+    def test_hybrid_without_declared_virtual_attendees_uses_full_headcount(self):
+        result = calculate_scenario(
+            EventScenarioInput(
+                name="hybrid-no-digital",
+                attendees=500,
+                event_type="hybrid_event",
+                travel_segments=[
+                    TravelSegment(mode=TravelMode.SHORT_HAUL_FLIGHT, attendees=100, distance_km=800)
+                ],
+            )
+        )
+        assert "100 of 500 attendees" in result.assumptions["travel_coverage"]
 
 
 class TestVenueKwh:
@@ -333,6 +391,28 @@ class TestDigitalCategory:
         # 500 attendees x 6h x 0.036 kg = 108 kg
         assert e.digital_tco2e == pytest.approx(0.108, abs=0.001)
         assert e.total_tco2e == pytest.approx(e.digital_tco2e, abs=1e-6)
+
+    def test_virtual_event_with_travel_segments_still_has_no_physical_proxies(self):
+        # The invariant holds even once a segment exists: the segment counts as-is, and
+        # no proxy (travel remainder, venue, accommodation, catering, waste) is invented.
+        result = calculate_scenario(
+            EventScenarioInput(
+                name="v-seg",
+                attendees=500,
+                event_days=1,
+                event_type="virtual_event",
+                travel_segments=[
+                    TravelSegment(mode=TravelMode.LONG_HAUL_FLIGHT, attendees=5, distance_km=4000)
+                ],
+            )
+        )
+        e = result.emissions
+        segment_kg = 5 * 4000 * EF["travel"]["long_haul_flight"]["economy"]
+        assert e.travel_tco2e == pytest.approx(segment_kg / 1000, abs=1e-4)
+        assert e.venue_energy_tco2e == 0
+        assert e.accommodation_tco2e == 0
+        assert e.catering_tco2e == 0
+        assert e.materials_waste_tco2e == 0
 
     def test_virtual_event_honors_explicit_inputs(self):
         result = calculate_scenario(
