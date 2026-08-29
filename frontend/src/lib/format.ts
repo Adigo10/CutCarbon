@@ -398,12 +398,22 @@ export function buildFlowDiagram(scenario: Scenario | null): string {
     diagram += `  EVT --> ${row.key.toUpperCase()}\n`
   })
 
+  // Which scope the venue and equipment lines land in follows the declared
+  // organizational boundary: a contracted venue is a purchased service (Scope 3),
+  // not the organizer's Scope 2. Unset payloads take the schema default.
+  const venueOwned = scenario.input_payload?.venue_energy?.control === 'owned_operated'
+  const equipmentOwned = scenario.input_payload?.equipment?.control === 'owned_operated'
+
   emissionRows.forEach((row) => {
     const target =
       row.key === 'venue_energy_tco2e'
-        ? 'S2'
+        ? venueOwned
+          ? 'S2'
+          : 'S3'
         : row.key === 'equipment_tco2e'
-          ? 'TOT'
+          ? equipmentOwned
+            ? 'TOT'
+            : 'S3'
           : 'S3'
     diagram += `  ${row.key.toUpperCase()} --> ${target}\n`
   })
