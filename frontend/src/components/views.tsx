@@ -475,6 +475,7 @@ export function ScenariosView({
                         travel_class: 'economy',
                         attendees: 100,
                         distance_km: 2000,
+                        round_trip: false,
                         label: '',
                       },
                     ],
@@ -549,6 +550,21 @@ export function ScenariosView({
                         }))
                       }
                     />
+                    <label className="travel-roundtrip" title="Distance is one-way; tick to count the return leg too">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(segment.round_trip)}
+                        onChange={(event) =>
+                          setDraft((current) => ({
+                            ...current,
+                            travel_segments: current.travel_segments.map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, round_trip: event.target.checked } : item,
+                            ),
+                          }))
+                        }
+                      />
+                      <span>Round trip</span>
+                    </label>
                     <button
                       className="mini-action danger"
                       onClick={() =>

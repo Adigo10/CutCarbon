@@ -235,6 +235,15 @@
       "stadium_per_seat_day": 1.8,
       "unit": "kg_co2e"
     },
+    "proxy_kwh_intensity": {
+      "conference_centre_kwh_per_m2_day": {
+        "factor": 6.0,
+        "unit": "kwh_per_m2_per_day",
+        "source": "Derived in-repo from venue_energy.proxy_factors.conference_centre_per_m2_day (2.8 kg CO2e/m2/day) and venue_energy.grids.global_average (0.478 kg CO2e/kWh, IEA 2023)",
+        "methodology": "2.8 / 0.478 = 5.86 kWh/m2/day, rounded to 6.0 (+2.4%). Keeps the kWh-based venue proxy reconciled with the kg CO2e/m2/day proxy on a global-average grid. Represents an active event day at full HVAC/lighting/AV load, not an annual whole-building average (~0.5-1 kWh/m2/day).",
+        "scope": 2
+      }
+    },
     "scope": 2
   },
   "accommodation": {

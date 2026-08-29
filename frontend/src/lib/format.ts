@@ -214,6 +214,7 @@ export function buildScenarioPayload(draft: ScenarioDraft, scenarioCount: number
     mode: 'basic',
     travel_segments: draft.travel_segments.map((segment: TravelSegment) => ({
       ...segment,
+      round_trip: segment.round_trip ?? false,
       label: segment.label || labelize(segment.mode),
     })),
     venue_energy: {
@@ -314,6 +315,7 @@ export function applyExtractedData(
         travel_class: String(segment.travel_class ?? 'economy'),
         attendees: Number(segment.attendees ?? 0),
         distance_km: Number(segment.distance_km ?? 0),
+        round_trip: Boolean(segment.round_trip ?? false),
         label: typeof segment.label === 'string' ? segment.label : '',
       })
     })

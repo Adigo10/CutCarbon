@@ -45,17 +45,72 @@ def reload_factors() -> None:
     EF.update(fresh)
 
 
-def _travel_emissions(segments, attendees: int) -> tuple[float, dict]:
-    """Returns travel kg CO2e and assumption notes."""
+def physical_attendee_count(scenario) -> int:
+    """Headcount physically present at the venue.
+
+    Hybrid events net out an explicitly declared remote cohort — those people neither
+    travel to the venue nor occupy a hotel room, a seat at lunch, or floor space. Every
+    other event type uses the full headcount: a conference's streamed audience is
+    *additive* to the room, not overlapping with it, and a virtual event is gated
+    separately in calculate_scenario.
+
+    Single source for the netting, shared by the travel base, the physical-presence
+    proxies and the financial back-calculation, so the categories cannot disagree about
+    how many people were in the building.
+    """
+    if scenario.event_type.value != "hybrid_event":
+        return scenario.attendees
+    declared_remote = scenario.digital.virtual_attendees if scenario.digital else 0
+    return scenario.attendees - min(declared_remote, scenario.attendees)
+
+
+def _netting_note(physical_attendees: int, attendees: int) -> str:
+    """Disclosure clause appended to a proxy note when a remote cohort was netted out."""
+    remote = attendees - physical_attendees
+    if remote <= 0:
+        return ""
+    return (
+        f" (sized for {physical_attendees} of {attendees} attendees; "
+        f"{remote} remote attendees are not physically present)"
+    )
+
+
+def _travel_proxy_kg(attendees: float) -> float:
+    """Per-head travel proxy: 70% fly long-haul 2000km economy, 30% local MRT 50km."""
+    long_haul = attendees * 0.7 * 2000 * EF["travel"]["long_haul_flight"]["economy"]
+    local = attendees * 0.3 * 50 * EF["travel"]["mrt_metro"]["factor"]
+    return long_haul + local
+
+
+def _travel_emissions(
+    segments,
+    attendees: int,
+    *,
+    reconcile: bool = True,
+    remote_attendees: int = 0,
+) -> tuple[float, dict]:
+    """Returns travel kg CO2e and assumption notes.
+
+    ``reconcile`` gates the unallocated-attendee remainder. It is off for virtual events,
+    where the headcount is an audience that never travels — supplied segments (e.g. a crew
+    flying to the studio) count as-is and nothing is inferred on top.
+    ``remote_attendees`` is netted out of the travelling base for hybrid events, so the
+    declared virtual cohort does not get booked physical travel it never took. It applies
+    to BOTH proxy paths — the no-segments proxy and the unallocated remainder — so that
+    supplying travel data for part of the headcount cannot discontinuously change the base.
+    """
     total_kg = 0.0
     notes = {}
+    travel_base = attendees - remote_attendees
 
     if not segments:
-        # Proxy: assume 70% fly long-haul 2000km, 30% local 50km
-        long_haul = attendees * 0.7 * 2000 * EF["travel"]["long_haul_flight"]["economy"]
-        local = attendees * 0.3 * 50 * EF["travel"]["mrt_metro"]["factor"]
-        total_kg = long_haul + local
+        total_kg = _travel_proxy_kg(travel_base)
         notes["travel"] = "Proxy: 70% long-haul flight 2000km economy, 30% local MRT 50km"
+        if remote_attendees > 0:
+            notes["travel"] += (
+                f", applied to {travel_base} of {attendees} attendees; "
+                f"{remote_attendees} remote attendees do not travel to the venue"
+            )
     else:
         for seg in segments:
             mode = seg.mode.value
@@ -85,9 +140,55 @@ def _travel_emissions(segments, attendees: int) -> tuple[float, dict]:
                 logger.error("Malformed emission factor for travel mode %r; segment excluded", mode)
                 notes[f"travel_{mode}"] = f"No usable emission factor for '{mode}'; segment excluded from total"
                 continue
-            total_kg += seg.attendees * seg.distance_km * ef
+            legs = 2 if seg.round_trip else 1
+            total_kg += seg.attendees * seg.distance_km * legs * ef
+
+        notes["travel_distance_basis"] = (
+            "Segment distances are treated as one-way unless round_trip is set (then doubled)"
+        )
+
+        # Reconcile against the headcount: attendees not covered by any segment would
+        # otherwise travel to the event for free. Estimate the remainder with the same
+        # proxy used when no segments are supplied at all. Only attendees who actually
+        # travel to the venue are in the base — remote attendees never do.
+        if reconcile:
+            covered = sum(seg.attendees for seg in segments)
+            unallocated = max(0, travel_base - covered)
+            if unallocated > 0:
+                total_kg += _travel_proxy_kg(unallocated)
+                coverage_pct = (covered / travel_base * 100) if travel_base > 0 else 0.0
+                note = (
+                    f"Travel data covers {covered} of {travel_base} attendees ({coverage_pct:.0f}%); "
+                    f"the remaining {unallocated} estimated via proxy "
+                    "(70% long-haul flight 2000km economy, 30% local MRT 50km)"
+                )
+                if remote_attendees > 0:
+                    note += (
+                        f". {remote_attendees} remote attendees were netted out of the "
+                        f"{attendees}-person headcount — they do not travel to the venue"
+                    )
+                notes["travel_coverage"] = note
 
     return total_kg, notes
+
+
+# Floor area assumed per attendee when only a headcount is known (seated conference
+# space including circulation). Shared by both venue proxy paths so they reconcile.
+_VENUE_M2_PER_ATTENDEE = 2.0
+
+
+def _venue_kwh_intensity() -> float:
+    """kWh/m2/day for an active event day, from emission_factors.json.
+
+    Sourced entry (not a code constant) so the derivation from the kg CO2e/m2/day
+    proxy and the global-average grid factor is auditable alongside the factors.
+    """
+    return (
+        EF["venue_energy"]
+        .get("proxy_kwh_intensity", {})
+        .get("conference_centre_kwh_per_m2_day", {})
+        .get("factor", 6.0)
+    )
 
 
 def estimate_venue_kwh(venue_energy, attendees: int, event_days: int) -> float:
@@ -97,36 +198,56 @@ def estimate_venue_kwh(venue_energy, attendees: int, event_days: int) -> float:
     financial back-calculations: actual kWh when provided, else area proxy, else
     attendee proxy.
     """
+    intensity = _venue_kwh_intensity()
     if venue_energy is not None:
         if venue_energy.kwh_consumed is not None:
             return venue_energy.kwh_consumed
         if venue_energy.venue_area_m2 is not None:
-            return venue_energy.venue_area_m2 * event_days * 30
-    return attendees * 2.0 * event_days * 30
+            return venue_energy.venue_area_m2 * event_days * intensity
+    return attendees * _VENUE_M2_PER_ATTENDEE * event_days * intensity
 
 
-def _venue_energy_emissions(venue_energy, attendees: int, event_days: int) -> tuple[float, float, dict]:
-    """Returns venue energy kg CO2e, scope1 kg (generators), notes."""
+def _venue_energy_emissions(
+    venue_energy, attendees: int, event_days: int, physical_attendees: Optional[int] = None
+) -> tuple[float, float, dict]:
+    """Returns venue energy kg CO2e, scope1 kg (generators), notes.
+
+    ``physical_attendees`` sizes the floor-area proxies; a metered kWh reading is an
+    actual and is never netted.
+    """
     notes = {}
     scope1_kg = 0.0
+    on_site = attendees if physical_attendees is None else physical_attendees
 
     if venue_energy is None:
-        proxy_area = attendees * 2.0
+        proxy_area = on_site * _VENUE_M2_PER_ATTENDEE
         proxy_factor = EF["venue_energy"]["proxy_factors"]["conference_centre_per_m2_day"]
         total_kg = proxy_area * event_days * proxy_factor
-        notes["venue"] = f"Proxy: {proxy_area}m2 at {proxy_factor} kg CO2e/m2/day"
+        notes["venue"] = (
+            f"Proxy: {proxy_area}m2 at {proxy_factor} kg CO2e/m2/day"
+            f"{_netting_note(on_site, attendees)}"
+        )
+        notes["venue_basis"] = "area_intensity_proxy"
         return total_kg, scope1_kg, notes
 
     grid_key = venue_energy.grid_region.value
     grid_ef = EF["venue_energy"]["grids"].get(grid_key, EF["venue_energy"]["grids"]["global_average"])["factor"]
 
-    kwh = estimate_venue_kwh(venue_energy, attendees, event_days)
+    kwh = estimate_venue_kwh(venue_energy, on_site, event_days)
+    intensity = _venue_kwh_intensity()
     if venue_energy.kwh_consumed is not None:
         notes["venue"] = f"Actual kWh: {kwh:.0f}"
+        notes["venue_basis"] = "measured_kwh"
     elif venue_energy.venue_area_m2 is not None:
-        notes["venue"] = f"Proxy kWh from area: {kwh:.0f}"
+        notes["venue"] = f"Proxy kWh from area: {kwh:.0f} ({intensity} kWh/m2/day)"
+        notes["venue_basis"] = "area_kwh_proxy"
     else:
-        notes["venue"] = f"Proxy kWh from attendees: {kwh:.0f}"
+        notes["venue"] = (
+            f"Proxy kWh from attendees: {kwh:.0f} "
+            f"({_VENUE_M2_PER_ATTENDEE}m2/attendee at {intensity} kWh/m2/day)"
+        )
+        notes["venue"] += _netting_note(on_site, attendees)
+        notes["venue_basis"] = "attendee_kwh_proxy"
 
     effective_ef = grid_ef * (1 - venue_energy.renewable_pct / 100)
     total_kg = kwh * effective_ef
@@ -137,14 +258,20 @@ def _venue_energy_emissions(venue_energy, attendees: int, event_days: int) -> tu
     return total_kg, scope1_kg, notes
 
 
-def _accommodation_emissions(accom, attendees: int, event_days: int) -> tuple[float, dict]:
+def _accommodation_emissions(
+    accom, attendees: int, event_days: int, physical_attendees: Optional[int] = None
+) -> tuple[float, dict]:
     notes = {}
+    on_site = attendees if physical_attendees is None else physical_attendees
 
     if accom is None:
-        room_nights = (attendees * 0.8 / 1.5) * event_days
+        room_nights = (on_site * 0.8 / 1.5) * event_days
         ef = EF["accommodation"]["standard_hotel"]["factor"]
         total_kg = room_nights * ef
-        notes["accommodation"] = f"Proxy: 80% attendees, standard hotel, {room_nights:.0f} room-nights"
+        notes["accommodation"] = (
+            f"Proxy: 80% attendees, standard hotel, {room_nights:.0f} room-nights"
+            f"{_netting_note(on_site, attendees)}"
+        )
         return total_kg, notes
 
     ef_key = accom.accommodation_type.value
@@ -155,15 +282,20 @@ def _accommodation_emissions(accom, attendees: int, event_days: int) -> tuple[fl
     return total_kg, notes
 
 
-def _catering_emissions(catering, attendees: int, event_days: int) -> tuple[float, dict]:
+def _catering_emissions(
+    catering, attendees: int, event_days: int, physical_attendees: Optional[int] = None
+) -> tuple[float, dict]:
     notes = {}
+    on_site = attendees if physical_attendees is None else physical_attendees
 
     if catering is None:
-        meals = attendees * event_days * 2
+        meals = on_site * event_days * 2
         ef = EF["catering"]["mixed_buffet"]["factor"]
         beverage_ef = EF["catering"]["beverages_per_person_day"]["factor"]
-        total_kg = meals * ef + attendees * event_days * beverage_ef
-        notes["catering"] = f"Proxy: {meals} mixed meals + beverages"
+        total_kg = meals * ef + on_site * event_days * beverage_ef
+        notes["catering"] = (
+            f"Proxy: {meals} mixed meals + beverages{_netting_note(on_site, attendees)}"
+        )
         return total_kg, notes
 
     ef_key = catering.catering_type.value
@@ -192,15 +324,23 @@ def _catering_emissions(catering, attendees: int, event_days: int) -> tuple[floa
     return total_kg, notes
 
 
-def _waste_emissions(waste, attendees: int) -> tuple[float, dict]:
+def _waste_emissions(
+    waste, attendees: int, event_days: int, physical_attendees: Optional[int] = None
+) -> tuple[float, dict]:
     notes = {}
+    on_site = attendees if physical_attendees is None else physical_attendees
 
     if waste is None:
+        # Printed handouts are a one-off per attendee; general waste accrues per day,
+        # matching every other proxy in the engine.
         total_kg = (
-            attendees * 0.5 * EF["materials_waste"]["paper_cardboard"]["factor"]
-            + attendees * 0.3 * EF["materials_waste"]["general_landfill"]["factor"]
+            on_site * 0.5 * EF["materials_waste"]["paper_cardboard"]["factor"]
+            + on_site * 0.3 * event_days * EF["materials_waste"]["general_landfill"]["factor"]
         )
-        notes["waste"] = "Proxy: 0.5kg printed + 0.3kg general waste per attendee"
+        notes["waste"] = (
+            "Proxy: 0.5kg printed per attendee + 0.3kg general waste per attendee per day"
+            f"{_netting_note(on_site, attendees)}"
+        )
         return total_kg, notes
 
     total_kg = (
@@ -210,15 +350,40 @@ def _waste_emissions(waste, attendees: int) -> tuple[float, dict]:
         + waste.exhibition_booths_m2 * EF["materials_waste"]["exhibition_booth_per_m2"]["factor"]
     )
 
-    if waste.printed_materials_per_attendee:
-        total_kg += attendees * EF["materials_waste"]["printed_materials_per_attendee"]["factor"]
+    # Weighed waste already contains the printed paper, so the per-attendee printed
+    # proxy would double count it. Unset (None) means "decide from the data"; an
+    # explicit True/False from the user is always honored.
+    measured_weights = waste.general_waste_kg > 0 or waste.recycled_kg > 0
+    include_printed = (
+        waste.printed_materials_per_attendee
+        if waste.printed_materials_per_attendee is not None
+        else not measured_weights
+    )
 
-    notes["waste"] = "Actual waste data provided"
+    if include_printed:
+        total_kg += attendees * EF["materials_waste"]["printed_materials_per_attendee"]["factor"]
+        notes["waste"] = "Actual waste data provided; printed-materials proxy added per attendee"
+    elif measured_weights:
+        notes["waste"] = (
+            "Actual waste data provided; printed-materials proxy omitted "
+            "(printed paper is already inside the measured waste weights)"
+        )
+    else:
+        notes["waste"] = "Actual waste data provided; printed-materials proxy excluded"
+
     return total_kg, notes
 
 
-def _equipment_emissions(equipment, event_days: int) -> tuple[float, float, float, float, dict]:
-    """Returns total kg, scope1 kg (generators), scope2 kg (electricity), scope3 kg (stage+freight), notes."""
+def _equipment_emissions(
+    equipment, event_days: int, venue_metered: bool = False
+) -> tuple[float, float, float, float, dict]:
+    """Returns total kg, scope1 kg (generators), scope2 kg (electricity), scope3 kg (stage+freight), notes.
+
+    ``venue_metered`` says the venue supplied an actual kWh reading. That meter already
+    covers the lighting/sound/LED/projector loads plugged into the venue supply, so the
+    equipment electricity lines are skipped to avoid double counting. Non-electricity
+    lines (generator fuel, stage build, freight) are unaffected.
+    """
     notes = {}
     if equipment is None:
         return 0.0, 0.0, 0.0, 0.0, notes
@@ -231,21 +396,15 @@ def _equipment_emissions(equipment, event_days: int) -> tuple[float, float, floa
     # Stage
     stage_kg = equipment.stage_m2 * event_days * eq.get("stage_per_m2_per_day", {}).get("factor", 0.5)
 
-    # Lighting (Scope 2 - electricity)
-    lighting_kg = equipment.lighting_days * eq.get("lighting_rig_per_day", {}).get("factor", 45.0)
-    scope2_kg += lighting_kg
-
-    # Sound (Scope 2)
-    sound_kg = equipment.sound_system_days * eq.get("sound_system_per_day", {}).get("factor", 25.0)
-    scope2_kg += sound_kg
-
-    # LED screens (Scope 2)
-    led_kg = equipment.led_screen_m2 * event_days * eq.get("led_screen_per_m2_per_day", {}).get("factor", 2.5)
-    scope2_kg += led_kg
-
-    # Projectors (Scope 2)
-    proj_kg = equipment.projectors * event_days * eq.get("projector_per_day", {}).get("factor", 3.8)
-    scope2_kg += proj_kg
+    # Electricity lines (Scope 2): lighting, sound, LED screens, projectors.
+    electricity_kg = (
+        equipment.lighting_days * eq.get("lighting_rig_per_day", {}).get("factor", 45.0)
+        + equipment.sound_system_days * eq.get("sound_system_per_day", {}).get("factor", 25.0)
+        + equipment.led_screen_m2 * event_days * eq.get("led_screen_per_m2_per_day", {}).get("factor", 2.5)
+        + equipment.projectors * event_days * eq.get("projector_per_day", {}).get("factor", 3.8)
+    )
+    if not venue_metered:
+        scope2_kg += electricity_kg
 
     # Generator (Scope 1 - direct combustion)
     gen_kg = equipment.generator_hours * eq.get("generator_diesel_per_hour", {}).get("factor", 8.5)
@@ -259,7 +418,12 @@ def _equipment_emissions(equipment, event_days: int) -> tuple[float, float, floa
 
     if total_kg > 0:
         notes["equipment"] = f"Stage {equipment.stage_m2}m2, lighting {equipment.lighting_days}d, sound {equipment.sound_system_days}d, LED {equipment.led_screen_m2}m2, gen {equipment.generator_hours}h"
-    if scope2_kg > 0:
+    if venue_metered and electricity_kg > 0:
+        notes["equipment_electricity"] = (
+            f"Equipment electricity (lighting, sound, LED, projectors, {electricity_kg:.0f} kg CO2e) "
+            "excluded — already included in the metered venue supply."
+        )
+    elif scope2_kg > 0:
         notes["equipment_electricity"] = (
             "Equipment electricity uses global-average grid factors, not the venue grid."
         )
@@ -431,18 +595,44 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
     # footprint. Explicitly provided inputs (e.g. a studio venue) are still honored.
     is_virtual = scenario.event_type.value == "virtual_event"
 
+    # People actually in the building. On a hybrid event this nets out an explicitly
+    # declared remote cohort; everywhere else it is the full headcount. One base for the
+    # travel reconciliation AND every physical-presence proxy, so the categories cannot
+    # disagree about how many people were on site. Only a *declared* cohort counts — the
+    # hybrid digital proxy (30% of attendees) is itself an assumption and must not
+    # silently shrink any base.
+    physical_attendees = physical_attendee_count(scenario)
+    remote_attendees = attendees - physical_attendees
+
     # Travel (Scope 3)
     if is_virtual and not scenario.travel_segments:
         travel_kg, t_notes = 0.0, {"travel": "Virtual event: no physical travel assumed"}
     else:
-        travel_kg, t_notes = _travel_emissions(scenario.travel_segments, attendees)
+        # On a virtual event the headcount is an audience that stays home: any supplied
+        # segment (a crew flying to the studio) counts as-is, with no proxy remainder.
+        travel_kg, t_notes = _travel_emissions(
+            scenario.travel_segments,
+            attendees,
+            reconcile=not is_virtual,
+            remote_attendees=remote_attendees,
+        )
+        if is_virtual and scenario.travel_segments:
+            t_notes["travel"] = (
+                "Virtual event: only the travel segments supplied are counted; "
+                "the remote audience is not assumed to travel"
+            )
     scope3_total += travel_kg
 
     # Venue energy (Scope 2, with potential Scope 1 from generators)
     if is_virtual and scenario.venue_energy is None:
-        energy_kg, venue_s1_kg, e_notes = 0.0, 0.0, {"venue": "Virtual event: no physical venue assumed"}
+        energy_kg, venue_s1_kg, e_notes = 0.0, 0.0, {
+            "venue": "Virtual event: no physical venue assumed",
+            "venue_basis": "not applicable (virtual event)",
+        }
     else:
-        energy_kg, venue_s1_kg, e_notes = _venue_energy_emissions(scenario.venue_energy, attendees, days)
+        energy_kg, venue_s1_kg, e_notes = _venue_energy_emissions(
+            scenario.venue_energy, attendees, days, physical_attendees
+        )
     scope2_total += energy_kg
     scope1_total += venue_s1_kg
 
@@ -450,25 +640,33 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
     if is_virtual and scenario.accommodation is None:
         accom_kg, a_notes = 0.0, {}
     else:
-        accom_kg, a_notes = _accommodation_emissions(scenario.accommodation, attendees, days)
+        accom_kg, a_notes = _accommodation_emissions(
+            scenario.accommodation, attendees, days, physical_attendees
+        )
     scope3_total += accom_kg
 
     # Catering (Scope 3)
     if is_virtual and scenario.catering is None:
         catering_kg, c_notes = 0.0, {}
     else:
-        catering_kg, c_notes = _catering_emissions(scenario.catering, attendees, days)
+        catering_kg, c_notes = _catering_emissions(
+            scenario.catering, attendees, days, physical_attendees
+        )
     scope3_total += catering_kg
 
     # Waste (Scope 3)
     if is_virtual and scenario.waste is None:
         waste_kg, w_notes = 0.0, {}
     else:
-        waste_kg, w_notes = _waste_emissions(scenario.waste, attendees)
+        waste_kg, w_notes = _waste_emissions(scenario.waste, attendees, days, physical_attendees)
     scope3_total += waste_kg
 
-    # Equipment (Scope 1 generators + Scope 2 electricity + Scope 3 stage/freight)
-    equip_kg, equip_s1, equip_s2, equip_s3, eq_notes = _equipment_emissions(scenario.equipment, days)
+    # Equipment (Scope 1 generators + Scope 2 electricity + Scope 3 stage/freight).
+    # A venue meter reading already covers the equipment on the venue supply.
+    venue_metered = scenario.venue_energy is not None and scenario.venue_energy.kwh_consumed is not None
+    equip_kg, equip_s1, equip_s2, equip_s3, eq_notes = _equipment_emissions(
+        scenario.equipment, days, venue_metered=venue_metered
+    )
     scope1_total += equip_s1
     scope2_total += equip_s2
     scope3_total += equip_s3
@@ -523,8 +721,14 @@ def calculate_scenario(scenario: EventScenarioInput) -> ScenarioResult:
             return "not applicable (virtual event)"
         return "not provided" if optional else "proxy"
 
+    # Segments that cover only part of the headcount are a mix of measured and proxy
+    # data, so the travel category lands on the existing "partial" tier.
+    travel_quality = "partial" if "travel_coverage" in t_notes else _quality(
+        core_provided["travel"], gated=is_virtual
+    )
+
     assumptions["category_data_quality"] = {
-        "travel": _quality(core_provided["travel"], gated=is_virtual),
+        "travel": travel_quality,
         "venue_energy": _quality(core_provided["venue_energy"], gated=is_virtual),
         "accommodation": _quality(core_provided["accommodation"], gated=is_virtual),
         "catering": _quality(core_provided["catering"], gated=is_virtual),

@@ -41,6 +41,7 @@ class _TravelSegmentExtract(BaseModel):
     travel_class: Optional[str] = "economy"
     attendees: int = Field(ge=1, le=1_000_000)
     distance_km: float = Field(ge=0, le=50_000)
+    round_trip: Optional[bool] = False
     label: Optional[str] = ""
 
     @model_validator(mode="after")
@@ -159,7 +160,14 @@ EXTRACTION_TOOLS = [
                                     "description": "Cabin class — flights only; omit for trains, cars, buses and other ground/sea modes"
                                 },
                                 "attendees": {"type": "integer"},
-                                "distance_km": {"type": "number"},
+                                "distance_km": {
+                                    "type": "number",
+                                    "description": "One-way distance for this leg in km"
+                                },
+                                "round_trip": {
+                                    "type": "boolean",
+                                    "description": "Set true when the user says 'round trip', 'return', 'there and back' or 'both ways' — the one-way distance_km is then counted twice"
+                                },
                                 "label": {"type": "string"}
                             },
                             "required": ["mode", "attendees", "distance_km"]

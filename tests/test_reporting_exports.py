@@ -78,10 +78,13 @@ def test_shared_report_payload_includes_offsets_and_compliance_overrides(client:
     # NZCE also appears as a compliance framework check.
     assert any("Net Zero Carbon Events" in c.framework for c in report.compliance.checks)
 
-    # Per-category data-quality disclosure persisted via assumptions.
+    # Per-category data-quality disclosure persisted via assumptions. The seeded
+    # scenario's travel segment covers only 40 of its 120 attendees, so travel is a
+    # mix of measured and proxy data ("partial"), and the reconciliation is disclosed.
     quality = report.assumptions["category_data_quality"]
-    assert quality["travel"] == "actual"
+    assert quality["travel"] == "partial"
     assert quality["waste"] == "proxy"
+    assert "40 of 120 attendees" in report.assumptions["travel_coverage"]
 
 
 @pytest.mark.parametrize("fmt", ["json", "csv", "xlsx", "pdf"])
