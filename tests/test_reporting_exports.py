@@ -11,7 +11,7 @@ import app.models.database as database
 from app.models.database import UserDB
 from app.models.schemas import EventScenarioInput, OffsetProjectType, OffsetPurchaseCreate, TravelMode, TravelSegment, VenueEnergy
 from app.routers.exports import build_scenario_report_payload
-from app.services.claims import find_banned_claims
+from app.services.claims import CLAIM_INTEGRITY_CAVEAT, find_banned_claims
 from app.services.emissions_engine import calculate_scenario
 
 from helpers import create_seeded_scenario, register_user
@@ -59,7 +59,10 @@ def test_shared_report_payload_includes_offsets_and_compliance_overrides(client:
     statement = report.offset_portfolio.claim_statement
     assert f"2.500 of {total:.3f} tCO2e residual compensated" in statement
     assert "via retired credits from Gold Standard;" in statement
-    assert statement.endswith(f"{total - 2.5:.3f} tCO2e residual not yet compensated")
+    assert f"{total - 2.5:.3f} tCO2e residual not yet compensated" in statement
+    # The seeded credit carries no CCP/Article 6 evidence, so the export statement
+    # must not read as a clean claim (app/services/offset_integrity.py).
+    assert statement.endswith(CLAIM_INTEGRITY_CAVEAT.strip())
     assert find_banned_claims(statement) == []
     assert report.compliance_overrides.region == "eu"
     assert report.compliance_overrides.has_scope3 is False

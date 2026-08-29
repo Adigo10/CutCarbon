@@ -255,8 +255,15 @@ export const api = {
     }, token)
   },
 
-  getOffsetRecommendations(scenarioId: string, token: string) {
-    return request<OffsetRecommendation[]>(`/api/offsets/recommend/${scenarioId}`, undefined, token)
+  getOffsetRecommendations(scenarioId: string, token: string, reductionPct = 0) {
+    // reduction_pct sizes the mix against the residual left after a committed
+    // reduction; 0 keeps the legacy gross basis (flagged as such in the response).
+    const suffix = reductionPct > 0 ? `?reduction_pct=${encodeURIComponent(reductionPct)}` : ''
+    return request<OffsetRecommendation[]>(
+      `/api/offsets/recommend/${scenarioId}${suffix}`,
+      undefined,
+      token,
+    )
   },
 
   getAgentStatus(token: string) {

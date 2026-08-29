@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List, Dict, Any
+from datetime import date
 from enum import Enum
 from uuid import uuid4
 
@@ -401,6 +402,15 @@ class OffsetPurchaseCreate(BaseModel):
     vintage_year: int = Field(default=2025, ge=1900, le=2100)
     serial_number: Optional[str] = None
     notes: Optional[str] = None
+    # Credit-integrity evidence. All optional: a purchase can be recorded before the
+    # registry paperwork lands, it just cannot back a claim until it is complete
+    # (see app/services/offset_integrity.py).
+    ccp_approved: Optional[bool] = None  # ICVCM Core Carbon Principles approved
+    article6_adjustment: Optional[bool] = None  # Art. 6.4 corresponding adjustment applied
+    methodology: Optional[str] = Field(default=None, max_length=300)
+    retirement_serial: Optional[str] = Field(default=None, max_length=300)
+    retirement_date: Optional[date] = None
+    country: Optional[str] = Field(default=None, max_length=120)
 
 
 class OffsetPurchaseOut(BaseModel):
@@ -417,6 +427,17 @@ class OffsetPurchaseOut(BaseModel):
     retired_at: Optional[str]
     notes: Optional[str]
     created_at: str
+    ccp_approved: Optional[bool] = None
+    article6_adjustment: Optional[bool] = None
+    methodology: Optional[str] = None
+    retirement_serial: Optional[str] = None
+    retirement_date: Optional[str] = None
+    country: Optional[str] = None
+    # True only when the integrity evidence a post-2026 VCMI claim needs is on file.
+    claim_eligible: bool = False
+    # True when the credit's vintage predates the linked scenario's event year —
+    # an old vintage against a new event invites a double-counting challenge.
+    vintage_stale: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -442,8 +463,17 @@ class OffsetRecommendation(BaseModel):
     recommended_qty_tco2e: float
     estimated_cost_usd: float
     permanence: str
+    # Quality signals carried straight from app/data/carbon_offsets.json so a buyer
+    # sees the reversal and over-crediting risk next to the price, not buried in the
+    # catalog. `risk_warning` is non-empty only for high-additionality-risk types.
+    additionality_risk: str = ""
+    risk_warning: str = ""
     co_benefits: List[str]
     sdgs: List[int]
+    # What this mix was sized against: "gross" (no reduction stated) or
+    # "net_of_reductions" (total less the caller's committed reduction target).
+    basis: str = "gross"
+    residual_tco2e: float = 0.0
 
 
 class ScenarioReportMetric(BaseModel):

@@ -10,7 +10,7 @@ from typing import AsyncGenerator
 from uuid import uuid4
 
 from sqlalchemy import (
-    Column, String, Integer, Float, Text, DateTime, Boolean, JSON, Uuid, text,
+    Column, String, Integer, Float, Text, Date, DateTime, Boolean, JSON, Uuid, text,
     ForeignKey, Index, event,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -235,9 +235,19 @@ class OffsetPurchaseDB(Base):
     vintage_year = Column(Integer)
     serial_number = Column(String, nullable=True)
     status = Column(String, default="purchased", index=True)  # purchased | retired | cancelled
-    retired_at = Column(DateTime, nullable=True)
+    retired_at = Column(DateTime, nullable=True)  # when *this app* marked it retired
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=utcnow, index=True)
+
+    # Credit-integrity evidence (all nullable — historic rows predate the fields).
+    # Together these decide OffsetPurchaseOut.claim_eligible; see
+    # app/services/offset_integrity.py for the VCMI/ICVCM rule they encode.
+    ccp_approved = Column(Boolean, nullable=True)  # ICVCM Core Carbon Principles label
+    article6_adjustment = Column(Boolean, nullable=True)  # Art. 6.4 corresponding adjustment
+    methodology = Column(String, nullable=True)  # crediting methodology + version
+    retirement_serial = Column(String, nullable=True)  # registry retirement serial block
+    retirement_date = Column(Date, nullable=True)  # retirement date *in the registry*
+    country = Column(String, nullable=True)  # host country of the project
 
 
 class AgentRunDB(Base):

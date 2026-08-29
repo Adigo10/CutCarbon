@@ -1,8 +1,8 @@
 """Carbon offset portfolio management — browse projects, track purchases, retire credits."""
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional, Sequence
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
@@ -13,6 +13,12 @@ from app.models.schemas import (
 from app.routers.auth import get_current_user
 from app.services.claims import portfolio_claim_statement, sanitize_claim_language
 from app.services.data_files import CARBON_OFFSETS as OFFSET_DATA
+from app.services.offset_integrity import (
+    additionality_risk_warning,
+    claim_eligible,
+    residual_basis,
+    sum_by_registry,
+)
 from app.utils.time import utcnow
 
 router = APIRouter()
@@ -43,6 +49,7 @@ async def create_purchase(
     current_user: UserDB = Depends(get_current_user),
 ):
     """Record a carbon offset purchase."""
+    scenario = None
     if purchase.scenario_id:
         scenario = await db.scalar(
             select(ScenarioDB).where(
@@ -69,11 +76,18 @@ async def create_purchase(
         # through the green-claims linter like any other narrative.
         notes=sanitize_claim_language(purchase.notes)[0] if purchase.notes else None,
         created_at=utcnow(),
+        ccp_approved=purchase.ccp_approved,
+        article6_adjustment=purchase.article6_adjustment,
+        methodology=purchase.methodology,
+        retirement_serial=purchase.retirement_serial,
+        retirement_date=purchase.retirement_date,
+        country=purchase.country,
     )
     db.add(db_obj)
     await db.commit()
     await db.refresh(db_obj)
-    return _to_out(db_obj)
+    # The owning scenario is already loaded above — no second round trip needed.
+    return _to_out(db_obj, scenario.created_at.year if scenario and scenario.created_at else None)
 
 
 @router.get("", response_model=List[OffsetPurchaseOut])
@@ -87,7 +101,9 @@ async def list_purchases(
         .where(OffsetPurchaseDB.user_id == current_user.id)
         .order_by(OffsetPurchaseDB.created_at.desc())
     )
-    return [_to_out(p) for p in result.scalars().all()]
+    purchases = result.scalars().all()
+    event_years = await _event_years(db, purchases)
+    return [_to_out(p, event_years.get(p.scenario_id)) for p in purchases]
 
 
 @router.post("/{purchase_id}/retire")
@@ -112,7 +128,7 @@ async def retire_credit(
     p.status = "retired"
     p.retired_at = utcnow()
     await db.commit()
-    return _to_out(p)
+    return _to_out(p, (await _event_years(db, [p])).get(p.scenario_id))
 
 
 @router.delete("/{purchase_id}")
@@ -164,6 +180,13 @@ async def portfolio_summary(
         by_type[p.project_type] = by_type.get(p.project_type, 0) + p.quantity_tco2e
         by_registry[p.registry] = by_registry.get(p.registry, 0) + p.quantity_tco2e
 
+    # by_registry above is a breakdown of everything *held*; the claim statement may
+    # only name the registries whose credits were actually retired (see
+    # app/services/claims.py — a held Gold Standard credit must not be described as
+    # compensating alongside a retired Verra one).
+    retired = [p for p in purchases if p.status == "retired"]
+    retired_by_registry = sum_by_registry(retired)
+
     coverage_pct = None
     claim_statement = ""
     if scenario_id:
@@ -174,7 +197,10 @@ async def portfolio_summary(
         if scenario and scenario.total_tco2e > 0:
             coverage_pct = round(total_retired / scenario.total_tco2e * 100, 1)
             claim_statement = portfolio_claim_statement(
-                scenario.total_tco2e, total_retired, by_registry
+                scenario.total_tco2e,
+                total_retired,
+                retired_by_registry,
+                credits_claim_eligible=all(claim_eligible(p) for p in retired),
             )
 
     return OffsetPortfolioSummary(
@@ -192,6 +218,14 @@ async def portfolio_summary(
 async def recommend_offsets(
     scenario_id: str,
     budget_usd: Optional[float] = None,
+    reduction_pct: float = Query(
+        default=0.0,
+        ge=0,
+        le=100,
+        description="Committed reduction target (%). The mix is sized against the "
+                    "residual left after it, since offsetting applies to residual "
+                    "emissions only (ISO 14068-1).",
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: UserDB = Depends(get_current_user),
 ):
@@ -203,7 +237,9 @@ async def recommend_offsets(
     if not scenario:
         raise HTTPException(status_code=404, detail="Scenario not found")
 
-    residual = scenario.total_tco2e
+    # Without a stated reduction the mix is sized against the gross total — reported
+    # as basis "gross" so it is never presented as a residual it is not.
+    residual, basis = residual_basis(scenario.total_tco2e, reduction_pct)
     projects = OFFSET_DATA["project_types"]
 
     # Recommended portfolio: 50% avoidance, 30% nature-based, 20% removal
@@ -236,8 +272,10 @@ async def recommend_offsets(
         scale = budget_usd / total_cost_unconstrained
 
     recommendations = []
+    residual_reported = round(residual, 3)
     for proj_key, proj, qty, price in raw:
         scaled_qty = round(qty * scale, 3)
+        risk = proj.get("additionality_risk", "")
         recommendations.append(OffsetRecommendation(
             project_type=proj_key,
             label=proj["label"],
@@ -248,14 +286,36 @@ async def recommend_offsets(
             recommended_qty_tco2e=scaled_qty,
             estimated_cost_usd=round(scaled_qty * price, 2),
             permanence=proj["permanence"],
+            additionality_risk=risk,
+            risk_warning=additionality_risk_warning(risk),
             co_benefits=proj["co_benefits"],
             sdgs=proj["sdgs"],
+            basis=basis,
+            residual_tco2e=residual_reported,
         ))
 
     return recommendations
 
 
-def _to_out(p: OffsetPurchaseDB) -> OffsetPurchaseOut:
+async def _event_years(
+    db: AsyncSession, purchases: Sequence[OffsetPurchaseDB]
+) -> Dict[str, int]:
+    """Event year per linked scenario id, for the vintage-staleness check.
+
+    A scenario carries no event date of its own, so the year it was created stands
+    in for the event year — the comparison only needs to catch a vintage from
+    *before* the event was being planned.
+    """
+    scenario_ids = {p.scenario_id for p in purchases if p.scenario_id}
+    if not scenario_ids:
+        return {}
+    rows = await db.execute(
+        select(ScenarioDB.id, ScenarioDB.created_at).where(ScenarioDB.id.in_(scenario_ids))
+    )
+    return {sid: created.year for sid, created in rows.all() if created}
+
+
+def _to_out(p: OffsetPurchaseDB, event_year: Optional[int] = None) -> OffsetPurchaseOut:
     return OffsetPurchaseOut(
         id=p.id,
         scenario_id=p.scenario_id,
@@ -270,4 +330,12 @@ def _to_out(p: OffsetPurchaseDB) -> OffsetPurchaseOut:
         retired_at=p.retired_at.isoformat() if p.retired_at else None,
         notes=p.notes,
         created_at=p.created_at.isoformat() if p.created_at else "",
+        ccp_approved=p.ccp_approved,
+        article6_adjustment=p.article6_adjustment,
+        methodology=p.methodology,
+        retirement_serial=p.retirement_serial,
+        retirement_date=p.retirement_date.isoformat() if p.retirement_date else None,
+        country=p.country,
+        claim_eligible=claim_eligible(p),
+        vintage_stale=bool(event_year and p.vintage_year and p.vintage_year < event_year),
     )
