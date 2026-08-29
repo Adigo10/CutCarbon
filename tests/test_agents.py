@@ -42,7 +42,10 @@ def test_sync_run_is_not_reachable_by_get(client: TestClient, monkeypatch):
     monkeypatch.setattr(settings, "ADMIN_EMAILS", "admin@example.com")
     admin_headers = register_user(client, email="admin@example.com")
 
-    assert client.get("/api/agents/run/sync", headers=admin_headers).status_code == 405
+    # 405 with no SPA build present; 404 once frontend/dist exists, because the
+    # StaticFiles mount at "/" (app/main.py) then swallows the unmatched GET.
+    # Either way the handler never runs — that's what this asserts.
+    assert client.get("/api/agents/run/sync", headers=admin_headers).status_code in (404, 405)
     assert calls["count"] == 0
 
 
