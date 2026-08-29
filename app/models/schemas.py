@@ -478,5 +478,6 @@ class UserOut(BaseModel):
     id: str  # Supabase auth UUID (serialized as string)
     email: str
     created_at: str
+    is_admin: bool = False  # email is on the ADMIN_EMAILS allowlist (see require_admin)
 
     model_config = {"from_attributes": True}

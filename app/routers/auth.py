@@ -66,9 +66,14 @@ def _admin_emails() -> set[str]:
     return {e.strip().lower() for e in settings.ADMIN_EMAILS.split(",") if e.strip()}
 
 
+def is_admin(user: UserDB) -> bool:
+    """The single admin check — used by `require_admin` and reported on /me."""
+    return user.email.lower() in _admin_emails()
+
+
 async def require_admin(current_user: UserDB = Depends(get_current_user)) -> UserDB:
     """Gate for operations that mutate global state (e.g. emission-factor refresh)."""
-    if current_user.email.lower() not in _admin_emails():
+    if not is_admin(current_user):
         raise HTTPException(status_code=403, detail="Admin access required")
     return current_user
 
@@ -79,4 +84,5 @@ async def me(current_user: UserDB = Depends(get_current_user)):
         id=str(current_user.id),
         email=current_user.email,
         created_at=current_user.created_at.isoformat(),
+        is_admin=is_admin(current_user),
     )

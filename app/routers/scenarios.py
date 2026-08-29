@@ -164,9 +164,14 @@ async def delete_scenario(
     db: AsyncSession = Depends(get_db),
     current_user: UserDB = Depends(get_current_user),
 ):
-    await db.execute(
+    result = await db.execute(
         delete(ScenarioDB).where(ScenarioDB.id == scenario_id, ScenarioDB.user_id == current_user.id)
     )
+    if result.rowcount == 0:
+        # Unknown id, or someone else's scenario — 404 either way, so the response
+        # never confirms that another user's scenario exists.
+        await db.rollback()
+        raise HTTPException(status_code=404, detail="Scenario not found")
     await db.commit()
     return {"deleted": scenario_id}
 

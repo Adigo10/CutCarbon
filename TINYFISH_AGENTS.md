@@ -221,7 +221,7 @@ All endpoints live under `/api/agents/` (router: `app/routers/agents.py`).
 | Method | Path | Access | Description |
 |---|---|---|---|
 | `POST` | `/api/agents/run` | Admin only | Trigger all agents as a background task. Returns immediately. |
-| `GET` | `/api/agents/run/sync` | Admin only | Trigger all agents synchronously. Waits for completion. |
+| `POST` | `/api/agents/run/sync` | Admin only | Trigger all agents synchronously. Waits for completion. |
 | `GET` | `/api/agents/status` | Authenticated | Per-agent status: last run time, cache validity, result summary. |
 | `GET` | `/api/agents/history` | Authenticated | Paginated run history (50 most recent by default). |
 
@@ -245,7 +245,7 @@ The `force=true` query parameter is accepted by both run endpoints to bypass the
 
 4. **Add validation bounds** (for numeric factors) to `_GRID_FACTOR_BOUNDS` or a similar dict, with region-appropriate min/max values. Include a conversion step if the source reports in non-standard units.
 
-5. **Test** by calling `GET /api/agents/run/sync?force=true` and checking `/api/agents/status` for the new agent's result.
+5. **Test** by calling `POST /api/agents/run/sync?force=true` and checking `/api/agents/status` for the new agent's result.
 
 ---
 
@@ -256,7 +256,7 @@ The `force=true` query parameter is accepted by both run endpoints to bypass the
 | Agent status shows `error` | Source URL changed or site structure updated | Check the TinyFish run log for the HTML it received; update the `url` or `goal` in the agent class |
 | Factor value unchanged after successful run | Parsed value fell outside validation bounds | Lower/raise bounds in `_GRID_FACTOR_BOUNDS` if the source data is legitimately out of range |
 | Unit conversion producing wrong value | Source changed reporting units | Add/adjust conversion in the agent's `_parse_result()` method |
-| Agent always shows `_cache_hit: true` | Within 12-hour TTL window | Use `force=true` to bypass: `GET /api/agents/run/sync?force=true` |
+| Agent always shows `_cache_hit: true` | Within 12-hour TTL window | Use `force=true` to bypass: `POST /api/agents/run/sync?force=true` |
 | Run endpoint returns 403 | Logged-in email not in `ADMIN_EMAILS` | Add the email to the `ADMIN_EMAILS` allowlist in `.env` and restart |
 | Run endpoint returns 429 | 2-runs-per-hour rate limit hit | Wait, or set `RATE_LIMIT_ENABLED=false` (dev/tests only) |
 | DB write fails after successful fetch | `EmissionFactorDB` upsert error | Check `DATABASE_URL` env var and ensure the `emission_factors` table exists (auto-created on startup) |

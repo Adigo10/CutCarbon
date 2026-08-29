@@ -75,8 +75,11 @@ def pg_base_url() -> str:
     except ImportError:
         pytest.skip("Postgres unavailable: set TEST_DATABASE_URL or install testcontainers + Docker")
 
-    container = PostgresContainer("postgres:17")  # match Supabase prod (17.x)
     try:
+        # Construction itself talks to the Docker daemon, so it must be inside the
+        # try — otherwise a Docker-less machine ERRORs every DB-backed test instead
+        # of skipping.
+        container = PostgresContainer("postgres:17")  # match Supabase prod (17.x)
         container.start()
     except Exception as exc:  # Docker not running / not installed
         pytest.skip(f"Could not start a Postgres testcontainer ({exc}); set TEST_DATABASE_URL")
