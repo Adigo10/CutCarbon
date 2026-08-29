@@ -1956,11 +1956,18 @@ export function ComplianceView({
                     </p>
                     {check.reason ? <p className="framework-reason">{check.reason}</p> : null}
                     {/* A completeness bar only where the tool can actually assess one —
-                        never for ISO 20121 or a statutory scoping decision. */}
+                        never for ISO 20121 or a statutory scoping decision. Labelled,
+                        so the bar reads as inventory completeness and not as conformance. */}
                     {check.score_pct !== null ? (
-                      <div className="framework-score">
-                        <span style={{ width: `${check.score_pct}%` }} />
-                      </div>
+                      <>
+                        <p className="framework-meta">
+                          Inventory completeness {check.score_pct.toFixed(0)}%
+                          {check.readiness ? ` · ${labelize(check.readiness)}` : ''}
+                        </p>
+                        <div className="framework-score">
+                          <span style={{ width: `${check.score_pct}%` }} />
+                        </div>
+                      </>
                     ) : null}
                     {check.clause_checklist.length ? (
                       <div className="framework-list">

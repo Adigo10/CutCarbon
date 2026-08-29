@@ -431,6 +431,7 @@ def _scenario_report_csv_bytes(report: ScenarioReportPayload) -> bytes:
             writer.writerow(("compliance_check", f"{prefix}.scope3_required", f"{check.framework} Scope 3 required", check.scope3_required, "boolean"))
         if check.score_pct is not None:
             writer.writerow(("compliance_check", f"{prefix}.score_pct", f"{check.framework} completeness", check.score_pct, "pct"))
+            writer.writerow(("compliance_check", f"{prefix}.readiness", f"{check.framework} readiness", check.readiness or "", ""))
         for clause_idx, clause in enumerate(check.clause_checklist, start=1):
             writer.writerow((
                 "compliance_clause", f"{prefix}.clause_{clause_idx}",
@@ -529,6 +530,9 @@ def _scenario_report_xlsx(report: ScenarioReportPayload):
     compliance_ws = wb.create_sheet("Compliance")
     compliance_ws.append([
         "Framework", "Applies", "Status", "As Of", "Scope 3 Required",
+        # Completeness is left blank wherever a number would be invented — for every
+        # statutory scoping decision, and for ISO 20121, which is audited by clause.
+        "Inventory Completeness %", "Readiness",
         "Reason", "Clause Checklist", "Gaps", "Recommendations",
     ])
     _style_header(compliance_ws)
@@ -539,6 +543,8 @@ def _scenario_report_xlsx(report: ScenarioReportPayload):
             check.status,
             check.as_of,
             "" if check.scope3_required is None else check.scope3_required,
+            "" if check.score_pct is None else check.score_pct,
+            check.readiness or "",
             check.reason,
             "\n".join(f"{c.clause}: {c.requirement} — {c.evidence_status}" for c in check.clause_checklist),
             "\n".join([gap for gap in check.gaps if gap]),
