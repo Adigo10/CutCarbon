@@ -30,8 +30,7 @@ _DATA_DIR = Path(__file__).parent.parent / "data"
 # Changing only emission_factors.json bumps `EF["version"]`, not this.
 ENGINE_VERSION = "2.0.0"
 
-with open(_DATA_DIR / "emission_factors.json", encoding="utf-8") as f:
-    EF = json.load(f)
+from app.services.factor_catalog import EF
 
 from app.services.data_files import TAX_DATA as _TAX_DATA  # noqa: E402
 from app.utils.time import utcnow
@@ -42,20 +41,6 @@ _OFFSET_PRICE_USD = (
     .get("carbon_offset_purchase", {})
     .get("cost_per_tco2e_usd", 15.0)
 )
-
-
-def reload_factors() -> None:
-    """Re-read emission_factors.json into the shared EF dict IN PLACE.
-
-    The in-place update (clear + update) is deliberate: other modules import this
-    same dict object (e.g. ``from app.services.emissions_engine import EF``), so
-    rebinding the name would not propagate. Mutating in place means a TinyFish
-    refresh is reflected by the very next calculation without a process restart.
-    """
-    with open(_DATA_DIR / "emission_factors.json", encoding="utf-8") as f:
-        fresh = json.load(f)
-    EF.clear()
-    EF.update(fresh)
 
 
 def physical_attendee_count(scenario) -> int:

@@ -3,6 +3,7 @@ import type {
   AgentStatus,
   ChatMessage,
   ChatResponse,
+  RefreshSummary,
   ComplianceReport,
   FinancialResult,
   OffsetMarket,
@@ -275,13 +276,13 @@ export const api = {
   },
 
   runAgentsSync(token: string) {
-    return request<Record<string, unknown>>('/api/agents/run/sync?force=true', {
+    return request<RefreshSummary>('/api/agents/run/sync', {
       method: 'POST',
     }, token)
   },
 
   runAgentsForce(token: string) {
-    return request<Record<string, unknown>>('/api/agents/run?force=true', {
+    return request<RefreshSummary>('/api/agents/run?force=true', {
       method: 'POST',
     }, token)
   },

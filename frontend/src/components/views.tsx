@@ -1,4 +1,4 @@
-import { type Dispatch, type FormEvent, type SetStateAction, useDeferredValue, useState } from 'react'
+import { type Dispatch, type FormEvent, type SetStateAction, type ReactNode, useDeferredValue, useState } from 'react'
 import {
   ACCOMMODATION_OPTIONS,
   APPLIES_LABELS,
@@ -66,6 +66,26 @@ interface AuthViewProps {
   onPasswordChange: (value: string) => void
   onSubmit: () => void
   onForgotPassword: () => void
+}
+
+function CitedMessage({ message }: { message: ChatMessage }) {
+  const nodes: ReactNode[] = []
+  let cursor = 0
+  for (const citation of [...(message.citations ?? [])].sort((a, b) => a.start_index - b.start_index)) {
+    const { start_index: start, end_index: end } = citation
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < cursor || end <= start || end > message.content.length) continue
+    let safe = false
+    try {
+      const url = new URL(citation.url)
+      safe = ['https:', 'http:'].includes(url.protocol) && !url.username
+    } catch { /* Ignore malformed source links. */ }
+    if (!safe) continue
+    nodes.push(message.content.slice(cursor, start))
+    nodes.push(<a key={`${start}-${end}-${citation.url}`} href={citation.url} title={citation.title} target="_blank" rel="noopener noreferrer">{message.content.slice(start, end)}</a>)
+    cursor = end
+  }
+  nodes.push(message.content.slice(cursor))
+  return <span>{nodes}</span>
 }
 
 export function AuthView({
@@ -308,7 +328,7 @@ export function ChatView({
             {messages.map((message, index) => (
               <article key={`${message.role}-${index}`} className={message.role === 'user' ? 'message-bubble user' : 'message-bubble assistant'}>
                 <div className="message-copy">
-                  <span>{message.content}</span>
+                  <CitedMessage message={message} />
                 </div>
                 {message.financial_analysis ? (
                   <div className="signal-grid">
@@ -2430,7 +2450,8 @@ export function DataView({
           <div className="panel-heading">
             <div>
               <span className="eyebrow">Agent status</span>
-              <h3>TinyFish factor refresh</h3>
+              <h3>OpenAI factor refresh</h3>
+              {agentsRunning ? <p className="subtle-copy" role="status">Searching sources and saving validated results. This can take up to four minutes.</p> : null}
             </div>
             <div className="hero-actions">
               <Button tone="soft" onClick={onRefreshStatus}>

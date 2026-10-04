@@ -10,7 +10,7 @@ from typing import AsyncGenerator
 from uuid import uuid4
 
 from sqlalchemy import (
-    Column, String, Integer, Float, Text, Date, DateTime, Boolean, JSON, Uuid, text,
+    Column, String, Integer, BigInteger, Float, Text, Date, DateTime, Boolean, JSON, Uuid, text,
     ForeignKey, Index, event,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -174,6 +174,7 @@ class ChatMessageDB(Base):
     role = Column(String)
     content = Column(Text)
     extracted_data = _json_col(nullable=True)
+    citations = _json_col(nullable=True)
     created_at = Column(DateTime, default=utcnow, index=True)
     user_id = _uuid_col(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
 
@@ -196,12 +197,7 @@ class FinancialReportDB(Base):
 
 
 class EmissionFactorDB(Base):
-    """Audit log of TinyFish-fetched factor values with provenance.
-
-    Deliberately write-only: emission_factors.json is the live source of truth for
-    calculations; this table records what each agent fetched and when, so auto-fetched
-    values (is_verified=False) can be human-reviewed later.
-    """
+    """Legacy factor audit records; current values live in FactorCatalogDB."""
 
     __tablename__ = "emission_factors"
 
@@ -280,6 +276,18 @@ class ReportSnapshotDB(Base):
     sha256 = Column(String(64), nullable=False, index=True)
 
 
+class FactorCatalogDB(Base):
+    """Shared catalog and expiring refresh lease, portable to SQLite development."""
+
+    __tablename__ = "factor_catalog"
+    id = Column(Integer, primary_key=True)
+    document = _json_col(nullable=False)
+    revision = Column(BigInteger, nullable=False, default=0)
+    updated_at = Column(DateTime, nullable=False, default=utcnow)
+    refresh_token = Column(String, nullable=True)
+    refresh_expires_at = Column(DateTime, nullable=True)
+
+
 class AgentRunDB(Base):
     __tablename__ = "agent_runs"
 
@@ -287,7 +295,7 @@ class AgentRunDB(Base):
     agent_name = Column(String, nullable=False, index=True)
     category = Column(String, nullable=True)
     source_url = Column(String, nullable=True)
-    status = Column(String, default="success")  # success | error | skipped
+    status = Column(String, default="success")  # success | no_data | error | timeout
     run_id = Column(String, nullable=True)
     num_steps = Column(Integer, nullable=True)
     result_json = _json_col(nullable=True)
@@ -315,6 +323,11 @@ async def init_db():
     if "sqlite" in settings.DATABASE_URL:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            # Existing development DBs predate the optional citations column.
+            from sqlalchemy import inspect
+            columns = await conn.run_sync(lambda c: {col["name"] for col in inspect(c).get_columns("chat_messages")})
+            if "citations" not in columns:
+                await conn.execute(text("ALTER TABLE chat_messages ADD COLUMN citations JSON"))
         return
 
     if settings.RUN_MIGRATIONS_ON_STARTUP:

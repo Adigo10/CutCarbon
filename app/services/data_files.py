@@ -1,7 +1,7 @@
 """Loads the static data JSONs once, shared across services.
 
-emission_factors.json is NOT here — it lives in emissions_engine as the mutable
-``EF`` dict with in-place reload semantics (TinyFish refreshes mutate it live).
+Emission factors live in the database catalog. ``EF`` exposes the current
+request's snapshot; emission_factors.json is its packaged seed.
 """
 
 import json

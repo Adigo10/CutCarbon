@@ -362,8 +362,39 @@ class ChatRequest(BaseModel):
     scenario_id: Optional[str] = None
 
 
+class ChatCitation(BaseModel):
+    url: str
+    title: str
+    start_index: int = Field(ge=0)
+    end_index: int = Field(ge=0)
+
+
+class FactorRefreshOutcome(BaseModel):
+    status: Literal["success", "cached", "no_data", "error", "timeout"]
+    cache_hit: bool = False
+    data: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+    run_id: Optional[str] = None
+    updated_fields: List[str] = Field(default_factory=list)
+
+
+class FactorMergeSummary(BaseModel):
+    total: int = 0
+    updated_fields: List[str] = Field(default_factory=list)
+
+
+class FactorRefreshSummary(BaseModel):
+    status: Literal["completed", "partial", "failed"]
+    agent_results: Dict[str, FactorRefreshOutcome]
+    merge_summary: FactorMergeSummary = Field(default_factory=FactorMergeSummary)
+    ran_at: str = ""
+    ttl_hours: int = 12
+    forced: bool = False
+
+
 class ChatResponse(BaseModel):
     reply: str
+    citations: List[ChatCitation] = Field(default_factory=list)
     extracted_data: Optional[Dict[str, Any]] = None
     suggestions: List[str] = Field(default_factory=list)
     # Server-validated session id the turn was persisted under; clients should adopt

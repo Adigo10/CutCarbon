@@ -29,7 +29,7 @@
 The app combines **three power sources**:
 - 🔬 **Deterministic emissions calculations** (GHG Protocol methodology)
 - 🤖 **OpenAI function calling** for natural language event data extraction
-- 🌐 **TinyFish web agents** for live emission factor updates from authoritative sources
+- 🌐 **OpenAI web search** for live emission factor updates from authoritative sources
 
 ### Feature Summary
 
@@ -37,7 +37,7 @@ The app combines **three power sources**:
 |---|---|
 | **Emissions** | 8 categories: travel, venue energy, accommodation, catering, waste, equipment, merchandise, digital/virtual. Scope 1/2/3 per GHG Protocol. Basic (proxy) and advanced (detailed) modes. |
 | **AI Co-Pilot** | Natural language → structured scenario. Context-aware chat. Reduction suggestions. Real financial analysis for the selected scenario, shown as a savings card in chat. |
-| **Live Data** | 10 TinyFish agents refresh grid factors (SG/UK/AU/US/EU), carbon prices (SG/EU/UK ETS), aviation factors, and food emissions (OWID). See `TINYFISH_AGENTS.md`. |
+| **Live Data** | 10 OpenAI web search agents refresh grid factors (SG/UK/AU/US/EU), carbon prices (SG/EU/UK ETS), aviation factors, and food emissions (OWID). See `WEB_SEARCH_AGENTS.md`. |
 | **Scenarios** | Create, edit, clone, compare up to 4 side-by-side with deltas vs baseline. Data quality tracking (estimated / partial / verified) plus per-category flags. Instant recalculation. |
 | **Financial** | Carbon tax savings by region (SG, EU, UK, AU, USA). Green incentive identification. Energy and catering cost savings. |
 | **Carbon Credits** | Browse 10+ project types. Purchase and retire credits. Registry tracking (Gold Standard, VCS, ACR, etc.). Carbon neutral certification. |
@@ -743,7 +743,7 @@ Every scenario report (all four formats) also includes:
 
 **Web Scraping Agent Status**
 
-CutCarbon runs **10 autonomous agents** to keep emission factors up-to-date. For full specifications including validation bounds, unit conversions, and data destinations, see `TINYFISH_AGENTS.md`.
+CutCarbon runs **10 autonomous agents** to keep emission factors up-to-date. For full specifications including validation bounds, unit conversions, and data destinations, see `WEB_SEARCH_AGENTS.md`.
 
 ```
 AGENT STATUS
@@ -919,7 +919,7 @@ A: Yes, through:
 Example: 6,912 tCO2e event → Reduce to 5,000 → Offset remaining 5,000 = Carbon Neutral ✓
 
 **Q: Is data automatically updated?**
-A: 10 TinyFish agents can refresh emission factors from official sources (grid factors, carbon prices, aviation factors, food emissions), with a 12-hour TTL cache. Runs are triggered by an administrator (email on the `ADMIN_EMAILS` allowlist); after a refresh, use "Recalculate all" so saved scenarios pick up the new factors. See `TINYFISH_AGENTS.md` for the full agent roster and data sources.
+A: 10 OpenAI web search agents can refresh emission factors from official sources (grid factors, carbon prices, aviation factors, food emissions), with a 12-hour TTL cache. Runs are triggered by an administrator (email on the `ADMIN_EMAILS` allowlist); after a refresh, use "Recalculate all" so saved scenarios pick up the new factors. See `WEB_SEARCH_AGENTS.md` for the full agent roster and data sources.
 
 ---
 
@@ -987,7 +987,7 @@ A: Yes! Download as:
 - Offset portfolio management (browse, purchase, retire)
 - Dashboard visualizations (KPI cards, pie/bar/line/scope charts, benchmarks)
 - Data exports (PDF, Excel, JSON, CSV — all with NZCE mapping and per-category data-quality flags)
-- 10 TinyFish web agents updating emission factors and carbon prices (admin-triggered, 12-hour TTL cache)
+- 10 OpenAI web search tasks updating emission factors and carbon prices (admin-triggered, 12-hour TTL cache)
 - Authentication (JWT-based login/register, user-isolated data, admin allowlist for agent runs)
 - Database persistence (SQLite locally, Postgres-ready)
 

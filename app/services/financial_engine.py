@@ -76,7 +76,7 @@ def canonical_actions(actions: List[str]) -> set:
 
 
 def _live_carbon_prices() -> dict:
-    """Live carbon prices fetched by the TinyFish agents (carbon_tax_live), if any."""
+    """Live carbon prices fetched by the OpenAI web search agents (carbon_tax_live), if any."""
     try:
         from app.services.emissions_engine import EF
         return EF.get("carbon_tax_live", {}) or {}
@@ -110,7 +110,7 @@ def calculate_carbon_tax_savings(
 ) -> List[TaxSaving]:
     """Direct carbon-tax/ETS liability avoided by the emission reduction.
 
-    Prefers a live carbon price fetched by the TinyFish agents (carbon_tax_live) and
+    Prefers a live carbon price fetched by the OpenAI web search agents (carbon_tax_live) and
     falls back to the static tax_incentives.json value. Returns no savings for regions
     with no configured carbon price rather than fabricating one.
     """
@@ -133,7 +133,7 @@ def calculate_carbon_tax_savings(
         if field in rate_data:
             currency = cur
             live_key = _LIVE_PRICE_KEYS.get(field)
-            if live_key and live.get(live_key):
+            if live_key and live.get(live_key) is not None:
                 local_price = live[live_key]
                 is_live = True
             else:
@@ -164,11 +164,11 @@ def calculate_carbon_tax_savings(
     if region_key == "singapore":
         future_price = live.get("singapore_next_sgd")
         source_note = "announced next-step rate (live)"
-        if not future_price:
+        if future_price is None:
             rate_range = rate_data.get("2030_rate_sgd_range") or []
             future_price = rate_range[0] if rate_range else None
             source_note = "low bound of the announced SGD 50-80/tCO2e range by 2030"
-        if future_price:
+        if future_price is not None:
             savings.append(TaxSaving(
                 scheme="Singapore Carbon Tax (future rate)",
                 savings_usd=round(co2e_reduced_tco2e * future_price * usd_rate, 2),

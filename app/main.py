@@ -3,7 +3,7 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
@@ -13,6 +13,8 @@ from app.config import settings
 from app.models.database import init_db
 from app.rate_limit import limiter
 from app.routers import chat, scenarios, financial, agents, auth, offsets, exports
+from app.services.factor_catalog import bind_catalog, ensure_catalog
+from app.services.openai_client import close_client
 
 logger = logging.getLogger(__name__)
 IS_VERCEL = os.getenv("VERCEL") == "1"
@@ -40,8 +42,12 @@ async def lifespan(app: FastAPI):
     logging.basicConfig(level=logging.INFO)
     _validate_runtime_config()
     await init_db()
+    await ensure_catalog()
     logger.info("EventCarbon Co-Pilot v2.0 started — http://localhost:8000")
-    yield
+    try:
+        yield
+    finally:
+        await close_client()
 
 
 app = FastAPI(
@@ -68,13 +74,13 @@ app.add_middleware(
 )
 
 app.include_router(auth.router,      prefix=f"{API_PREFIX}/auth",      tags=["Auth"])
-app.include_router(chat.router,      prefix=f"{API_PREFIX}/chat",      tags=["Chat"])
-app.include_router(scenarios.router, prefix=f"{API_PREFIX}/scenarios", tags=["Scenarios"])
-app.include_router(financial.router, prefix=f"{API_PREFIX}/financial", tags=["Financial"])
-app.include_router(offsets.router,   prefix=f"{API_PREFIX}/offsets",   tags=["Carbon Offsets"])
-app.include_router(agents.router,    prefix=f"{API_PREFIX}/agents",    tags=["TinyFish Agents"])
-app.include_router(exports.router,   prefix=f"{API_PREFIX}/exports",   tags=["Data Exports"])
-app.include_router(exports.reports_router, prefix=API_PREFIX,           tags=["Report Snapshots"])
+app.include_router(chat.router,      prefix=f"{API_PREFIX}/chat",      tags=["Chat"], dependencies=[Depends(bind_catalog)])
+app.include_router(scenarios.router, prefix=f"{API_PREFIX}/scenarios", tags=["Scenarios"], dependencies=[Depends(bind_catalog)])
+app.include_router(financial.router, prefix=f"{API_PREFIX}/financial", tags=["Financial"], dependencies=[Depends(bind_catalog)])
+app.include_router(offsets.router,   prefix=f"{API_PREFIX}/offsets",   tags=["Carbon Offsets"], dependencies=[Depends(bind_catalog)])
+app.include_router(agents.router,    prefix=f"{API_PREFIX}/agents",    tags=["Factor Refresh"])
+app.include_router(exports.router,   prefix=f"{API_PREFIX}/exports",   tags=["Data Exports"], dependencies=[Depends(bind_catalog)])
+app.include_router(exports.reports_router, prefix=API_PREFIX,           tags=["Report Snapshots"], dependencies=[Depends(bind_catalog)])
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIST_DIR = BASE_DIR / "frontend" / "dist"

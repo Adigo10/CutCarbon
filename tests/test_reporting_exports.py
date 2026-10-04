@@ -338,18 +338,14 @@ def test_financial_total_excludes_fabricated_streams():
     assert abs(res.total_financial_savings_usd - expected) < 0.01
 
 
-def test_financial_uses_live_carbon_price_when_present():
+def test_financial_uses_live_carbon_price_when_present(monkeypatch):
     from app.services import emissions_engine as eng
     from app.services.financial_engine import calculate_carbon_tax_savings
 
-    live = eng.EF.setdefault("carbon_tax_live", {})
-    live["singapore_current_sgd"] = 99
-    try:
-        savings = calculate_carbon_tax_savings(10, "singapore")
-        assert savings[0].savings_local == 990  # 10 t x 99 SGD
-        assert "live price" in savings[0].description
-    finally:
-        live.pop("singapore_current_sgd", None)
+    monkeypatch.setattr("app.services.financial_engine._live_carbon_prices", lambda: {"singapore_current_sgd": 99})
+    savings = calculate_carbon_tax_savings(10, "singapore")
+    assert savings[0].savings_local == 990  # 10 t x 99 SGD
+    assert "live price" in savings[0].description
 
 
 def test_reduction_suggestions_are_clamped_and_offsets_separated():
@@ -373,8 +369,8 @@ def test_reduction_suggestions_are_clamped_and_offsets_separated():
     assert offsets and suggestions[-1].get("is_neutralization")
 
 
-def test_tinyfish_extract_validates_and_converts():
-    from app.services.tinyfish_agent import (
+def test_web_search_extract_validates_and_converts():
+    from app.services.web_search_agent import (
         EUGridFactorAgent,
         FlightEmissionFactorAgent,
         SingaporeGridFactorAgent,
@@ -386,6 +382,7 @@ def test_tinyfish_extract_validates_and_converts():
     assert SingaporeGridFactorAgent().extract({"factor": 2024})["factor_value"] is None
     # Business cheaper than economy is implausible -> dropped.
     flight = FlightEmissionFactorAgent().extract(
-        {"short_haul_economy": 0.15, "long_haul_economy": 0.19, "long_haul_business": 0.10}
+        {"short_haul_economy": 0.15, "long_haul_economy": 0.19, "long_haul_business": 0.10,
+         "unit": "kg_co2e_per_passenger_km", "radiative_forcing": True}
     )
     assert flight["long_haul_business"] is None

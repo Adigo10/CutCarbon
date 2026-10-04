@@ -212,15 +212,24 @@ export interface ReductionSuggestion {
   is_neutralization?: boolean
 }
 
+export interface ChatCitation {
+  url: string
+  title: string
+  start_index: number
+  end_index: number
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
+  citations?: ChatCitation[]
   extracted_data?: Record<string, unknown>
   financial_analysis?: FinancialResult
 }
 
 export interface ChatResponse {
   reply: string
+  citations: ChatCitation[]
   extracted_data?: Record<string, unknown> | null
   suggestions: string[]
   session_id?: string
@@ -441,6 +450,18 @@ export interface AgentRun {
   fetched_at: string
   error?: string | null
   data?: Record<string, unknown> | null
+}
+
+export interface RefreshSummary {
+  status: 'completed' | 'partial' | 'failed'
+  agent_results: Record<string, {
+    status: 'success' | 'cached' | 'no_data' | 'error' | 'timeout'
+    cache_hit: boolean
+    error?: string | null
+    updated_fields: string[]
+  }>
+  merge_summary: { total: number; updated_fields: string[] }
+  forced: boolean
 }
 
 export interface OffsetMarket {

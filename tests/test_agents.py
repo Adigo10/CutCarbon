@@ -11,7 +11,7 @@ def _mock_run_and_update(monkeypatch):
 
     async def fake_run_and_update(force=False):
         calls["count"] += 1
-        return {"status": "ok", "force": force, "results": {}}
+        return {"status": "completed", "forced": force, "agent_results": {}}
 
     monkeypatch.setattr(agents_router, "run_and_update", fake_run_and_update)
     return calls
@@ -29,11 +29,11 @@ def test_agent_triggers_require_admin(client: TestClient, monkeypatch):
 
     dispatched = client.post("/api/agents/run", headers=admin_headers)
     assert dispatched.status_code == 200
-    assert dispatched.json()["status"] == "agents_dispatched"
+    assert dispatched.json()["status"] == "completed"
 
     sync = client.post("/api/agents/run/sync", headers=admin_headers)
     assert sync.status_code == 200
-    assert sync.json()["status"] == "ok"
+    assert sync.json()["status"] == "completed"
 
 
 def test_sync_run_is_not_reachable_by_get(client: TestClient, monkeypatch):

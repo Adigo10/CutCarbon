@@ -1442,6 +1442,13 @@ tbody tr:last-child td {
   font-size: 0.9rem;
 }
 
+.message-copy a {
+  color: var(--accent-fresh-dark);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  overflow-wrap: anywhere;
+}
+
 .extracted-box {
   display: flex;
   justify-content: flex-end;

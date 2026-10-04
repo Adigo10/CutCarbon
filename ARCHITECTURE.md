@@ -45,7 +45,7 @@
 │  │  │  └─ Tax savings, incentives, compliance      │   │
 │  │  ├─ openai_service.py                           │   │
 │  │  │  └─ Chat with function calling               │   │
-│  │  ├─ tinyfish_agent.py                           │   │
+│  │  ├─ web_search_agent.py                           │   │
 │  │  │  └─ Web scraper orchestration                │   │
 │  │  ├─ scenario_serializer.py                      │   │
 │  │  │  └─ ScenarioDB row ↔ API payload mapping     │   │
@@ -62,7 +62,7 @@
 │  │  ├─ Financial reports                           │   │
 │  │  ├─ Offset purchases                            │   │
 │  │  ├─ Emission factors (write-only audit log —    │   │
-│  │  │   emission_factors.json is the live source)  │   │
+│  │  │   factor_catalog is the live source)         │   │
 │  │  └─ Agent run history                           │   │
 │  └──────────────────────────────────────────────────┘   │
 │    (Supabase Postgres via asyncpg; sqlite dev fallback) │
@@ -74,10 +74,10 @@
 ┌─────────────────────────────────────────────────────────┐
 │           EXTERNAL SERVICES (Async)                     │
 │                                                         │
-│  ├─ OpenAI API → function calling (gpt-4o-mini)       │
+│  ├─ OpenAI API → function calling (gpt-6-luna)       │
 │  │  (Extracts event data from chat)                    │
 │  │                                                      │
-│  ├─ TinyFish Agents (10x Headless Browser)            │
+│  ├─ Responses web_search (10 validated tasks)        │
 │  │  ├─ EMA ← Singapore Electricity Market Authority   │
 │  │  ├─ DEFRA ← UK Dept for Environment (GHG factors) │
 │  │  ├─ EPA eGRID ← US grid emission factors           │
@@ -90,7 +90,7 @@
 │  │  └─ Our World in Data ← Food/catering emissions    │
 │  │                                                      │
 │  └─ Data Files (JSON)                                 │
-│     ├─ emission_factors.json → Updated by agents      │
+│     ├─ emission_factors.json → Catalog baseline       │
 │     ├─ tax_incentives.json → Regional rates           │
 │     └─ carbon_offsets.json → Project catalog          │
 │                                                         │
@@ -314,7 +314,7 @@ Backend (routers/chat.py):
        }
      ]
 
-OpenAI (default model gpt-4o-mini):
+OpenAI (default model gpt-6-luna):
   1. Reads user message
   2. Identifies intent (create scenario, ask question, etc)
   3. Extracts key details:
@@ -568,65 +568,32 @@ Swagger access:
 
 ## 📊 Emission Factor Data Flow
 
-For full per-agent specifications, validation bounds, unit conversions, caching behavior, and the developer guide for adding new agents, see `TINYFISH_AGENTS.md`.
+All AI calls use GPT-6 Luna through the Responses API. See [WEB_SEARCH_AGENTS.md](WEB_SEARCH_AGENTS.md) for task sources and operational details.
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│ DATA SOURCES (Updated by TinyFish Agents, 12h TTL cache) │
-└──────────────────────────────────────────────────────────┘
+Admin POST refresh (awaited, bounded to 240 seconds)
+    → acquire 300-second database lease
+    → reuse valid 12-hour cached evidence, or:
+      required source-restricted web_search
+      → strict extraction from retrieved evidence
+      → validate source, date, units, methodology and values
+    → atomically commit each successful task:
+      factor_catalog patch + agent_runs evidence
+    → release lease and return completed / partial / failed
 
-┌─────────────────────┐         ┌─────────────────────┐
-│ EMA Website         │         │ DEFRA Gov.uk        │
-│ (SG grid factor)    │         │ (UK factors)        │
-└─────────────────────┘         └─────────────────────┘
-          ↓                               ↓
-    ┌─────────────────────────────────────┐
-    │ TinyFish Headless Browser Agent     │
-    │ (admin-triggered via /api/agents,   │
-    │  2 runs/hour limit, 12h TTL cache)  │
-    └─────────────────────────────────────┘
-          ↓                    ↓
-    Parse HTML           Parse HTML
-    Extract rows         Extract rows
-          ↓                    ↓
-    ┌────────────────────────────────────┐
-    │ Validate & Transform                │
-    │ (Per-region min/max bounds; out-of- │
-    │  range values discarded, previous   │
-    │  good value kept)                   │
-    └────────────────────────────────────┘
-          ↓
-    ┌────────────────────────────────────┐
-    │ app/data/emission_factors.json      │
-    │ (Updated file)                      │
-    │                                     │
-    │ {                                   │
-    │   "travel": {                       │
-    │     "short_haul_flight": {          │
-    │       "economy": 0.255,             │
-    │       "source": "ICAO 2025",        │
-    │       "fetched_at": "2026-03-28"    │
-    │     }                               │
-    │   }                                 │
-    │ }                                   │
-    └────────────────────────────────────┘
-          ↓
-    ┌────────────────────────────────────┐
-    │ AgentRunDB (Database)              │
-    │                                     │
-    │ {                                   │
-    │   "agent_name": "sg_grid_factor",  │
-    │   "status": "success",             │
-    │   "fetched_at": "2026-03-28...",   │
-    │   "num_steps": 7,                  │
-    │   "run_id": "<tinyfish-run-id>"    │
-    │ }                                   │
-    └────────────────────────────────────┘
-          ↓
-    Next calculation uses updated factors
+Authenticated calculation / export request
+    → load one factor_catalog snapshot
+    → deterministic emissions and financial engines
+    → versioned scenario / immutable report snapshot
 ```
 
----
+Five tasks run concurrently. Failure and no-data results retain previous factors.
+The JSON catalog is a packaged seed, never a mutable runtime file. Numeric changes
+advance the catalog version, making older working scenarios stale across instances.
+
+Chat combines optional web search with validated scenario and financial tools.
+Its citations survive storage and history and render inline as clickable links.
+Search cannot mutate shared factors or replace engine-computed financial results.
 
 ## 🎬 End-to-End Example Timeline
 

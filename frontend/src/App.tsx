@@ -32,6 +32,7 @@ import type {
   AgentStatus,
   AuthMode,
   ChatMessage,
+  RefreshSummary,
   ComplianceReport,
   FinancialResult,
   OffsetMarket,
@@ -523,6 +524,7 @@ function App() {
       const assistantMessage: ChatMessage = {
         role: 'assistant',
         content: response.reply,
+        citations: response.citations ?? [],
         extracted_data: response.extracted_data ?? undefined,
         financial_analysis: response.financial_analysis ?? undefined,
       }
@@ -692,6 +694,16 @@ function App() {
     }
   }
 
+  function showRefreshOutcome(summary: RefreshSummary) {
+    const outcomes = Object.values(summary.agent_results)
+    const cached = outcomes.filter((item) => item.status === 'cached').length
+    const failed = outcomes.filter((item) => !['success', 'cached'].includes(item.status)).length
+    pushToast(
+      `${summary.merge_summary.total} factors updated, ${cached} tasks cached${failed ? `, ${failed} tasks unavailable — previous factors retained` : ''}.`,
+      summary.status === 'completed' ? 'success' : 'warning',
+    )
+  }
+
   async function handleRefreshAgents() {
     if (!token) return
     setAgentsRunning(true)
@@ -701,7 +713,8 @@ function App() {
       // locked out of "Recalculate all" entirely.
       if (isAdmin) {
         try {
-          await api.runAgentsSync(token)
+          const summary = await api.runAgentsSync(token)
+          showRefreshOutcome(summary)
         } catch {
           pushToast('Factor refresh agent unavailable, recalculating with current factors.', 'warning')
         }
@@ -724,9 +737,9 @@ function App() {
     if (!token || !isAdmin) return
     setAgentsRunning(true)
     try {
-      await api.runAgentsForce(token)
+      const summary = await api.runAgentsForce(token)
+      showRefreshOutcome(summary)
       await loadAgentPanels()
-      pushToast('Force refresh dispatched', 'success')
     } catch (error) {
       pushToast(error instanceof Error ? error.message : 'Force refresh failed', 'danger')
     } finally {

@@ -32,9 +32,7 @@ except ImportError:
 
 class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
-    OPENAI_MODEL: str = "gpt-4o-mini"
-
-    TINYFISH_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-6-luna"
 
     # Primary backend is Supabase Postgres, via the transaction pooler (port 6543) as
     # the least-privilege `cutcarbon_app` role:
@@ -65,8 +63,7 @@ class Settings(BaseSettings):
     SUPABASE_JWKS_URL: str = ""
     SUPABASE_JWKS_CACHE_TTL: int = 600  # seconds
 
-    # Comma-separated emails allowed to trigger TinyFish agent runs (which mutate
-    # the global emission-factor file and scrape external sites). Empty = nobody.
+    # Emails allowed to refresh the shared factor catalog. Empty = nobody.
     ADMIN_EMAILS: str = ""
 
     # Disable in tests; per-IP in-memory limits otherwise.

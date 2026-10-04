@@ -60,25 +60,23 @@ class TestCarbonTaxSavings:
         # Low bound of the announced 2030 range (SGD 50-80).
         assert future.savings_local == pytest.approx(10 * 50)
 
-    def test_live_next_rate_preferred_over_static_range(self):
-        live = emissions_engine.EF.setdefault("carbon_tax_live", {})
-        live["singapore_next_sgd"] = 60
-        try:
-            savings = calculate_carbon_tax_savings(10, "singapore")
-            future = next(s for s in savings if "future rate" in s.scheme)
-            assert future.savings_local == pytest.approx(600)
-        finally:
-            live.pop("singapore_next_sgd", None)
+    def test_live_next_rate_preferred_over_static_range(self, monkeypatch):
+        monkeypatch.setattr("app.services.financial_engine._live_carbon_prices", lambda: {"singapore_next_sgd": 60})
+        savings = calculate_carbon_tax_savings(10, "singapore")
+        future = next(s for s in savings if "future rate" in s.scheme)
+        assert future.savings_local == pytest.approx(600)
 
-    def test_live_price_discloses_static_fx(self):
-        live = emissions_engine.EF.setdefault("carbon_tax_live", {})
-        live["singapore_current_sgd"] = 99
-        try:
-            savings = calculate_carbon_tax_savings(10, "singapore")
-            assert "live price" in savings[0].description
-            assert "static FX" in savings[0].description
-        finally:
-            live.pop("singapore_current_sgd", None)
+    def test_live_price_discloses_static_fx(self, monkeypatch):
+        monkeypatch.setattr("app.services.financial_engine._live_carbon_prices", lambda: {"singapore_current_sgd": 99})
+        savings = calculate_carbon_tax_savings(10, "singapore")
+        assert "live price" in savings[0].description
+        assert "static FX" in savings[0].description
+
+    def test_live_zero_price_is_not_replaced_with_static_price(self, monkeypatch):
+        monkeypatch.setattr("app.services.financial_engine._live_carbon_prices", lambda: {"singapore_current_sgd": 0})
+        savings = calculate_carbon_tax_savings(10, "singapore")
+        assert savings[0].savings_local == 0
+        assert "live price" in savings[0].description
 
 
 class TestEnergySavings:

@@ -409,7 +409,7 @@ DATA & EXPORTS
 - Read [USER_GUIDE.md](USER_GUIDE.md) (comprehensive manual)
 - Check inline tooltips (hover over `?` icons)
 - Review [CLAUDE.md](CLAUDE.md) (developer/technical reference)
-- Review [TINYFISH_AGENTS.md](TINYFISH_AGENTS.md) (data sources & agent specs)
+- Review [WEB_SEARCH_AGENTS.md](WEB_SEARCH_AGENTS.md) (data sources & agent specs)
 
 💬 **For AI help:**
 - Open **AI Co-Pilot** tab and ask anything

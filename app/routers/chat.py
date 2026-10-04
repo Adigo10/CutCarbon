@@ -10,6 +10,7 @@ from app.models.schemas import ChatRequest, ChatResponse
 from app.rate_limit import limiter
 from app.services import openai_service
 from app.services.claims import sanitize_claim_language
+from app.services.citations import remap_citations
 from app.services.financial_engine import build_scenario_financial_request, generate_financial_report
 from app.routers.auth import get_current_user
 from app.utils.time import utcnow
@@ -42,7 +43,7 @@ async def chat(
         raise HTTPException(status_code=400, detail="No messages provided")
 
     # Build event context from DB if scenario_id provided
-    event_context = req.event_context or {}
+    event_context = dict(req.event_context or {})
     scenario = None
     if req.scenario_id:
         result = await db.execute(
@@ -66,7 +67,7 @@ async def chat(
         def financial_provider(args):
             args = args or {}
             try:
-                reduction_pct = float(args.get("reduction_pct") or 30.0)
+                reduction_pct = float(args["reduction_pct"] if args.get("reduction_pct") is not None else 30.0)
             except (TypeError, ValueError):
                 reduction_pct = 30.0
             reduction_pct = min(max(reduction_pct, 0.0), 100.0)
@@ -74,7 +75,7 @@ async def chat(
                 scenario_row,
                 region=args.get("region") or "singapore",
                 reduction_pct=reduction_pct,
-                actions_taken=args.get("actions") or ["renewable_energy", "vegetarian_menu", "digital_materials"],
+                actions_taken=args["actions"] if args.get("actions") is not None else ["renewable_energy", "vegetarian_menu", "digital_materials"],
             )
             return generate_financial_report(fin_req).model_dump()
 
@@ -83,7 +84,9 @@ async def chat(
     session_id = _valid_session_id((req.event_context or {}).get("session_id"))
 
     # Persist the user's message FIRST so a downstream LLM failure can't lose the turn.
-    last_user = req.messages[-1]
+    last_user = next((m for m in reversed(req.messages) if m.role == "user"), None)
+    if last_user is None or req.messages[-1].role != "user":
+        raise HTTPException(400, "The latest message must be from the user")
     db.add(ChatMessageDB(
         session_id=session_id,
         role="user",
@@ -102,6 +105,7 @@ async def chat(
     # The system prompt forbids offset-based neutrality claims, but the model is not
     # a guarantee — lint the reply before it is persisted or shown (EU 2024/825).
     reply, banned = sanitize_claim_language(result["reply"])
+    citations = remap_citations(result["reply"], reply, result.get("citations", []))
     if banned:
         logger.warning("sanitized banned green claim(s) in chat reply: %s", banned)
 
@@ -110,6 +114,7 @@ async def chat(
         role="assistant",
         content=reply,
         extracted_data=result.get("extracted_data"),
+        citations=citations,
         created_at=utcnow(),
         user_id=current_user.id,
     ))
@@ -117,6 +122,7 @@ async def chat(
 
     return ChatResponse(
         reply=reply,
+        citations=citations,
         extracted_data=result.get("extracted_data"),
         suggestions=result.get("suggestions", []),
         session_id=session_id,
@@ -138,6 +144,6 @@ async def get_history(
     )
     messages = result.scalars().all()
     return [
-        {"role": m.role, "content": m.content, "created_at": m.created_at.isoformat()}
+        {"role": m.role, "content": m.content, "citations": m.citations or [], "created_at": m.created_at.isoformat()}
         for m in messages
     ]

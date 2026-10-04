@@ -1388,9 +1388,8 @@ async def get_report_snapshot(
 def _build_factor_workbook():
     from openpyxl import Workbook
 
-    ef_path = _DATA_DIR / "emission_factors.json"
-    with open(ef_path, encoding="utf-8") as f:
-        ef = json.load(f)
+    from app.services.factor_catalog import EF
+    ef = dict(EF)
 
     wb = Workbook()
     ws = wb.active
@@ -1464,7 +1463,7 @@ def _build_agent_runs_workbook(rows):
     return wb
 
 
-@router.get("/agent-runs.xlsx", summary="Download TinyFish agent run history as Excel")
+@router.get("/agent-runs.xlsx", summary="Download factor refresh history as Excel")
 async def export_agent_runs_xlsx(
     db: AsyncSession = Depends(get_db),
     limit: int = 500,
@@ -1482,9 +1481,8 @@ async def export_agent_runs_xlsx(
 
 
 def _load_factor_json() -> dict:
-    ef_path = _DATA_DIR / "emission_factors.json"
-    with open(ef_path, encoding="utf-8") as f:
-        return json.load(f)
+    from app.services.factor_catalog import EF
+    return dict(EF)
 
 
 @router.get("/emission-factors.json", summary="Download emission_factors.json (raw)")

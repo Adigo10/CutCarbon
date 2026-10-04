@@ -9,7 +9,7 @@ from fastapi import HTTPException
 
 from app.config import settings
 from app.main import _validate_runtime_config
-from app.routers.agents import _require_durable_worker
+import app.routers.agents as agents_router
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -49,19 +49,13 @@ def test_vercel_entrypoint_handles_preserved_api_paths():
     subprocess.run([sys.executable, "-c", code], cwd=ROOT, env=env, check=True)
 
 
-def test_agent_refresh_rejected_on_vercel(monkeypatch):
+def test_agent_refresh_awaited_on_vercel(monkeypatch):
     monkeypatch.setenv("VERCEL", "1")
-
-    with pytest.raises(HTTPException) as exc_info:
-        _require_durable_worker()
-
-    assert exc_info.value.status_code == 503
-
-
-def test_agent_refresh_allowed_on_durable_runtime(monkeypatch):
-    monkeypatch.delenv("VERCEL", raising=False)
-
-    _require_durable_worker()
+    async def fake_run(force=False):
+        return {"status": "completed", "forced": force}
+    monkeypatch.setattr(agents_router, "run_and_update", fake_run)
+    import asyncio
+    assert asyncio.run(agents_router._refresh(False)) == {"status": "completed", "forced": False}
 
 
 def test_vercel_rejects_sqlite_fallback(monkeypatch):

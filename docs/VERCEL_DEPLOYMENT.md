@@ -23,8 +23,8 @@ Both `/api/health` and the legacy `/health` endpoint reach the backend.
    - `SUPABASE_URL`
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_PUBLISHABLE_KEY`
-   - `OPENAI_API_KEY` if chat is enabled.
-   - `OPENAI_MODEL` if overriding `gpt-4o-mini`.
+   - `OPENAI_API_KEY` for chat and factor refresh.
+   - `OPENAI_MODEL=gpt-6-luna` (also the application default).
    - `ADMIN_EMAILS` if admin-only features are enabled.
 4. Keep `RUN_MIGRATIONS_ON_STARTUP=false`. Apply migrations once from a trusted
    runner using `MIGRATION_DATABASE_URL` before promoting a deployment.
@@ -54,9 +54,10 @@ environment-specific URLs.
 ## Runtime constraints
 
 - SQLite is rejected on Vercel because function filesystems are ephemeral.
-- TinyFish factor refresh endpoints return `503` on Vercel. They mutate the factor
-  catalog and require a durable writable worker. Existing bundled factors, agent
-  history, and scenario recalculation remain available.
+- OpenAI factor refresh awaits bounded tasks and persists results in Postgres.
+  The function has a 300-second budget; refresh has a 240-second task deadline.
+  Apply the catalog migration before deployment. A database lease prevents
+  overlapping refreshes across instances. Completed tasks survive partial failures.
 - Rate limiting is process-local. Use Vercel Firewall or a shared rate-limit store
   before relying on it for abuse protection across function instances.
 - Build the frontend with `npm --prefix frontend run build`, then run the API
