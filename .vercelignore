@@ -1,4 +1,5 @@
 .carbon_venv/
+.venv/
 .claude/
 .git/
 .pytest_cache/
@@ -9,8 +10,8 @@ __pycache__/
 *.db
 *.sqlite
 *.sqlite3
-.env
-frontend/.env
+.env*
+frontend/.env*
 frontend/dist/
 frontend/node_modules/
 requirements-dev.txt

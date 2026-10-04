@@ -16,7 +16,8 @@ from app.routers import chat, scenarios, financial, agents, auth, offsets, expor
 
 logger = logging.getLogger(__name__)
 IS_VERCEL = os.getenv("VERCEL") == "1"
-API_PREFIX = "" if IS_VERCEL else "/api"
+# Vercel forwards the original request path, including /api, to the function.
+API_PREFIX = "/api"
 
 
 def _validate_runtime_config() -> None:
@@ -80,12 +81,13 @@ FRONTEND_DIST_DIR = BASE_DIR / "frontend" / "dist"
 
 
 @app.get("/health")
+@app.get(f"{API_PREFIX}/health")
 async def health():
     return {"status": "ok", "service": "EventCarbon Co-Pilot", "version": "2.0.0"}
 
 
 if IS_VERCEL:
-    logger.info("Vercel serves the frontend as a separate Vite service")
+    logger.info("Vercel serves the frontend as static Vite assets")
 elif (FRONTEND_DIST_DIR / "index.html").exists():
     app.mount("/", StaticFiles(directory=str(FRONTEND_DIST_DIR), html=True), name="frontend")
 else:

@@ -1,17 +1,27 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "experimentalServices": {
-    "frontend": {
-      "entrypoint": "frontend",
-      "routePrefix": "/",
-      "framework": "vite"
+  "version": 2,
+  "builds": [
+    {
+      "src": "frontend/package.json",
+      "use": "@vercel/static-build",
+      "config": { "distDir": "dist" }
     },
-    "backend": {
-      "entrypoint": "index.py",
-      "routePrefix": "/api",
-      "maxDuration": 300,
-      "includeFiles": "app/data/**",
-      "excludeFiles": "{tests/**,docs/**,.claude/**,.github/**,frontend/**,alembic/**,**/__pycache__/**,**/*.pyc,cutcarbon.db}"
+    {
+      "src": "index.py",
+      "use": "@vercel/python",
+      "config": {
+        "maxDuration": 300,
+        "includeFiles": "app/data/**",
+        "excludeFiles": "{.venv/**,.carbon_venv/**,tests/**,docs/**,.claude/**,.github/**,frontend/**,alembic/**,**/__pycache__/**,**/*.pyc,cutcarbon.db}"
+      }
     }
-  }
+  ],
+  "routes": [
+    { "src": "/api(?:/.*)?", "dest": "/index.py" },
+    { "src": "/health", "dest": "/index.py" },
+    { "src": "/assets/(.*)", "dest": "/frontend/assets/$1" },
+    { "src": "/(favicon|icons)\\.svg", "dest": "/frontend/$1.svg" },
+    { "src": "/.*", "dest": "/frontend/index.html" }
+  ]
 }

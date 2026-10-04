@@ -15,29 +15,35 @@ from app.routers.agents import _require_durable_worker
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def test_vercel_config_defines_vite_and_fastapi_services():
+def test_vercel_config_builds_frontend_and_routes_api_before_spa():
     config = json.loads((ROOT / "vercel.json").read_text(encoding="utf-8"))
-    services = config["experimentalServices"]
-
-    assert services["frontend"] == {
-        "entrypoint": "frontend",
-        "routePrefix": "/",
-        "framework": "vite",
+    frontend, backend = config["builds"]
+    assert frontend == {
+        "src": "frontend/package.json",
+        "use": "@vercel/static-build",
+        "config": {"distDir": "dist"},
     }
-    assert services["backend"]["entrypoint"] == "index.py"
-    assert services["backend"]["routePrefix"] == "/api"
-    assert services["backend"]["includeFiles"] == "app/data/**"
+    assert backend["src"] == "index.py"
+    assert backend["config"]["includeFiles"] == "app/data/**"
+    assert config["routes"][0] == {
+        "src": "/api(?:/.*)?", "dest": "/index.py",
+    }
+    assert config["routes"][-1]["dest"] == "/frontend/index.html"
+    # Filesystem dispatch would resolve / to the index.py function before the SPA.
+    assert not any(route.get("handle") == "filesystem" for route in config["routes"])
 
 
-def test_vercel_entrypoint_uses_service_relative_routes():
+def test_vercel_entrypoint_handles_preserved_api_paths():
     env = os.environ.copy()
     env["VERCEL"] = "1"
     code = (
         "from index import app; "
-        "paths = {route.path for route in app.routes}; "
-        "assert '/scenarios' in paths; "
-        "assert '/api/scenarios' not in paths; "
-        "assert '/health' in paths"
+        "from fastapi.testclient import TestClient; "
+        "client = TestClient(app); "
+        "assert client.get('/api/health').json()['status'] == 'ok'; "
+        "assert client.get('/health').status_code == 200; "
+        "assert client.get('/api/scenarios').status_code == 401; "
+        "assert client.get('/scenarios').status_code == 404"
     )
 
     subprocess.run([sys.executable, "-c", code], cwd=ROOT, env=env, check=True)
